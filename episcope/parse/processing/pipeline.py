@@ -20,8 +20,10 @@ import pandas as pd
 
 from ..blueprints.data_blueprints import StructuredSection, Reference, PaperMetadata
 from ..configs.configs import GT_PAPER_TYPES, SELECTED_TYPE, SearchConfig, PipelineConfig
+from ..indexing.embeddings import EmbeddingIndexer
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -419,12 +421,11 @@ class PipelineProcessor:
     def _init_components(self):
         """Initialize all pipeline components."""
         # Initialize indexer
-        self.indexer = None
-        try:
-            from ..indexing.embeddings import EmbeddingIndexer
-            self.indexer = EmbeddingIndexer(self.config.model_name)
-        except Exception:
-            logger.debug("EmbeddingIndexer not available")
+        # self.indexer = None
+        # try:
+        self.indexer = EmbeddingIndexer(self.config.model_name)
+        # except Exception:
+        # logger.debug("EmbeddingIndexer not available")
         
         # Initialize other components
         from ..extraction.paper_classifier import PaperClassifier

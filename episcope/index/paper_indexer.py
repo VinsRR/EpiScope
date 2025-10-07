@@ -26,6 +26,7 @@ import numpy as np
 from ..core.interfaces import AbstractIndexer
 from ..retrieve.embeddings import SimplifiedEmbedder
 from ..parse.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from ..parse.indexing.chunking import paragraph_chunking
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class PaperIndexer(AbstractIndexer):
             })
         # Process sections
         for section in sections:
-            section_chunks = self._paragraph_chunking(section)
+            section_chunks = paragraph_chunking(section, self.min_chunk_size)
             for chunk in section_chunks:
                 chunk_meta = {
                     "text": chunk["text"],
@@ -178,34 +179,3 @@ class PaperIndexer(AbstractIndexer):
         except Exception:
             # Fallback on error
             return np.array([len(text.split())], dtype="float32")
-
-    # ------------------------------------------------------------------
-    # Legacy chunking helpers (mirroring parse.indexing.embeddings)
-    # ------------------------------------------------------------------
-    def _split_into_sentences(self, text: str) -> List[str]:
-        """Split text into sentences using punctuation heuristics.
-
-        This method mirrors the behaviour of the legacy
-        ``EmbeddingIndexer`` to satisfy existing tests.  It simply
-        splits on `.`, `!` and `?` followed by whitespace while
-        preserving the delimiter.
-        """
-        # Use regex to split while keeping punctuation with the sentence
-        sentence_endings = re.compile(r"(?<=[.!?])\s+")
-        parts = sentence_endings.split(text.strip())
-        return [p.strip() for p in parts if p.strip()]
-
-    def _paragraph_chunking(self, section: StructuredSection) -> List[Dict[str, Any]]:
-        """Produce paragraph chunks for a structured section.
-
-        Chunks are created for paragraphs that exceed ``min_chunk_size``
-        characters and contain more than five words.  Each returned
-        dict contains only a ``text`` key; additional metadata is
-        added in :meth:`index_paper`.
-        """
-        chunks: List[Dict[str, Any]] = []
-        paragraphs = [p.strip() for p in section.content.split("\n\n") if p.strip()]
-        for i, paragraph in enumerate(paragraphs):
-            if len(paragraph) > self.min_chunk_size and len(paragraph.split()) > 5:
-                chunks.append({"text": paragraph})
-        return chunks

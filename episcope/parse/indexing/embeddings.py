@@ -1,72 +1,87 @@
-"""Compatibility wrapper for structured embedding indexing.
+"""Specialized FAISS indexer for the parsing pipeline.
 
-This module provides a thin wrapper around the new
-``episcope.index.paper_indexer.PaperIndexer`` class to preserve
-backwards compatibility with existing code and tests.  The original
-``EmbeddingIndexer`` implemented multiple chunking strategies and
-relied on heavy dependencies such as ``faiss`` and
-``sentence_transformers``.  Those responsibilities are now handled
-by the ``PaperIndexer`` and the ``FaissIndexer`` in the ``index``
-package.  Only the paragraph‑based chunking and sentence splitting
-utilities are retained here to satisfy unit tests.
+This module provides the `EmbeddingIndexer`, a subclass of
+`episcope.index.faiss_indexer.FaissIndexer`. It is tailored to the
+needs of the processing pipeline, providing a `create_index` method
+that handles structured paper data, performs chunking, and persists
+the resulting index and chunk files to disk.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 
-from ...index.paper_indexer import PaperIndexer
+from ...index.faiss_indexer import FaissIndexer
 from ..blueprints.data_blueprints import StructuredSection, PaperMetadata
+from .chunking import paragraph_chunking
 
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingIndexer(PaperIndexer):
-    """Alias for PaperIndexer preserving the old API surface.
-
-    This subclass exposes the same constructor signature as the
-    legacy ``EmbeddingIndexer`` but delegates all work to
-    ``PaperIndexer``.  Parameters unrelated to paragraph chunking
-    (e.g. ``chunk_size``, ``chunk_overlap``, ``semantic_threshold``)
-    are accepted for compatibility but currently unused.  Future
-    implementations could leverage these to implement additional
-    chunking strategies.
+class EmbeddingIndexer(FaissIndexer):
+    """
+    A specialized FaissIndexer that understands structured paper data
+    and provides a pipeline-compatible `create_index` method.
     """
 
     def __init__(self,
                  model_name: str = "jinaai/jina-embeddings-v3",
-                 chunking_strategy: str = "paragraph",
-                 chunk_size: int = 200,
-                 chunk_overlap: int = 50,
                  min_chunk_size: int = 50,
-                 semantic_threshold: float = 0.5,
-                 recursive_separators: List[str] | None = None) -> None:
-        super().__init__(embed_model=model_name, batch_size=8, min_chunk_size=min_chunk_size)
-        self.chunking_strategy = chunking_strategy
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.semantic_threshold = semantic_threshold
-        self.recursive_separators = recursive_separators or ["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " "]
-        logger.info(f"Initialized EmbeddingIndexer (compat) with {self.chunking_strategy} chunking")
+                 **kwargs: Any) -> None:
+        super().__init__(embed_model=model_name, batch_size=kwargs.get("batch_size", 8))
+        self.min_chunk_size = min_chunk_size
+        logger.info("Initialized specialized EmbeddingIndexer for the pipeline.")
 
-    # Expose type hints for _paragraph_chunking and _split_into_sentences
-    def _paragraph_chunking(self, section: StructuredSection) -> List[Dict[str, str]]:  # type: ignore[override]
-        return super()._paragraph_chunking(section)
-
-    def _split_into_sentences(self, text: str) -> List[str]:  # type: ignore[override]
-        return super()._split_into_sentences(text)
-
-    # The original ``create_index`` method saved FAISS indices to disk;
-    # for backward compatibility a no‑op implementation is provided.
-    def create_index(self, sections: List[StructuredSection], metadata: PaperMetadata, output_dir: str, paper_id: str) -> None:
-        """Build an index for a structured paper and persist to disk.
-
-        The compatibility implementation simply calls ``index_paper``
-        and does not write any files.  The return value mirrors
-        the legacy method but always returns ``None`` to signal that
-        no files were produced.  This behaviour satisfies the unit
-        tests which focus on chunking rather than persistence.
+    def create_index(
+        self,
+        sections: List[StructuredSection],
+        metadata: PaperMetadata,
+        output_dir: str,
+        paper_id: str
+    ) -> str | None:
         """
-        self.index_paper(sections, metadata, paper_id)
-        return None
+        Chunks a structured paper, creates a FAISS index, and saves both to disk.
+        """
+        chunks = self._create_chunks(sections, metadata, paper_id)
+        if not chunks:
+            logger.warning(f"No chunks were created for paper {paper_id}, index not generated.")
+            return None
+
+        # Use the parent FaissIndexer to create the in-memory index
+        self.index_documents(chunks, namespace=paper_id)
+
+        # Use the parent FaissIndexer to save the index and chunks to files
+        return self.save_index_files(namespace=paper_id, output_dir=output_dir, paper_id=paper_id)
+
+    def _create_chunks(
+        self,
+        sections: List[StructuredSection],
+        metadata: PaperMetadata,
+        paper_id: str
+    ) -> List[Dict[str, Any]]:
+        """Creates a list of chunks from paper sections and metadata."""
+        chunks: List[Dict[str, Any]] = []
+        if metadata and metadata.abstract:
+            chunks.append({
+                "text": metadata.abstract,
+                "content": metadata.abstract,
+                "section_title": "Abstract",
+                "section_type": "Abstract",
+                "paper_id": paper_id,
+                "is_metadata": True,
+            })
+
+        for section in sections:
+            section_chunks = paragraph_chunking(section, self.min_chunk_size)
+            for chunk in section_chunks:
+                chunk_meta = {
+                    "text": chunk["text"],
+                    "content": chunk["text"],
+                    "section_title": section.title,
+                    "section_type": section.section_type,
+                    "paper_id": paper_id,
+                    "is_metadata": False,
+                }
+                chunks.append(chunk_meta)
+        return chunks

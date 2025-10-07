@@ -20,6 +20,8 @@ matching documents from the specified namespace.
 from __future__ import annotations
 
 import logging
+import os
+import json
 from typing import Iterable, Sequence, Dict, Any, Optional, List
 
 import numpy as np
@@ -62,11 +64,12 @@ class FaissIndexer(AbstractIndexer):
         # Ensure there is a metadata list for this namespace
         meta_list = self._metadata.setdefault(ns, [])
         # Extract contents for embedding
-        texts = [doc.get("content", "") for doc in docs_list]
+        texts = [doc.get("content", doc.get("text", "")) for doc in docs_list]
         embeddings = np.array(self.embedder.embed_texts(texts), dtype="float32")
         # Normalize embeddings for cosine similarity
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-9
-        embeddings = embeddings / norms
+        if embeddings.size > 0:
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-9
+            embeddings = embeddings / norms
         # Append to existing embeddings
         if ns not in self._embeddings:
             self._embeddings[ns] = embeddings
@@ -76,13 +79,11 @@ class FaissIndexer(AbstractIndexer):
         for doc in docs_list:
             meta_list.append(doc)
         self._metadata[ns] = meta_list
-        # Rebuild or extend FAISS index if available.  When faiss is
-        # unavailable we rely solely on the numpy fallback and skip
-        # building any index structures.
+        # Rebuild or extend FAISS index if available.
         if _HAS_FAISS:
             try:
                 if ns not in self._faiss_indices:
-                    index = faiss.IndexFlatIP(embeddings.shape[1])  # type: ignore[arg-type]
+                    index = faiss.IndexFlatIP(embeddings.shape[1])
                     self._faiss_indices[ns] = index
                 else:
                     index = self._faiss_indices[ns]
@@ -90,6 +91,38 @@ class FaissIndexer(AbstractIndexer):
                 logger.debug(f"Added {len(docs_list)} embeddings to FAISS index for namespace '{ns}'")
             except Exception as e:
                 logger.warning(f"Failed to build FAISS index; falling back to numpy: {e}")
+
+    def save_index_files(self, namespace: str, output_dir: str, paper_id: str) -> Optional[str]:
+        """Saves the FAISS index and metadata chunks to files."""
+        if not _HAS_FAISS:
+            logger.warning("FAISS not available. Cannot save index files.")
+            return None
+        
+        if namespace not in self._faiss_indices or namespace not in self._metadata:
+            logger.warning(f"No index found for namespace '{namespace}' to save.")
+            return None
+
+        try:
+            index = self._faiss_indices[namespace]
+            chunks = self._metadata[namespace]
+
+            os.makedirs(output_dir, exist_ok=True)
+            index_path = os.path.join(output_dir, f"{paper_id}_structured_index.faiss")
+            chunks_path = os.path.join(output_dir, f"{paper_id}_structured_chunks.json")
+
+            faiss.write_index(index, index_path)
+            
+            for i, chunk in enumerate(chunks):
+                chunk['id'] = i
+
+            with open(chunks_path, 'w', encoding='utf-8') as f:
+                json.dump(chunks, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Saved FAISS index to {index_path} and chunks to {chunks_path}")
+            return index_path
+        except Exception as e:
+            logger.error(f"Failed to save index files for namespace '{namespace}': {e}", exc_info=True)
+            return None
 
     def _search_numpy(self, query_emb: np.ndarray, ns: str, top_k: int) -> Sequence[Dict[str, Any]]:
         embs = self._embeddings.get(ns)
@@ -109,12 +142,13 @@ class FaissIndexer(AbstractIndexer):
         ns = namespace or "default"
         # embed query and normalize
         q_emb = np.array(self.embedder.embed_text(query), dtype="float32")
-        q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
+        if q_emb.size > 0:
+            q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
         # use FAISS if available
         if _HAS_FAISS and ns in self._faiss_indices:
             index = self._faiss_indices[ns]
             try:
-                distances, indices = index.search(q_emb.reshape(1, -1), top_k)  # type: ignore
+                distances, indices = index.search(q_emb.reshape(1, -1), top_k)
                 results = []
                 for dist, idx in zip(distances[0], indices[0]):
                     if idx < 0 or idx >= len(self._metadata[ns]):
