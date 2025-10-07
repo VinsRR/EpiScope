@@ -1,0 +1,23 @@
+fastapi
+uvicorn
+pydantic
+qdrant-client
+unstructured
+llama-index
+fastembed
+sentence-transformers
+faiss-cpu
+ollama
+streamlit
+typer
+# openai might be required for some LLM providers
+# pymongo is optional; if installed the AcademicDBManager will use it
+pymongo
+# google-generativeai may be required for Gemini provider
+grobid-client-python-0.0.18 # if using Grobid for PDF to TEI conversion
+gmft # for precision miner's table extraction
+pymupdf # for precision miner's table extraction
+rapidfuzz # for precision miner's table extraction
+layoutparser # for precision miner's table extraction
+img2table # for precision miner's table extraction
+effdet # for precision miner's table extraction
