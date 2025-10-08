@@ -5,3 +5,5 @@
 /indices
 /output
 /pdfs
+*.pyc
+__pycache__/
