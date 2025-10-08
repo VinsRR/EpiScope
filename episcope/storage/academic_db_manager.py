@@ -54,6 +54,8 @@ except Exception:  # pragma: no cover - absence of pymongo is expected in many t
 logger = logging.getLogger(__name__)
 
 
+
+MONGO_URI = os.environ.get("mongo_uri", "mongodb://localhost:27017")
 class AcademicDBManager:
     """Manager class for storing and retrieving extraction outputs.
 
@@ -84,7 +86,7 @@ class AcademicDBManager:
 
     def __init__(
         self,
-        uri: str = "mongodb://localhost:27017",
+        uri: str = None, # "mongodb://localhost:27017"
         db_name: str = "AcademicCorpus",
         collection_name: str = "ExtractedDocuments",
         use_in_memory: bool = False,
@@ -104,7 +106,7 @@ class AcademicDBManager:
                 specified the fallback store is kept purely in memory.
         """
         self.use_in_memory = use_in_memory or not _PYMONGO_AVAILABLE
-        self.uri = uri
+        self.uri = uri if uri is not None else MONGO_URI
         self.db_name = db_name
         self.collection_name = collection_name
         # Fallback store: mapping from (paper_id, data_type, strategy_name) to

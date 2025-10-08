@@ -29,13 +29,53 @@ factory.
 from __future__ import annotations
 
 import abc
+import json
 import logging
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from ..parse.blueprints.data_blueprints import StructuredSection, PaperMetadata, Reference
+from ..storage.academic_db_manager import AcademicDBManager
 
 logger = logging.getLogger(__name__)
+
+
+def _write_local_jsons(
+    paper_id: str,
+    sections: List[Dict[str, Any]],
+    metadata: Dict[str, Any],
+    references: List[Dict[str, Any]],
+    strategy_name: str,
+    *,
+    base_dir: Path,
+) -> None:
+    """Write extracted JSON objects to disk for debugging.
+
+    The files are written under ``base_dir`` organised by
+    ``strategy_name`` and ``paper_id``.  For example::
+
+        /base_dir/Strategy_V1_GROBID_Standard/Paper123/sections.json
+        /base_dir/Strategy_V1_GROBID_Standard/Paper123/metadata.json
+        /base_dir/Strategy_V1_GROBID_Standard/Paper123/references.json
+
+    If the directories do not exist they are created.  Existing
+    files are overwritten.
+    """
+    paper_dir = base_dir / strategy_name / paper_id
+    paper_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "sections.json": {"items": sections},
+        "metadata.json": metadata,
+        "references.json": {"items": references},
+    }
+    for name, obj in files.items():
+        out_path = paper_dir / name
+        try:
+            with open(out_path, "w", encoding="utf-8") as fh:
+                json.dump(obj, fh, indent=2, ensure_ascii=False)
+            logger.debug(f"Wrote {out_path}")
+        except Exception as exc:
+            logger.warning(f"Failed to write {out_path}: {exc}")
 
 
 class AbstractDocumentLoader(abc.ABC):
@@ -102,16 +142,100 @@ class AbstractDocumentLoader(abc.ABC):
             raise ValueError(f"Expected directory: {dir_path}")
         for child in path.rglob("*"):
             if child.is_file() and self._is_supported(child):
-                try:
+                # try:
                     sections, meta = self.load(child)
                     results[str(child)] = (sections, meta)
-                except Exception as exc:
-                    logger.warning(f"Failed to load {child}: {exc}")
+                # except Exception as exc:
+                    # logger.warning(f"Failed to load {child}: {exc}")
         return results
 
     def _is_supported(self, file_path: Path) -> bool:
         """Return True if this loader can process the given file extension."""
         return file_path.suffix.lower() in {".pdf", ".txt", ".md", ".text"}
+
+    def extract_paper(
+        self,
+        file_path: str | Path,
+        *,
+        strategy_name: str,
+        db: AcademicDBManager,
+        output_dir: Optional[str | Path] = None,
+    ) -> None:
+        """Extract structured data from a single document and persist it.
+
+        This function uses the loader's ``load_with_references`` method to obtain
+        sections, metadata and references from a document. The results
+        are inserted into the provided :class:`AcademicDBManager` under
+        the specified ``strategy_name``.  Optionally, the same data are
+        written to disk in a hierarchical directory structure for
+        debugging.
+
+        Args:
+            file_path: Location of the document to process.
+            strategy_name: Namespace under which to store the results.
+            db: Instance of :class:`AcademicDBManager` to persist data.
+            output_dir: Optional base directory for writing local JSON
+                files.  If omitted or ``None`` local writing is skipped.
+
+        Raises:
+            FileNotFoundError: If the document file does not exist.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        paper_id = path.stem
+
+        sections, metadata, references = self.load_with_references(path)
+
+        sections_dicts: List[Dict] = [s.to_dict() for s in sections]
+        metadata_dict: Dict = metadata.to_dict()
+        references_dicts: List[Dict] = [r.to_dict() for r in references]
+
+        db.insert(paper_id, "sections", strategy_name, sections_dicts)
+        db.insert(paper_id, "metadata", strategy_name, metadata_dict)
+        db.insert(paper_id, "references", strategy_name, references_dicts)
+        logger.info(
+            f"Persisted extraction for {paper_id} under strategy {strategy_name}."
+        )
+
+        if output_dir:
+            _write_local_jsons(
+                paper_id,
+                sections_dicts,
+                metadata_dict,
+                references_dicts,
+                strategy_name,
+                base_dir=Path(output_dir),
+            )
+
+    def extract_directory(
+        self,
+        dir_path: str | Path,
+        *,
+        strategy_name: str,
+        db: AcademicDBManager,
+        output_dir: Optional[str | Path] = None,
+    ) -> None:
+        """Process all supported files in a directory.
+
+        Recursively walks the directory tree rooted at ``dir_path`` and
+        applies :meth:`extract_paper` to each supported file. Errors are
+        logged and skipped rather than aborting the entire run.
+        """
+        root = Path(dir_path)
+        if not root.is_dir():
+            raise ValueError(f"Expected directory: {dir_path}")
+        for child in root.rglob("*"):
+            if child.is_file() and self._is_supported(child):
+                try:
+                    self.extract_paper(
+                        child,
+                        strategy_name=strategy_name,
+                        db=db,
+                        output_dir=output_dir,
+                    )
+                except Exception as exc:
+                    logger.error(f"Failed to process {child}: {exc}")
 
 
 class UnstructuredDocumentLoader(AbstractDocumentLoader):
