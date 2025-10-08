@@ -420,20 +420,18 @@ class PipelineProcessor:
     
     def _init_components(self):
         """Initialize all pipeline components."""
-        # Initialize indexer
-        # self.indexer = None
-        # try:
-        self.indexer = EmbeddingIndexer(self.config.model_name)
-        # except Exception:
-        # logger.debug("EmbeddingIndexer not available")
-        
-        # Initialize other components
         from ..extraction.paper_classifier import PaperClassifier
         from ..querying.rag_querier import RAGQuerier
         from ..extraction.llm_extractor import LLMExtractor
-        
-        self.paper_classifier = PaperClassifier(self.config.classifier_model)
-        self.querier = RAGQuerier(self.config.model_name)
+        from ...retrieve.embeddings import SimplifiedEmbedder
+
+        # Create a single embedder instance for consistency
+        embedder = SimplifiedEmbedder(embed_model=self.config.embedding_model)
+
+        # Initialize components with the shared embedder
+        self.indexer = EmbeddingIndexer(model_name=self.config.embedding_model)
+        self.paper_classifier = PaperClassifier(self.config.classifier_model, embedder=embedder)
+        self.querier = RAGQuerier(embedder=embedder)
         self.extractor = LLMExtractor(self.config.llm_model)
         
         # Initialize text processor and searcher

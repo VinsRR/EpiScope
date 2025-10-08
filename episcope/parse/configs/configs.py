@@ -55,10 +55,18 @@ class SearchConfig:
 @dataclass
 class PipelineConfig:
     """Main pipeline configuration."""
-    model_name: str = "allenai-specter"
+    embedding_model: str = "jinaai/jina-embeddings-v3"
     llm_model: str = "qwen2.5vl:3b" #"deepseek-r1:7b"
     hyde_model: str = "tinyllama:1.1b"
     classifier_model: str = "qwen2.5vl:3b"
     use_hyde: bool = True
     max_workers: int = 2
     search: SearchConfig = field(default_factory=SearchConfig)
+
+
+@dataclass
+class PaperClassifierConfig:
+    """Configuration for the paper classifier."""
+    model_name: str = "qwen2.5vl:3b" #"deepseek-r1:7b"
+    similarity_threshold: float = 0.75
+    embedding_model: str = "jinaai/jina-embeddings-v3"

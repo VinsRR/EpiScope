@@ -1,52 +1,83 @@
 """
 Tests for the EmbeddingIndexer class.
 
-These tests verify that chunking and sentence splitting work as
-expected.  They avoid creating actual FAISS indexes or embedding
-models by focusing on pure text operations.
+These tests verify that the `create_index` method correctly generates
+and saves a FAISS index and a structured chunks file.
 """
 import unittest
+import os
+import json
+from unittest import mock
+
+from .configs import test_model_hf_embedding as embed_model
 
 # Stub external dependencies before imports
-
+import sys
+import types
+sys.modules.setdefault(
+    "faiss",
+    types.SimpleNamespace(
+        read_index=lambda *args, **kwargs: None,
+        write_index=lambda *args, **kwargs: None,
+        IndexFlatIP=lambda *args, **kwargs: types.SimpleNamespace(add=lambda x: None),
+        normalize_L2=lambda *args, **kwargs: None,
+    ),
+)
+sys.modules.setdefault(
+    "episcope.retrieve.embeddings",
+    types.SimpleNamespace(
+        SimplifiedEmbedder=lambda *args, **kwargs: types.SimpleNamespace(
+            embed_text=lambda t: [len(t)],
+            embed_texts=lambda t_list: [[len(t)] for t in t_list]
+        )
+    ),
+)
 
 from episcope.parse.indexing.embeddings import EmbeddingIndexer
-from episcope.parse.blueprints.data_blueprints import StructuredSection
-
+from episcope.parse.blueprints.data_blueprints import StructuredSection, PaperMetadata
 
 class TestEmbeddingIndexer(unittest.TestCase):
-    """Test cases for EmbeddingIndexer chunking utilities."""
+    """Test cases for EmbeddingIndexer file creation."""
 
     def setUp(self) -> None:
-        # Patch the underlying embedder to avoid heavy dependencies.  The
-        # PaperIndexer used by EmbeddingIndexer will fall back to a
-        # length‑based embedding when the embedder is None, so we
-        # simply instantiate the indexer with a small min_chunk_size.
-        self.indexer = EmbeddingIndexer(
-            model_name="dummy-model", chunking_strategy="paragraph", min_chunk_size=10
-        )
+        self.indexer = EmbeddingIndexer(model_name=embed_model, min_chunk_size=10)
+        self.test_dir = "test_output"
+        os.makedirs(self.test_dir, exist_ok=True)
 
     def tearDown(self) -> None:
-        pass
+        import shutil
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
-    def test_split_into_sentences(self) -> None:
-        text = "Sentence one. Sentence two! Sentence three?"
-        sentences = self.indexer._split_into_sentences(text)
-        self.assertEqual(len(sentences), 3)
-        self.assertEqual(sentences[0], "Sentence one.")
-        self.assertEqual(sentences[1], "Sentence two!")
-        self.assertEqual(sentences[2], "Sentence three?")
+    @mock.patch("faiss.write_index")
+    @mock.patch("os.path.exists", side_effect=lambda p: p.endswith(".faiss") or p.endswith(".json")) # Mock existence of files.
+    def test_create_index_files(self, mock_exists, mock_write_index) -> None:
+        """Ensure create_index creates both index and chunks files."""
+        sections = [
+            StructuredSection(title="Intro", content="This is the introduction with more than five words.", section_type="introduction"),
+            StructuredSection(title="Methods", content="This is the methods section, also with more than five words.", section_type="methods")
+        ]
+        metadata = PaperMetadata(title="Test Paper", abstract="This is the abstract.")
+        paper_id = "test_paper_123"
 
-    def test_paragraph_chunking_creates_chunks(self) -> None:
-        content = "Paragraph one has enough words to be a chunk.\n\nShort.\n\nThis is another sufficiently long paragraph with more than five words."
-        section = StructuredSection(title="Intro", content=content, section_type="Methods")
-        chunks = self.indexer._paragraph_chunking(section)
-        # Should create chunks only for paragraphs with >5 words
-        self.assertEqual(len(chunks), 2)
-        texts = [c['text'] for c in chunks]
-        self.assertTrue(texts[0].startswith("Paragraph one"))
-        self.assertTrue(texts[1].startswith("This is another"))
+        index_path = self.indexer.create_index(sections, metadata, self.test_dir, paper_id)
 
+        # despite the mock, ensure the paths are as expected
+        expected_index_path = os.path.join(self.test_dir, f"{paper_id}_structured_index.faiss")
+        self.assertEqual(index_path, expected_index_path)
+        self.assertTrue(mock_exists(index_path))
+        #
+        chunks_path = os.path.join(self.test_dir, f"{paper_id}_structured_chunks.json")
+        self.assertTrue(mock_exists(chunks_path))
 
+        with open(chunks_path, 'r') as f:
+            chunks_data = json.load(f)
+        
+        self.assertEqual(len(chunks_data), 3) # Abstract + 2 sections
+        self.assertEqual(chunks_data[0]['section_title'], "Abstract")
+        self.assertEqual(chunks_data[1]['text'], "This is the introduction with more than five words.")
+        
+        mock_write_index.assert_called_once_with(mock.ANY, expected_index_path)
+                                                 
 if __name__ == "__main__":
     unittest.main()

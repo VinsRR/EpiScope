@@ -22,7 +22,7 @@ class TestRetrieveUtils(unittest.TestCase):
             "qdrant_client.http.models": types.SimpleNamespace(BinaryQuantization=lambda *a, **k: None, BinaryQuantizationConfig=lambda *a, **k: None),
             "fastembed": types.SimpleNamespace(SparseTextEmbedding=lambda *a, **k: None, LateInteractionTextEmbedding=lambda *a, **k: None),
             "unstructured": types.SimpleNamespace(partition=types.SimpleNamespace(pdf=lambda *a, **k: []), documents=types.SimpleNamespace(elements=types.SimpleNamespace(Table=object, CompositeElement=object))),
-            "sentence_transformers": types.SimpleNamespace(SentenceTransformer=lambda *a, **k: None),
+            # "sentence_transformers": types.SimpleNamespace(SentenceTransformer=lambda *a, **k: None),
             "transformers": types.SimpleNamespace(AutoConfig=types.SimpleNamespace(from_pretrained=lambda *a, **k: types.SimpleNamespace(hidden_size=768))),
             "llama_index": types.SimpleNamespace(embeddings=types.SimpleNamespace(huggingface=types.SimpleNamespace(HuggingFaceEmbedding=lambda *a, **k: types.SimpleNamespace(_get_query_embedding=lambda t: [0.0], get_text_embedding_batch=lambda batch: [[0.0] * len(batch)])))),
             "ollama": types.SimpleNamespace(chat=lambda *a, **k: {"message": {"content": "dummy"}}, show=lambda *a, **k: {}),

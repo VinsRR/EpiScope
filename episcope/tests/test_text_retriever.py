@@ -15,12 +15,14 @@ from unittest.mock import Mock
 from episcope.retrieve.text_retriever import TextRetriever
 from episcope.index.faiss_indexer import FaissIndexer
 
+from .configs import test_model_hf_embedding
+embed_model = test_model_hf_embedding
 
 class TestTextRetriever(unittest.TestCase):
     def test_retrieve_without_hyde(self) -> None:
         # Create an indexer and add a few documents
         indexer = FaissIndexer(
-            embed_model="prajjwal1/bert-tiny",#"dummy", 
+            embed_model=embed_model,
             batch_size=1)
         docs = [
             {"content": "Epidemiological studies show patterns."},
@@ -39,7 +41,7 @@ class TestTextRetriever(unittest.TestCase):
         hyde = Mock()
         hyde.generate.return_value = "This is a hypothesis."
         indexer = FaissIndexer(
-            embed_model="prajjwal1/bert-tiny",#"dummy", 
+            embed_model=embed_model,
             batch_size=1
             )
         indexer.index_documents([{"content": "This is a document about data."}])

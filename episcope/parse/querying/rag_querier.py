@@ -8,11 +8,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import faiss
-from sentence_transformers import SentenceTransformer
 import numpy as np
-
-logger = logging.getLogger(__name__)
-
+from ...retrieve.embeddings import SimplifiedEmbedder
 from ..blueprints.data_blueprints import Chunk
 
 
@@ -28,8 +25,8 @@ class RAGQuerier:
         - get_section_types(chunks_path)
     """
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name)
+    def __init__(self, embedder: SimplifiedEmbedder):
+        self.embedder = embedder
         # caches keyed by chunks_path
         self._chunks_cache: Dict[str, List[Chunk]] = {}
         self._embeddings_cache: Dict[str, np.ndarray] = {}
@@ -75,7 +72,7 @@ class RAGQuerier:
             self._embeddings_cache[chunks_path] = np.zeros((0, 1))
             return
         # batch encode once and cache
-        embs = np.array(self.model.encode(texts, show_progress_bar=False), dtype="float32")
+        embs = np.array(self.embedder.embed_texts(texts), dtype="float32")
         # normalize embeddings for cosine similarity
         norms = np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9
         embs = embs / norms
@@ -129,7 +126,7 @@ class RAGQuerier:
 
         # Use FAISS if possible
         if faiss_idx is not None:
-            q_emb = np.array(self.model.encode([query]), dtype="float32")
+            q_emb = np.array(self.embedder.embed_text(query), dtype="float32").reshape(1, -1)
             # normalize
             q_emb = q_emb / (np.linalg.norm(q_emb, axis=1, keepdims=True) + 1e-9)
             search_k = min(len(chunks), max(top_k * 3, top_k))
@@ -142,7 +139,7 @@ class RAGQuerier:
         # fallback: in-memory ranking (use cached embeddings)
         self._ensure_embeddings(chunks_path)
         embs = self._embeddings_cache.get(chunks_path)
-        q_emb = np.array(self.model.encode([query]), dtype="float32")[0]
+        q_emb = np.array(self.embedder.embed_text(query), dtype="float32")
         q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
         sims = (embs @ q_emb).astype(float)  # cosine since normalized
         ranked_idxs = list(reversed(sims.argsort()))  # high to low

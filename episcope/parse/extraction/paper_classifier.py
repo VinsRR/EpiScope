@@ -1,6 +1,4 @@
 from typing import Dict, List, Tuple, Optional, Union
-
-
 from pathlib import Path
 import json
 import re
@@ -10,17 +8,15 @@ import torch
 import ollama
 import faiss
 from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
-
 from collections import defaultdict
 
+from ...retrieve.embeddings import SimplifiedEmbedder
 from ..blueprints.data_blueprints import StructuredSection, Reference, PaperMetadata, PaperType, ClassificationResult, ClassificationOutput, DataSource, ExtractionResult
+from ..configs.configs import PaperClassifierConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
 
 # ============================================================================
 # PAPER CLASSIFIER
@@ -43,46 +39,25 @@ class PaperClassifier:
             "Participants were recruited through stratified random sampling. Data were collected through structured interviews. The final analytic sample included 8,734 individuals after exclusions.",
             "Descriptive statistics were calculated for all variables. Logistic regression models were fitted with adjustment for confounders. Effect sizes and 95% confidence intervals are reported."
         ],
-        # "methods_tools": [
-        #     "We propose a novel statistical method for analyzing longitudinal data with missing values. The method combines multiple imputation with mixed-effects modeling.",
-        #     "This paper introduces a new software package for epidemiological analysis. The tool implements advanced causal inference methods and provides user-friendly interfaces.",
-        #     "We developed and validated a new questionnaire for measuring health behaviors. Psychometric properties were assessed using factor analysis and reliability testing.",
-        #     "The algorithm we present here addresses limitations of existing approaches. Simulation studies demonstrate superior performance under various scenarios."
-        # ],
-        # "case_study": [
-        #     "We report a case series of 15 patients with rare disease X. All patients were treated at our institution between 2018-2023. Clinical characteristics and outcomes are described.",
-        #     "This case study examines the implementation of a new intervention in three healthcare settings. We describe barriers, facilitators, and lessons learned.",
-        #     "We present findings from a detailed investigation of an outbreak in rural community Y. Contact tracing identified 47 cases over a 6-week period.",
-        #     "A 45-year-old patient presented with unusual symptoms. Diagnostic workup revealed a rare condition. This case highlights important clinical considerations."
-        # ]
     }
     
     CLASSIFICATION_MAPPING = {
         "A": PaperType.LITERATURE_REVIEW, 
         "B": PaperType.DATA_ANALYSIS,
-        # "C": PaperType.METHODS_TOOLS, 
-        # "D": PaperType.CASE_STUDY,
-        # "E": PaperType.COMMENTARY, 
-        # "F": PaperType.OTHER
     }
     
     CATEGORY_LABELS = {
         "A": "Literature Review", 
         "B": "Data Analysis", 
-        # "C": "Methods Tools",
-        # "D": "Case Study",
-        # "E": "Commentary",
-        # "F": "Other",
-        # "G": "Unclear"
     }
     
-    def __init__(self, model_name: str = "deepseek-r1:7b", embedding_model: str = "allenai-specter", use_gpu: bool = True):
+    def __init__(self, model_name: str, embedder: SimplifiedEmbedder, config: Optional[PaperClassifierConfig] = None):
         self.model_name = model_name
         self.client = ollama.Client()
-        
-        # Initialize embedding model
-        device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
-        self.embedder = SentenceTransformer(embedding_model, device=device)
+        self.embedder = embedder
+        self.config = config or PaperClassifierConfig()
+
+
     
     def get_relevant_chunks(self, metadata: PaperMetadata, index_path: Optional[str] = None, 
                            chunks_path: Optional[str] = None, top_k: int = 10) -> Dict[str, List[Tuple[str, float]]]:
@@ -134,7 +109,7 @@ class PaperClassifier:
             chunks_data = json.load(f)
         
         # Encode query and search
-        query_embedding = self.embedder.encode([query], convert_to_numpy=True, show_progress_bar=False)
+        query_embedding = np.array(self.embedder.embed_text(query))
         faiss.normalize_L2(query_embedding)
         distances, indices = index.search(query_embedding.astype('float32'), top_k)
         
@@ -157,11 +132,11 @@ class PaperClassifier:
     def _fallback_template_similarity(self, query: str) -> Dict[str, List[Tuple[str, float]]]:
         """Fallback method using cosine similarity with template paragraphs."""
         
-        query_embedding = self.embedder.encode([query], show_progress_bar=False)
+        query_embedding = np.array(self.embedder.embed_text(query)).reshape(1, -1)
         results = {}
         
         for paper_type, templates in self.TEMPLATE_PARAGRAPHS.items():
-            template_embeddings = self.embedder.encode(templates, show_progress_bar=False)
+            template_embeddings = np.array(self.embedder.embed_texts(templates))
             similarities = cosine_similarity(query_embedding, template_embeddings)
             
             # Create results with similarity scores
@@ -173,11 +148,11 @@ class PaperClassifier:
     def _classify_chunk_by_templates(self, chunk_text: str) -> str:
         """Classify a chunk based on template similarity."""
         
-        chunk_embedding = self.embedder.encode([chunk_text], show_progress_bar=False)
+        chunk_embedding = np.array(self.embedder.embed_text(chunk_text)).reshape(1, -1)
         best_type, best_score = "other", -1
         
         for paper_type, templates in self.TEMPLATE_PARAGRAPHS.items():
-            template_embeddings = self.embedder.encode(templates, show_progress_bar=False)
+            template_embeddings = np.array(self.embedder.embed_texts(templates))
             similarities = cosine_similarity(chunk_embedding, template_embeddings)
             max_similarity = np.max(similarities)
             
@@ -357,10 +332,10 @@ class PaperClassifier:
 class DataExtractor:
     """Enhanced LLM extractor using structured GROBID data with integrated classification."""
     
-    def __init__(self, model_name: str = "deepseek-r1:7b"):
+    def __init__(self, model_name: str, embedder: SimplifiedEmbedder):
         self.model_name = model_name
         self.client = ollama.Client()
-        self.classifier = PaperClassifier(model_name)
+        self.classifier = PaperClassifier(model_name, embedder)
     
     def analyze_and_extract(self, sections: List[StructuredSection], metadata: PaperMetadata,
                            references: List[Reference], relevant_chunks: List[Dict], 
@@ -683,22 +658,12 @@ class DataExtractor:
 # UTILITY FUNCTIONS AND CONSTANTS
 # ============================================================================
 
-def create_paper_system(model_name: str = "deepseek-r1:7b", 
-                        embedding_model: str = "all-MiniLM-L6-v2",
-                        use_gpu: bool = True) -> Tuple[PaperClassifier, DataExtractor]:
+def create_paper_system(model_name: str, embedder: SimplifiedEmbedder) -> Tuple[PaperClassifier, DataExtractor]:
     """
     Factory function to create classifier and extractor instances.
-    
-    Args:
-        model_name: Name of the Ollama model
-        embedding_model: Name of the sentence transformer model
-        use_gpu: Whether to use GPU for embeddings
-        
-    Returns:
-        Tuple of (classifier, extractor) instances
     """
-    classifier = PaperClassifier(model_name, embedding_model, use_gpu)
-    extractor = DataExtractor(model_name)
+    classifier = PaperClassifier(model_name, embedder)
+    extractor = DataExtractor(model_name, embedder)
     return classifier, extractor
 
 

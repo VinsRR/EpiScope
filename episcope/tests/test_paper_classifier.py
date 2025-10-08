@@ -38,23 +38,31 @@ sys.modules.setdefault(
     ),
 )
 sys.modules.setdefault(
-    "sentence_transformers",
-    types.SimpleNamespace(SentenceTransformer=lambda *args, **kwargs: None),
+    "episcope.retrieve.embeddings",
+    types.SimpleNamespace(
+        SimplifiedEmbedder=lambda *args, **kwargs: types.SimpleNamespace(
+            embed_text=lambda t: [len(t)],
+            embed_texts=lambda t_list: [[len(t)] for t in t_list]
+        )
+    ),
 )
 
 from episcope.parse.extraction.paper_classifier import PaperClassifier
+from episcope.retrieve.embeddings import SimplifiedEmbedder
+from .configs import test_model_hf_embedding, test_model_ollama
 
-
+model_name_emb = test_model_hf_embedding
+model_name = test_model_ollama
 class TestPaperClassifier(unittest.TestCase):
     """Tests for helper functions in PaperClassifier."""
 
     def test_deduplicate_and_rank_chunks(self) -> None:
         """Ensure deduplication keeps the highest score and sorts descending."""
+        mock_embedder = SimplifiedEmbedder(embed_model=model_name_emb)
         classifier = PaperClassifier(
-            model_name= "tinyllama:1.1b",#"dummy", 
-            embedding_model="all-MiniLM-L6-v2",#"dummy", 
-            use_gpu=False
-            )
+            model_name=model_name,
+            embedder=mock_embedder
+        )
         aggregated = {
             "literature_review": [
                 ("duplicate text", 0.3),

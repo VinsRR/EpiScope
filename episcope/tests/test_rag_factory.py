@@ -32,7 +32,6 @@ class TestRAGFactory(unittest.TestCase):
             ),
             "unstructured.partition": types.SimpleNamespace(pdf=lambda *a, **k: []),
             "unstructured.partition.pdf": types.SimpleNamespace(partition_pdf=lambda *a, **k: []),
-            "sentence_transformers": types.SimpleNamespace(SentenceTransformer=lambda *a, **k: None),
             "transformers": types.SimpleNamespace(
                 AutoConfig=types.SimpleNamespace(from_pretrained=lambda *a, **k: types.SimpleNamespace(hidden_size=768))
             ),
@@ -75,7 +74,6 @@ class TestRAGFactory(unittest.TestCase):
             ),
             "unstructured.partition": types.SimpleNamespace(pdf=lambda *a, **k: []),
             "unstructured.partition.pdf": types.SimpleNamespace(partition_pdf=lambda *a, **k: []),
-            "sentence_transformers": types.SimpleNamespace(SentenceTransformer=lambda *a, **k: None),
             "transformers": types.SimpleNamespace(
                 AutoConfig=types.SimpleNamespace(from_pretrained=lambda *a, **k: types.SimpleNamespace(hidden_size=768))
             ),
