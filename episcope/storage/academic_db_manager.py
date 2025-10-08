@@ -52,8 +52,9 @@ except Exception:  # pragma: no cover - absence of pymongo is expected in many t
     _PYMONGO_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
-
+from ..parse.blueprints.data_blueprints import PaperMetadata, Reference, StructuredSection
 
 MONGO_URI = os.environ.get("mongo_uri", "mongodb://localhost:27017")
 class AcademicDBManager:
@@ -88,7 +89,6 @@ class AcademicDBManager:
         self,
         uri: str = None, # "mongodb://localhost:27017"
         db_name: str = "AcademicCorpus",
-        collection_name: str = "ExtractedDocuments",
         use_in_memory: bool = False,
         backup_file: Optional[str] = None,
     ) -> None:
@@ -108,7 +108,6 @@ class AcademicDBManager:
         self.use_in_memory = use_in_memory or not _PYMONGO_AVAILABLE
         self.uri = uri if uri is not None else MONGO_URI
         self.db_name = db_name
-        self.collection_name = collection_name
         # Fallback store: mapping from (paper_id, data_type, strategy_name) to
         # content dict
         self._store: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
@@ -127,16 +126,6 @@ class AcademicDBManager:
             try:
                 self._client = MongoClient(self.uri)
                 self._db = self._client[self.db_name]
-                self._collection = self._db[self.collection_name]
-                # Create unique index on the compound key if it doesn't exist
-                self._collection.create_index(
-                    [
-                        ("paper_id", pymongo.ASCENDING),
-                        ("data_type", pymongo.ASCENDING),
-                        ("strategy_name", pymongo.ASCENDING),
-                    ],
-                    unique=True,
-                )
             except Exception as exc:
                 logger.warning(
                     f"Failed to connect to MongoDB at {self.uri}: {exc}; falling back to in‑memory store"
@@ -183,20 +172,34 @@ class AcademicDBManager:
                 self._flush_backup()
             return
         # MongoDB branch
+        collection = self._get_collection(strategy_name)
         doc = {
             "paper_id": paper_id,
             "data_type": data_type,
-            "strategy_name": strategy_name,
             "content": content,
         }
         try:
-            self._collection.insert_one(doc)
+            collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError:  # type: ignore[no-redef]
             logger.debug(f"Duplicate insertion ignored for {key}")
 
+
+
+    def __deserialize_content(self, data_type: str, content: Any):
+        """Helper to deserialize content based on data type."""
+
+        if data_type == "sections":
+            return [StructuredSection.from_dict(s) for s in content]
+        elif data_type == "metadata":
+            return PaperMetadata.from_dict(content)
+        elif data_type == "references":
+            return [Reference.from_dict(r) for r in content]
+        else:
+            return None
+
     def retrieve(
         self, paper_id: str, data_type: str, strategy_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Any]:
         """Retrieve a single extraction record.
 
         Args:
@@ -205,24 +208,36 @@ class AcademicDBManager:
             strategy_name: Extraction strategy name under which the record was stored.
 
         Returns:
-            The stored JSON object if present, otherwise ``None``.
+            The stored data deserialized into the appropriate object,
+            or ``None`` if not found.
         """
         key = (paper_id, data_type, strategy_name)
+        logger.debug(f"Attempting to retrieve document for key: {key}")
+
         if self.use_in_memory:
-            return self._store.get(key)
+            result = self.store.get(key)
+            if result:
+                logger.debug(f"Found document in-memory for key: {key}")
+            else:
+                logger.debug(f"No document found in-memory for key: {key}")
+            return result
+
         # MongoDB branch
-        doc = self._collection.find_one(
-            {
-                "paper_id": paper_id,
-                "data_type": data_type,
-                "strategy_name": strategy_name,
-            },
+        collection = self._get_collection(strategy_name)
+        query = {
+            "paper_id": paper_id,
+            "data_type": data_type,
+        }
+        logger.debug(f"Executing MongoDB find_one with query: {query} in collection: {strategy_name}")
+        doc = collection.find_one(
+            query,
             projection={"_id": False, "content": True},
         )
-        # if nothing is found, communicate this to the user
+
         if not doc:
             logger.debug(f"No document found for {key}")
-        return doc["content"] if doc else None
+        return self.__deserialize_content(data_type, doc["content"]) if doc else None
+
 
     def delete_by_strategy(self, strategy_name: str) -> int:
         """Delete all records associated with a given strategy.
@@ -243,24 +258,27 @@ class AcademicDBManager:
                 self._flush_backup()
             return removed_count
         # MongoDB branch
-        result = self._collection.delete_many({"strategy_name": strategy_name})
-        return result.deleted_count
+        collection = self._get_collection(strategy_name)
+        count = collection.count_documents({})
+        collection.drop()
+        return count
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _flush_backup(self) -> None:
-        """Persist the in‑memory store to disk.
+    def _get_collection(self, strategy_name: str):
+        """Get MongoDB collection for a given strategy, creating index if new."""
+        if self.use_in_memory:
+            return None
+        collection = self._db[strategy_name]
+        # Create index if it's a new collection
+        if strategy_name not in self._db.list_collection_names():
+             collection.create_index(
+                [
+                    ("paper_id", pymongo.ASCENDING),
+                    ("data_type", pymongo.ASCENDING),
+                ],
+                unique=True,
+            )
+        return collection
 
-        The backup file stores keys joined by '||' to ensure JSON
-        serialisability.  Only invoked when a backup file was
-        specified at construction time.
-        """
-        if not self._backup_file:
-            return
-        try:
-            serialisable = {"||".join(k): v for k, v in self._store.items()}
-            with open(self._backup_file, "w", encoding="utf-8") as fh:
-                json.dump(serialisable, fh, indent=2, ensure_ascii=False)
-        except Exception as exc:
-            logger.warning(f"Failed to write backup file {self._backup_file}: {exc}")

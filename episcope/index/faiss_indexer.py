@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import json
+from pathlib import Path
 from typing import Iterable, Sequence, Dict, Any, Optional, List
 
 import numpy as np
@@ -48,8 +49,17 @@ class FaissIndexer(AbstractIndexer):
     product computed with numpy.
     """
 
-    def __init__(self, embed_model: str = "distilbert-base-uncased", batch_size: int = 8) -> None:
+    def __init__(
+        self,
+        embed_model: str = "distilbert-base-uncased",
+        batch_size: int = 8,
+        *,
+        index_dir: Optional[str | Path] = None,
+    ) -> None:
         self.embedder = SimplifiedEmbedder(embed_model=embed_model, batch_size=batch_size)
+        self.index_dir = Path(index_dir) if index_dir else None
+        if self.index_dir:
+            self.index_dir.mkdir(parents=True, exist_ok=True)
         # namespace -> (embeddings matrix (numpy), list of metadata dicts)
         self._embeddings: Dict[str, np.ndarray] = {}
         self._metadata: Dict[str, List[Dict[str, Any]]] = {}
@@ -91,38 +101,47 @@ class FaissIndexer(AbstractIndexer):
                 logger.debug(f"Added {len(docs_list)} embeddings to FAISS index for namespace '{ns}'")
             except Exception as e:
                 logger.warning(f"Failed to build FAISS index; falling back to numpy: {e}")
+        self.save(ns)
 
-    def save_index_files(self, namespace: str, output_dir: str, paper_id: str) -> Optional[str]:
-        """Saves the FAISS index and metadata chunks to files."""
-        if not _HAS_FAISS:
-            logger.warning("FAISS not available. Cannot save index files.")
-            return None
-        
-        if namespace not in self._faiss_indices or namespace not in self._metadata:
-            logger.warning(f"No index found for namespace '{namespace}' to save.")
-            return None
+    def save(self, namespace: str) -> None:
+        """Save the index for a given namespace to disk."""
+        if not self.index_dir:
+            return
+        ns_dir = self.index_dir / namespace
+        ns_dir.mkdir(parents=True, exist_ok=True)
+        # Save metadata
+        with open(ns_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(self._metadata[namespace], f, indent=2)
+        # Save FAISS index
+        if _HAS_FAISS and namespace in self._faiss_indices:
+            faiss.write_index(self._faiss_indices[namespace], str(ns_dir / "index.faiss"))
+        else:
+            # Save numpy embeddings as a fallback
+            np.save(ns_dir / "embeddings.npy", self._embeddings[namespace])
+        logger.debug(f"Saved index for namespace {namespace} to {ns_dir}")
 
+    def load(self, namespace: str) -> bool:
+        """Load the index for a given namespace from disk."""
+        if not self.index_dir:
+            return False
+        ns_dir = self.index_dir / namespace
+        if not ns_dir.exists():
+            return False
         try:
-            index = self._faiss_indices[namespace]
-            chunks = self._metadata[namespace]
-
-            os.makedirs(output_dir, exist_ok=True)
-            index_path = os.path.join(output_dir, f"{paper_id}_structured_index.faiss")
-            chunks_path = os.path.join(output_dir, f"{paper_id}_structured_chunks.json")
-
-            faiss.write_index(index, index_path)
-            
-            for i, chunk in enumerate(chunks):
-                chunk['id'] = i
-
-            with open(chunks_path, 'w', encoding='utf-8') as f:
-                json.dump(chunks, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Saved FAISS index to {index_path} and chunks to {chunks_path}")
-            return index_path
+            # Load metadata
+            with open(ns_dir / "metadata.json", "r", encoding="utf-8") as f:
+                self._metadata[namespace] = json.load(f)
+            # Load FAISS index
+            if _HAS_FAISS and (ns_dir / "index.faiss").exists():
+                self._faiss_indices[namespace] = faiss.read_index(str(ns_dir / "index.faiss"))
+            else:
+                # Load numpy embeddings as a fallback
+                self._embeddings[namespace] = np.load(ns_dir / "embeddings.npy")
+            logger.debug(f"Loaded index for namespace {namespace} from {ns_dir}")
+            return True
         except Exception as e:
-            logger.error(f"Failed to save index files for namespace '{namespace}': {e}", exc_info=True)
-            return None
+            logger.warning(f"Failed to load index for namespace {namespace}: {e}")
+            return False
 
     def _search_numpy(self, query_emb: np.ndarray, ns: str, top_k: int) -> Sequence[Dict[str, Any]]:
         embs = self._embeddings.get(ns)
@@ -140,6 +159,9 @@ class FaissIndexer(AbstractIndexer):
 
     def search(self, query: str, *, top_k: int = 5, namespace: Optional[str] = None) -> Sequence[Dict[str, Any]]:
         ns = namespace or "default"
+        # Load index from disk if not in memory
+        if ns not in self._embeddings and ns not in self._faiss_indices:
+            self.load(ns)
         # embed query and normalize
         q_emb = np.array(self.embedder.embed_text(query), dtype="float32")
         if q_emb.size > 0:

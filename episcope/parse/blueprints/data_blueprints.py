@@ -1,30 +1,25 @@
 from typing import Any, Dict, List, Optional
 from enum import Enum
+from dataclasses import asdict, dataclass, field
 
 from ..utils.serialization import Serializable, SerializableList
 
 
 
+from dataclasses import dataclass, field
+
+@dataclass
 class StructuredSection(Serializable):
     """Represents a structured section from GROBID parsing."""
-    
-    def __init__(self, title: str = "", content: str = "", section_type: str = "Other", 
-                 references_cited: Optional[List[str]] = None, page_number: Optional[int] = None):
-        self.title = title
-        self.content = content
-        self.section_type = section_type
-        self.references_cited = references_cited or []
-        self.page_number = page_number
+    title: str = ""
+    content: str = ""
+    section_type: str = "Other"
+    references_cited: List[str] = field(default_factory=list)
+    page_number: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "title": self.title,
-            "content": self.content,
-            "section_type": self.section_type,
-            "references_cited": self.references_cited,
-            "page_number": self.page_number
-        }
-    
+        return asdict(self)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'StructuredSection':
         return cls(
@@ -36,35 +31,21 @@ class StructuredSection(Serializable):
         )
 
 
+@dataclass
 class Reference(Serializable):
     """Represents a bibliographic reference."""
-    
-    def __init__(self, raw_text: str = "", is_data_source: bool = False, 
-                 title: str = "", authors: Optional[List[str]] = None, 
-                 year: Optional[int] = None, journal: str = "", doi: str = "", url: str = ""):
-        self.raw_text = raw_text
-        self.is_data_source = is_data_source
-        self.title = title
-        self.authors = authors or []
-        self.year = year
-        self.journal = journal
-        self.doi = doi or ""
-        self.url = url or ""
+    raw_text: str = ""
+    is_data_source: bool = False
+    title: str = ""
+    authors: List[str] = field(default_factory=list)
+    year: Optional[int] = None
+    journal: str = ""
+    doi: str = ""
+    url: str = ""
 
-
-    
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "raw_text": self.raw_text,
-            "is_data_source": self.is_data_source,
-            "title": self.title,
-            "authors": self.authors,
-            "year": self.year,
-            "journal": self.journal,
-            "doi": self.doi,
-            "url": self.url
-        }
-    
+        return asdict(self)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Reference':
         return cls(
@@ -79,34 +60,23 @@ class Reference(Serializable):
         )
 
 
+from dataclasses import asdict, dataclass, field
+
+@dataclass
 class PaperMetadata(Serializable):
     """Represents metadata for an academic paper."""
-    
-    def __init__(self, title: str = "", abstract: str = "", authors: Optional[List[str]] = None,
-                 publication_year: Optional[int] = None, journal: str = "", 
-                 doi: str = "", keywords: Optional[List[str]] = None,
-                 first_author: str = ""):
-        self.title = title
-        self.abstract = abstract
-        self.authors = authors or []
-        self.publication_year = publication_year
-        self.journal = journal
-        self.doi = doi
-        self.keywords = keywords or []
-        self.first_author = first_author
-    
+    title: str = ""
+    abstract: str = ""
+    authors: List[str] = field(default_factory=list)
+    publication_year: Optional[int] = None
+    journal: str = ""
+    doi: str = ""
+    keywords: List[str] = field(default_factory=list)
+    first_author: str = ""
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "title": self.title,
-            "abstract": self.abstract,
-            "authors": self.authors,
-            "publication_year": self.publication_year,
-            "journal": self.journal,
-            "doi": self.doi,
-            "keywords": self.keywords,
-            "first_author": self.first_author
-        }
-    
+        return asdict(self)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PaperMetadata':
         return cls(

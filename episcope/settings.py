@@ -15,6 +15,10 @@ from typing import Optional
 # pydantic is not installed at all (as may be the case in minimal
 # test environments), fall back to a simple dummy implementation
 # based on standard dataclasses.
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
 try:
     from pydantic import BaseSettings, Field, validator  # type: ignore[attr-defined]
 except ImportError:

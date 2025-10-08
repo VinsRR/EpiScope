@@ -17,8 +17,11 @@ searching, only the index for the specified paper is consulted.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -44,7 +47,14 @@ class PaperIndexer(AbstractIndexer):
     provenance.
     """
 
-    def __init__(self, embed_model: str = "jinaai/jina-embeddings-v3" , batch_size: int = 8, *, min_chunk_size: int = 50) -> None: # "distilbert-base-uncased"
+    def __init__(
+        self,
+        embed_model: str = "sentence-transformers/all-MiniLM-L12-v2",
+        batch_size: int = 8,
+        *,
+        min_chunk_size: int = 50,
+        index_dir: Optional[str | Path] = None,
+    ) -> None:
         self.embedder: SimplifiedEmbedder
         try:
             self.embedder = SimplifiedEmbedder(embed_model=embed_model, batch_size=batch_size)
@@ -52,6 +62,9 @@ class PaperIndexer(AbstractIndexer):
             # Fall back to a dummy embedder that encodes text length
             self.embedder = None  # type: ignore
         self.min_chunk_size = max(min_chunk_size, 1)
+        self.index_dir = Path(index_dir) if index_dir else None
+        if self.index_dir:
+            self.index_dir.mkdir(parents=True, exist_ok=True)
         # Map of paper_id -> (embeddings matrix, list of metadata dicts)
         self._embeddings: Dict[str, np.ndarray] = {}
         self._metadata: Dict[str, List[Dict[str, Any]]] = {}
@@ -157,6 +170,37 @@ class PaperIndexer(AbstractIndexer):
         self._embeddings[paper_id] = embeddings
         self._metadata[paper_id] = chunks
         logger.debug(f"Indexed {len(chunks)} chunks for paper {paper_id}")
+        self.save(paper_id)
+
+    def save(self, paper_id: str) -> None:
+        """Save the index for a single paper to disk."""
+        if not self.index_dir:
+            return
+        paper_dir = self.index_dir / paper_id
+        paper_dir.mkdir(parents=True, exist_ok=True)
+        # Save embeddings
+        np.save(paper_dir / "embeddings.npy", self._embeddings[paper_id])
+        # Save metadata
+        # with open(paper_dir / "metadata.json", "w", encoding="utf-8") as f:
+            # json.dump(self._metadata[paper_id], f, indent=2)
+        logger.debug(f"Saved index for paper {paper_id} to {paper_dir}")
+
+    def load(self, paper_id: str) -> bool:
+        """Load the index for a single paper from disk."""
+        if not self.index_dir:
+            return False
+        paper_dir = self.index_dir / paper_id
+        if not paper_dir.exists():
+            return False
+        try:
+            self._embeddings[paper_id] = np.load(paper_dir / "embeddings.npy")
+            with open(paper_dir / "metadata.json", "r", encoding="utf-8") as f:
+                self._metadata[paper_id] = json.load(f)
+            logger.debug(f"Loaded index for paper {paper_id} from {paper_dir}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load index for paper {paper_id}: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # Internal utilities
