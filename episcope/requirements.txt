@@ -12,7 +12,7 @@ streamlit
 typer
 # openai might be required for some LLM providers
 # pymongo is optional; if installed the AcademicDBManager will use it
-pymongo
+pymongo # if we use mongo, we ll also need MongoDB running, and Atlas or some other way to host it (MongoDB for VS code)
 # google-generativeai may be required for Gemini provider
 grobid-client-python-0.0.18 # if using Grobid for PDF to TEI conversion
 gmft # for precision miner's table extraction
