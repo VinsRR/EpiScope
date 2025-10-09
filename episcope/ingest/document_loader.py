@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from ..parse.blueprints.data_blueprints import StructuredSection, PaperMetadata, Reference
-from ..storage.academic_db_manager import AcademicDBManager
+from ..storage.academic_db import AcademicDB
 
 logger = logging.getLogger(__name__)
 
@@ -158,14 +158,14 @@ class AbstractDocumentLoader(abc.ABC):
         file_path: str | Path,
         *,
         strategy_name: str,
-        db: AcademicDBManager,
+        db: AcademicDB,
         output_dir: Optional[str | Path] = None,
     ) -> None:
         """Extract structured data from a single document and persist it.
 
         This function uses the loader's ``load_with_references`` method to obtain
         sections, metadata and references from a document. The results
-        are inserted into the provided :class:`AcademicDBManager` under
+        are inserted into the provided :class:`AcademicDB` under
         the specified ``strategy_name``.  Optionally, the same data are
         written to disk in a hierarchical directory structure for
         debugging.
@@ -173,7 +173,7 @@ class AbstractDocumentLoader(abc.ABC):
         Args:
             file_path: Location of the document to process.
             strategy_name: Namespace under which to store the results.
-            db: Instance of :class:`AcademicDBManager` to persist data.
+            db: Instance of :class:`AcademicDB` to persist data.
             output_dir: Optional base directory for writing local JSON
                 files.  If omitted or ``None`` local writing is skipped.
 
@@ -213,7 +213,7 @@ class AbstractDocumentLoader(abc.ABC):
         dir_path: str | Path,
         *,
         strategy_name: str,
-        db: AcademicDBManager,
+        db: AcademicDB,
         output_dir: Optional[str | Path] = None,
     ) -> None:
         """Process all supported files in a directory.
@@ -289,6 +289,7 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             filename=str(path),
             infer_table_structure=False,
             strategy="hi_res",
+            languages=["eng"],
             extract_image_block_types=[],
         )
         # except Exception as exc:

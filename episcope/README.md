@@ -82,32 +82,33 @@ from PDFs.  The function
 ``episcope.ingest.grobid_pipeline.extract_paper`` will run GROBID
 against a single PDF, parse the resulting TEI XML into sections,
 metadata and references, and then persist each component into a
-document store via the
-:class:`episcope.storage.academic_db_manager.AcademicDBManager`.
+document store that implements the
+:class:`episcope.storage.academic_db.AcademicDB` interface.
 Callers must supply a ``strategy_name`` to namespace extractions.
+The `get_academic_db` factory function can be used to obtain a database instance.
 For example:
 
 ```python
 from episcope.ingest.grobid_pipeline import extract_paper
-from episcope.storage.academic_db_manager import AcademicDBManager
+from episcope.storage.db_factory import get_academic_db
 
 # Use an in‑memory database for testing
-db = AcademicDBManager(use_in_memory=True)
+db = get_academic_db(use_in_memory=True)
 extract_paper("/path/to/paper.pdf", strategy_name="Strategy_V1_GROBID_Standard", db=db)
 
 # Retrieve the stored metadata
 metadata = db.retrieve("paper", "metadata", "Strategy_V1_GROBID_Standard")
-print(metadata["title"])
+if metadata:
+    print(metadata.title)
 ```
 
 If a running MongoDB instance is available and ``pymongo`` is
-installed, the manager will store documents in the
-``AcademicCorpus.ExtractedDocuments`` collection instead of the
-in‑memory fallback.  A unique index on
-``(paper_id, data_type, strategy_name)`` prevents accidental
-overwrites.  When MongoDB is unavailable the manager falls back
-automatically and you can optionally persist the in‑memory store to a
-JSON file via the ``backup_file`` parameter.
+installed, the factory will return a MongoDB-backed store.
+When MongoDB is unavailable the factory falls back
+automatically to an in-memory store. You can optionally persist the in‑memory store to a
+JSON file via the ``backup_file`` parameter. A unique index on
+``(paper_id, data_type)`` within a collection named after the ``strategy_name`` prevents accidental
+overwrites in MongoDB.
 ```
 
 ### Running the API

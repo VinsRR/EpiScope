@@ -16,6 +16,8 @@ from episcope.ingest.document_loader import (
     UnstructuredDocumentLoader,
     DocumentLoaderFactory,
 )
+from episcope.storage.in_memory_academic_db import InMemoryAcademicDB
+
 
 
 class TestDocumentLoader(unittest.TestCase):
@@ -67,6 +69,26 @@ class TestDocumentLoader(unittest.TestCase):
         # Unknown loader should raise
         with self.assertRaises(ValueError):
             DocumentLoaderFactory.get_loader("unknown")
+
+    def test_extract_paper_persists_data(self) -> None:
+        loader = UnstructuredDocumentLoader()
+        db = InMemoryAcademicDB()
+        strategy_name = "test_strategy"
+
+        loader.extract_paper(self.file1, strategy_name=strategy_name, db=db)
+
+        # Verify metadata was inserted
+        metadata = db.retrieve(self.file1.stem, "metadata", strategy_name)
+        self.assertIsNotNone(metadata)
+        self.assertEqual(metadata.title, self.file1.stem)
+
+        # Verify sections were inserted
+        sections = db.retrieve(self.file1.stem, "sections", strategy_name)
+        self.assertIsNotNone(sections)
+        self.assertEqual(len(sections), len(self.paragraphs1))
+        for sec, original in zip(sections, self.paragraphs1):
+            self.assertEqual(sec.content.strip(), original)
+
 
 
 if __name__ == "__main__":  # pragma: no cover
