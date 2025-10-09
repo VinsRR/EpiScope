@@ -289,7 +289,6 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             filename=str(path),
             infer_table_structure=False,
             strategy="hi_res",
-            languages=["eng"],
             extract_image_block_types=[],
         )
         # except Exception as exc:

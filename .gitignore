@@ -8,3 +8,4 @@
 /pdfs
 *.pyc
 __pycache__/
+episcope/.DS_Store

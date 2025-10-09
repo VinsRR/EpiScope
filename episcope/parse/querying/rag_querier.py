@@ -12,6 +12,8 @@ import numpy as np
 from ...retrieve.embeddings import SimplifiedEmbedder
 from ..blueprints.data_blueprints import Chunk
 
+logger = logging.getLogger(__name__)
+
 
 class RAGQuerier:
     """Efficient, simple retrieval over per-paper chunks with optional FAISS acceleration.

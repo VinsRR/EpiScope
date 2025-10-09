@@ -99,7 +99,6 @@ class LLMExtractor:
             metadata: Any, 
             query: str
             ) -> Tuple[ExtractionResult, Optional[Dict]]:
-        # Build context text; cap length to keep prompt reasonable
         texts = [c.get("text", "") for c in relevant_chunks]
         combined = "\n\n".join(texts)#[:40_000]  # truncate long text
         prompt = self._prepare_prompt(metadata, combined, query, paper_type)

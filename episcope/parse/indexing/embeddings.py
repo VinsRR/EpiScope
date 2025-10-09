@@ -15,6 +15,7 @@ from typing import List, Dict, Any
 from ...index.faiss_indexer import FaissIndexer
 from ..blueprints.data_blueprints import StructuredSection, PaperMetadata
 from .chunking import paragraph_chunking
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,8 @@ class EmbeddingIndexer(FaissIndexer):
         self.index_documents(chunks, namespace=paper_id)
 
         # Use the parent FaissIndexer to save the index and chunks to files
-        return self.save_index_files(namespace=paper_id, output_dir=output_dir, paper_id=paper_id)
+        if self.index_dir is None: self.index_dir = Path(output_dir)
+        return self.save(namespace=paper_id) #, output_dir=output_dir, paper_id=paper_id)
 
     def _create_chunks(
         self,

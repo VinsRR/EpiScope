@@ -29,8 +29,25 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
 # -------------------------
-# Text Processing Utilities
+# Search Strategy Classes
 # -------------------------
+from dataclasses import dataclass, field
+
+@dataclass
+class SearchResult:
+    """Represents a search result chunk with metadata."""
+    id: str
+    text: str
+    section_type: str = "other"
+    title: str = ""
+    similarity_score: float = 0.0
+    source: str = ""  # semantic, keyword, context
+    artifacts: Dict[str, Any] = field(default_factory=dict)
+    rank_score: float = 0.0
+
+
+
+
 class TextProcessor:
     """Handles text normalization and pattern matching."""
     
@@ -96,22 +113,6 @@ class TextProcessor:
             "normalized_text": normalized
         }
 
-# -------------------------
-# Search Strategy Classes
-# -------------------------
-from dataclasses import dataclass, field
-
-@dataclass
-class SearchResult:
-    """Represents a search result chunk with metadata."""
-    id: str
-    text: str
-    section_type: str = "other"
-    title: str = ""
-    similarity_score: float = 0.0
-    source: str = ""  # semantic, keyword, context
-    artifacts: Dict[str, Any] = field(default_factory=dict)
-    rank_score: float = 0.0
 
 class QueryGenerator:
     """Generates queries for different paper types."""
@@ -207,6 +208,8 @@ class QueryGenerator:
         result = list(unique_queries.values())
         result.sort(key=lambda x: x[1], reverse=True)
         return result
+
+
 
 class ChunkSearcher:
     """Handles different search strategies for finding relevant chunks."""
