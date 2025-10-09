@@ -56,10 +56,10 @@ class SearchConfig:
 class PipelineConfig:
     """Main pipeline configuration."""
     embedding_model: str = "jinaai/jina-embeddings-v3"
-    llm_model: str = "qwen2.5vl:3b" #"deepseek-r1:7b"
+    llm_model: str = "deepseek-r1:7b" # "qwen2.5vl:3b" #
     hyde_model: str = "tinyllama:1.1b"
     classifier_model: str = "qwen2.5vl:3b"
-    use_hyde: bool = True
+    use_hyde: bool = False
     max_workers: int = 2
     search: SearchConfig = field(default_factory=SearchConfig)
 

@@ -10,7 +10,7 @@ from ..blueprints.extraction_blueprints import DataSourceItem, ExtractionResult,
 
 logger = logging.getLogger(__name__)
 
-
+import ollama
 
 # Helper: locate JSON in a longer model response
 def _extract_json_blob(text: str) -> Optional[str]:
@@ -52,7 +52,6 @@ class LLMExtractor:
 
     def _default_ollama_chat(self, model_name: str, messages: List[Dict], options: Dict):
         try:
-            import ollama
             c = ollama.Client()
             r = c.chat(model=model_name, messages=messages, stream=False, options=options)
             # normalize return
@@ -103,10 +102,12 @@ class LLMExtractor:
         combined = "\n\n".join(texts)#[:40_000]  # truncate long text
         prompt = self._prepare_prompt(metadata, combined, query, paper_type)
         messages = [{"role": "user", "content": prompt}]
+        print(messages)
         try:
             resp = self.chat_fn(self.model_name, messages, options={"temperature": 0})
             raw = resp.get("content", "")
             # try to directly parse as JSON
+            print(raw)
             parsed = None
             try:
                 parsed = json.loads(raw)
