@@ -40,42 +40,6 @@ from ..storage.academic_db import AcademicDB
 logger = logging.getLogger(__name__)
 
 
-def _write_local_jsons(
-    paper_id: str,
-    sections: List[Dict[str, Any]],
-    metadata: Dict[str, Any],
-    references: List[Dict[str, Any]],
-    strategy_name: str,
-    *,
-    base_dir: Path,
-) -> None:
-    """Write extracted JSON objects to disk for debugging.
-
-    The files are written under ``base_dir`` organised by
-    ``strategy_name`` and ``paper_id``.  For example::
-
-        /base_dir/Strategy_V1_GROBID_Standard/Paper123/sections.json
-        /base_dir/Strategy_V1_GROBID_Standard/Paper123/metadata.json
-        /base_dir/Strategy_V1_GROBID_Standard/Paper123/references.json
-
-    If the directories do not exist they are created.  Existing
-    files are overwritten.
-    """
-    paper_dir = base_dir / strategy_name / paper_id
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    files = {
-        "sections.json": {"items": sections},
-        "metadata.json": metadata,
-        "references.json": {"items": references},
-    }
-    for name, obj in files.items():
-        out_path = paper_dir / name
-        try:
-            with open(out_path, "w", encoding="utf-8") as fh:
-                json.dump(obj, fh, indent=2, ensure_ascii=False)
-            logger.debug(f"Wrote {out_path}")
-        except Exception as exc:
-            logger.warning(f"Failed to write {out_path}: {exc}")
 
 
 class AbstractDocumentLoader(abc.ABC):
@@ -159,7 +123,6 @@ class AbstractDocumentLoader(abc.ABC):
         *,
         strategy_name: str,
         db: AcademicDB,
-        output_dir: Optional[str | Path] = None,
     ) -> None:
         """Extract structured data from a single document and persist it.
 
@@ -186,6 +149,7 @@ class AbstractDocumentLoader(abc.ABC):
         paper_id = path.stem
 
         sections, metadata, references = self.load_with_references(path)
+        metadata.file_path = str(path)
 
         sections_dicts: List[Dict] = [s.to_dict() for s in sections]
         metadata_dict: Dict = metadata.to_dict()
@@ -198,15 +162,7 @@ class AbstractDocumentLoader(abc.ABC):
             f"Persisted extraction for {paper_id} under strategy {strategy_name}."
         )
 
-        if output_dir:
-            _write_local_jsons(
-                paper_id,
-                sections_dicts,
-                metadata_dict,
-                references_dicts,
-                strategy_name,
-                base_dir=Path(output_dir),
-            )
+
 
     def extract_directory(
         self,
@@ -214,7 +170,6 @@ class AbstractDocumentLoader(abc.ABC):
         *,
         strategy_name: str,
         db: AcademicDB,
-        output_dir: Optional[str | Path] = None,
     ) -> None:
         """Process all supported files in a directory.
 
@@ -232,7 +187,7 @@ class AbstractDocumentLoader(abc.ABC):
                         child,
                         strategy_name=strategy_name,
                         db=db,
-                        output_dir=output_dir,
+                        # output_dir=output_dir,
                     )
                 except Exception as exc:
                     logger.error(f"Failed to process {child}: {exc}")

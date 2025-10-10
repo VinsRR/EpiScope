@@ -116,3 +116,11 @@ class MongoAcademicDB(AcademicDB):
         count = collection.count_documents({})
         collection.drop()
         return count
+
+    def list_papers(self, strategy_name: str) -> List[str]:
+        """List all paper IDs for a given strategy."""
+        if strategy_name not in self._db.list_collection_names():
+            return []
+        
+        collection = self._db[strategy_name]
+        return collection.distinct("paper_id")

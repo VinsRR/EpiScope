@@ -36,6 +36,11 @@ class AcademicDB(ABC):
         """Delete all records associated with a given strategy."""
         pass
 
+    @abstractmethod
+    def list_papers(self, strategy_name: str) -> List[str]:
+        """List all paper IDs for a given strategy."""
+        pass
+
     def _deserialize_content(self, data_type: str, content: Any) -> Optional[Any]:
         """Helper to deserialize content based on data type."""
         if content is None:

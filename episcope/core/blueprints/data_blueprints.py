@@ -73,6 +73,7 @@ class PaperMetadata(Serializable):
     doi: str = ""
     keywords: List[str] = field(default_factory=list)
     first_author: str = ""
+    file_path: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -87,7 +88,8 @@ class PaperMetadata(Serializable):
             journal=data.get("journal", ""),
             doi=data.get("doi", ""),
             keywords=data.get("keywords", []),
-            first_author=data.get("first_author", "")
+            first_author=data.get("first_author", ""),
+            file_path=data.get("file_path")
         )
 
 

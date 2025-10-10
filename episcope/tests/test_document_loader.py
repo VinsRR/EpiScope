@@ -81,6 +81,7 @@ class TestDocumentLoader(unittest.TestCase):
         metadata = db.retrieve(self.file1.stem, "metadata", strategy_name)
         self.assertIsNotNone(metadata)
         self.assertEqual(metadata.title, self.file1.stem)
+        self.assertEqual(metadata.file_path, str(self.file1))
 
         # Verify sections were inserted
         sections = db.retrieve(self.file1.stem, "sections", strategy_name)

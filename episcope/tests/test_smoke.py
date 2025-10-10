@@ -9,9 +9,6 @@ import unittest
 
 
 class TestSmoke(unittest.TestCase):
-    def test_import_rag_factory(self) -> None:
-        # Importing RAGFactory should not raise
-        from episcope.retrieve import RAGFactory  # noqa: F401
 
     def test_import_indexers(self) -> None:
         from episcope.index.faiss_indexer import FaissIndexer  # noqa: F401

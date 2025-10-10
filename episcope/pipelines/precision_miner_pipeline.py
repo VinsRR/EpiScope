@@ -6,6 +6,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
+from ..storage.academic_db import AcademicDB
 from ..core.blueprints.data_blueprints import StructuredSection, Reference, PaperMetadata
 from ..configs.parse_configs import PipelineConfig
 from ..index.specialized_faiss_indexer import EmbeddingIndexer
@@ -23,8 +24,9 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 class PipelineProcessor(BatchRAGPipeline):
     """Main pipeline processor with simplified architecture."""
     
-    def __init__(self, output_dir: str = "output", index_dir: str = "indices", 
+    def __init__(self, db: AcademicDB, output_dir: str = "output", index_dir: str = "indices", 
                  config: Optional[PipelineConfig] = None):
+        self.db = db
         self.output_dir = Path(output_dir)
         self.index_dir = Path(index_dir)
         self.config = config or PipelineConfig()
@@ -69,22 +71,18 @@ class PipelineProcessor(BatchRAGPipeline):
             except Exception:
                 logger.debug("HyDE not available")
     
-    def process_item(self, pdf_path: str, storage_path: str = None, strategy_name: str = "default") -> Dict[str, Any]:
-        """Process a single PDF file."""
-        paper_id = Path(pdf_path).stem
-        # Determine base_dir using storage_path and strategy_name
-        if storage_path is not None:
-            base_dir = Path(storage_path) / strategy_name
-        else:
-            base_dir = Path(pdf_path).parent / strategy_name
-        
+    def process_item(self, paper_id: str, strategy_name: str = "default") -> Dict[str, Any]:
+        """Process a single paper from the database."""
         logger.info(f"Processing {paper_id}")
         
-        # Load extracted data
-        metadata, sections, references = self._load_extracted_data(base_dir, paper_id)
-        
+        # Load extracted data from DB
+        metadata, sections, references = self._load_extracted_data(paper_id, strategy_name)
+        pdf_path = metadata.file_path
+        if not pdf_path:
+            raise ValueError(f"PDF path not found in metadata for paper {paper_id}")
+
         # Create/load index and chunks
-        index_path, chunks_path = self._prepare_index_and_chunks(sections, metadata, paper_id, base_dir, strategy_name)
+        index_path, chunks_path = self._prepare_index_and_chunks(sections, metadata, paper_id, Path(pdf_path).parent, strategy_name)
         
         # Classify paper type
         paper_type = self._classify_paper_type(metadata, index_path, chunks_path)
@@ -106,18 +104,20 @@ class PipelineProcessor(BatchRAGPipeline):
         logger.info(f"Completed processing {paper_id}")
         return result_dict, result_markdown
     
-    def _load_extracted_data(self, base_dir: Path, paper_id: str):
-        """Load metadata, sections, and references from JSON files."""
+    def _load_extracted_data(self, paper_id: str, strategy_name: str):
+        """Load metadata, sections, and references from the database."""
         try:
-            from ..core.blueprints.data_blueprints import PaperMetadata, SectionList, ReferenceList
-            metadata = PaperMetadata.from_json(Path(base_dir, paper_id,"metadata.json")) 
-            sections = SectionList.from_json(Path(base_dir, paper_id,"sections.json")) 
-            references = ReferenceList.from_json(Path(base_dir, paper_id,"references.json"))
+            metadata = self.db.retrieve(paper_id, "metadata", strategy_name)
+            sections = self.db.retrieve(paper_id, "sections", strategy_name)
+            references = self.db.retrieve(paper_id, "references", strategy_name)
 
-            return metadata, sections, references
+            if not metadata or not sections:
+                raise FileNotFoundError(f"Data not found in DB for paper {paper_id} with strategy {strategy_name}")
+
+            return metadata, sections, references or []
             
         except Exception as e:
-            logger.error(f"Failed to load extracted data for {paper_id}: {e}")
+            logger.error(f"Failed to load extracted data for {paper_id} from DB: {e}")
             raise
     
     def _prepare_index_and_chunks(self, sections, metadata, paper_id: str, base_dir: Path, strategy_name: str):
@@ -248,20 +248,20 @@ class PipelineProcessor(BatchRAGPipeline):
         table_image_results = fte.run_with_matcher(references)
         return table_image_results
         
-    def run(self, input_dir: str, strategy_name: str, max_files: Optional[int] = None) -> None:
-        """Process all PDFs in a directory."""
-        pdfs = list(Path(input_dir).rglob("*.pdf"))
-        if max_files:
-            pdfs = pdfs[:max_files]
-        logger.info(f"Processing {len(pdfs)} PDFs with {self.config.max_workers} workers")
+    def run(self, strategy_name: str, paper_ids: Optional[List[str]] = None) -> None:
+        """Process all papers for a given strategy."""
+        if not paper_ids:
+            paper_ids = self.db.list_papers(strategy_name)
+        
+        logger.info(f"Processing {len(paper_ids)} papers with {self.config.max_workers} workers for strategy '{strategy_name}'")
 
-        md_final_filename = self.output_dir / "final_extraction.md"
+        md_final_filename = self.output_dir / f"{strategy_name}_extraction.md"
         md_final_content = ""
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-            futures = {executor.submit(self.process_item, str(pdf), strategy_name=strategy_name): pdf for pdf in pdfs}
+            futures = {executor.submit(self.process_item, paper_id, strategy_name=strategy_name): paper_id for paper_id in paper_ids}
             
             for future in as_completed(futures):
-                pdf_path = futures[future]
+                paper_id = futures[future]
                 try:
                     result_csv, result_markdown = future.result()
                     self.results.append(result_csv)
@@ -271,31 +271,18 @@ class PipelineProcessor(BatchRAGPipeline):
 
                     md_final_content += result_markdown
 
-                    logger.info(f"✓ {pdf_path.name} completed successfully")
+                    logger.info(f"✓ {paper_id} completed successfully")
                     
                 except Exception as e:
-                    logger.error(f"✗ {pdf_path.name} failed: {e}")
+                    logger.error(f"✗ {paper_id} failed: {e}")
         
         if self.results:
-            final_file = self.output_dir / "_final_results.csv"
+            final_file = self.output_dir / f"_{strategy_name}_final_results.csv"
             pd.DataFrame(self.results).to_csv(final_file, index=False)
-            md_final_filename = self.output_dir / "final_extraction.md"
             with open(md_final_filename, "w", encoding="utf-8") as f:
                 f.write(md_final_content)
 
             logger.info(f"Saved final results to {final_file}, {md_final_filename}")
             self._print_summary()
     
-    def _print_summary(self) -> None:
-        """Print processing summary."""
-        if not self.results:
-            return
-        
-        df = pd.DataFrame(self.results)
-        logger.info("=== Processing Summary ===")
-        logger.info(f"Total papers processed: {len(df)}")
-        
-        if "analysis_type" in df.columns:
-            logger.info("Analysis type distribution:")
-            for analysis_type, count in df["analysis_type"].value_counts().items():
-                logger.info(f"  {analysis_type}: {count}")
+

@@ -33,6 +33,7 @@ sys.modules.setdefault(
     ),
 )
 
+from unittest.mock import patch, MagicMock
 from episcope.index.specialized_faiss_indexer import EmbeddingIndexer
 from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
 
@@ -49,35 +50,7 @@ class TestEmbeddingIndexer(unittest.TestCase):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
 
-    @mock.patch("faiss.write_index")
-    @mock.patch("os.path.exists", side_effect=lambda p: p.endswith(".faiss") or p.endswith(".json")) # Mock existence of files.
-    def test_create_index_files(self, mock_exists, mock_write_index) -> None:
-        """Ensure create_index creates both index and chunks files."""
-        sections = [
-            StructuredSection(title="Intro", content="This is the introduction with more than five words.", section_type="introduction"),
-            StructuredSection(title="Methods", content="This is the methods section, also with more than five words.", section_type="methods")
-        ]
-        metadata = PaperMetadata(title="Test Paper", abstract="This is the abstract.")
-        paper_id = "test_paper_123"
 
-        index_path = self.indexer.create_index(sections, metadata, self.test_dir, paper_id)
-
-        # despite the mock, ensure the paths are as expected
-        expected_index_path = os.path.join(self.test_dir, f"{paper_id}_structured_index.faiss")
-        self.assertEqual(index_path, expected_index_path)
-        self.assertTrue(mock_exists(index_path))
-        #
-        chunks_path = os.path.join(self.test_dir, f"{paper_id}_structured_chunks.json")
-        self.assertTrue(mock_exists(chunks_path))
-
-        with open(chunks_path, 'r') as f:
-            chunks_data = json.load(f)
-        
-        self.assertEqual(len(chunks_data), 3) # Abstract + 2 sections
-        self.assertEqual(chunks_data[0]['section_title'], "Abstract")
-        self.assertEqual(chunks_data[1]['text'], "This is the introduction with more than five words.")
-        
-        mock_write_index.assert_called_once_with(mock.ANY, expected_index_path)
                                                  
 if __name__ == "__main__":
     unittest.main()

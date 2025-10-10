@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
 from .academic_db import AcademicDB
 
@@ -17,7 +17,7 @@ class InMemoryAcademicDB(AcademicDB):
     any external services. Can be backed by a JSON file for persistence.
     """
 
-    def __init__(self, backup_file: Optional[str] = None) -> None:
+    def __init__(self, backup_file: Optional[str] = "backup.json") -> None:
         """Initialise a new in-memory database.
 
         Args:
@@ -93,3 +93,7 @@ class InMemoryAcademicDB(AcademicDB):
         if self._backup_file and removed_count > 0:
             self._flush_backup()
         return removed_count
+
+    def list_papers(self, strategy_name: str) -> List[str]:
+        """List all paper IDs for a given strategy."""
+        return sorted(list(set(k[0] for k in self._store if k[2] == strategy_name)))
