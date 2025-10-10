@@ -22,7 +22,7 @@ import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.interfaces import AbstractIndexer, AbstractRetriever
-from ..parse.blueprints.data_blueprints import PaperType, DataSource, ExtractionResult
+from ..core.blueprints.data_blueprints import PaperType, DataSource, ExtractionResult
 
 logger = logging.getLogger(__name__)
 

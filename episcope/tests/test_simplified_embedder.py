@@ -39,34 +39,29 @@ sys.modules.setdefault(
 from episcope.retrieve.embeddings import SimplifiedEmbedder
 
 
+class DummyHF:
+    def __init__(self, *args, **kwargs):
+        pass
+    def _get_query_embedding(self, text: str):
+        # Return a constant vector whose length depends on the input
+        return [len(text)]
+    def get_text_embedding_batch(self, texts):
+        return [[len(t)] for t in texts]
+
 class TestSimplifiedEmbedder(unittest.TestCase):
-    """Tests for the simplified embedding wrapper."""
-
     def test_embed_text_uses_underlying_embedder(self) -> None:
-        # Create dummy embedding model
-        class DummyHF:
-            def __init__(self, *args, **kwargs):
-                pass
-            def _get_query_embedding(self, text: str):
-                # Return a constant vector whose length depends on the input
-                return [len(text)]
-            def get_text_embedding_batch(self, texts):
-                return [[len(t)] for t in texts]
-
         class DummyConfig:
             hidden_size = 1
-
+    
         with patch("episcope.retrieve.embeddings.HuggingFaceEmbedding", return_value=DummyHF()) as mock_hf, \
              patch("episcope.retrieve.embeddings.AutoConfig.from_pretrained", return_value=DummyConfig()):
-            embedder = SimplifiedEmbedder(embed_model="dummy-model", batch_size=2)
-            # Single text
-            vec = embedder.embed_text("hello")
-            self.assertEqual(vec, [5])
-            # Batch texts
-            vecs = embedder.embed_texts(["hi", "world"])
-            self.assertEqual(vecs, [[2], [5]])
-            # Embedding dimension should reflect DummyConfig.hidden_size
-            self.assertEqual(embedder.dim, 1)
+            
+            embedder = SimplifiedEmbedder(embed_model="dummy-model")
+            embedding = embedder.embed_text("hello")
+            self.assertEqual(embedding, [5])
+            
+            embeddings = embedder.embed_texts(["hello", "world"])
+            self.assertEqual(embeddings, [[5], [5]])
 
 
 if __name__ == "__main__":

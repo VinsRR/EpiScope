@@ -10,7 +10,7 @@ import unittest
 
 from episcope.index.paper_indexer import PaperIndexer
 from episcope.retrieve.precision import PrecisionMinerRetriever
-from episcope.parse.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
 
 
 class TestPrecisionMinerRetriever(unittest.TestCase):

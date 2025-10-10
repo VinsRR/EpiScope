@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 from enum import Enum
 from dataclasses import asdict, dataclass, field
 
-from ..utils.serialization import Serializable, SerializableList
+from ...utils.serialization import Serializable, SerializableList
 
 
 

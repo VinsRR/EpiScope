@@ -11,7 +11,7 @@ appended to the original query before embedding, leading to richer
 document retrieval.
 
 The HYDE class exposed here is a superset of the functionality found
-in the original `retrieve/utils.py` and `parse/querying/hyde.py` classes.
+in the original `retrieve/utils.py` class.
 By consolidating the implementation in a single place we avoid code
 duplication and allow both pipelines to share improvements and bug
 fixes.
@@ -51,7 +51,7 @@ class HYDE:
     itself to improve retrieval performance. The implementation here
     merges the simple behaviour previously found in
     ``retrieve/utils.py`` with the more sophisticated, context‑aware
-    prompts defined in ``parse/querying/hyde.py``.
+    prompts.
     """
 
     def __init__(self, model_name: str = "tinyllama:1.1b") -> None:

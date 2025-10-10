@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from ..utils.serialization import Serializable
+from ...utils.serialization import Serializable
 from .data_blueprints import Reference
 
 

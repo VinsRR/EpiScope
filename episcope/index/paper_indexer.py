@@ -28,8 +28,8 @@ import numpy as np
 
 from ..core.interfaces import AbstractIndexer
 from ..retrieve.embeddings import SimplifiedEmbedder
-from ..parse.blueprints.data_blueprints import StructuredSection, PaperMetadata
-from ..parse.indexing.chunking import paragraph_chunking
+from ..core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from ..utils.chunking import paragraph_chunking
 
 logger = logging.getLogger(__name__)
 

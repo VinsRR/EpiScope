@@ -2,13 +2,13 @@
 Unit tests for the LLMExtractor class.
 
 These tests validate helper functions and core extraction logic in
-``episcope.parse.extraction.llm_extractor``.  External model calls
+``episcope.generate.llm_extractor``.  External model calls
 are replaced with dummy functions to avoid network dependencies.
 """
 import unittest
 from typing import Any, Dict, List
 
-from episcope.parse.extraction.llm_extractor import LLMExtractor, _extract_json_blob
+from episcope.generate.llm_extractor import LLMExtractor, _extract_json_blob
 
 
 class TestLLMExtractor(unittest.TestCase):
@@ -38,7 +38,7 @@ class TestLLMExtractor(unittest.TestCase):
             abstract = "Test abstract"
         metadata = Meta()
 
-        result, conf = extractor.extract_data_sources(
+        result, conf = extractor.generate(
             relevant_chunks=[{"text": "Example chunk."}],
             references=[],
             paper_type="data_analysis",

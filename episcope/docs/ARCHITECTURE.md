@@ -23,8 +23,8 @@ configs/      # configuration modules and defaults
 src/          # FastAPI service exposing ingest and query endpoints
 core/         # shared abstractions: RAG base class, provider interfaces, provenance models
 ingest/       # ingestion pipelines for PDFs and DOIs
-parse/        # PrecisionMiner implementation (blueprints, extraction, indexing, processing, querying)
-index/        # wrappers for vector storage backends (e.g. Qdrant)
+pipelines/    # complex, multi-step processing pipelines (e.g., PrecisionMiner)
+index/        # wrappers for vector storage backends (e.g. Qdrant) and specialized indexers
 retrieve/     # RAG implementations (text only, multimodal, graph) and factory
 generate/     # answer generator orchestrating retrieval, LLM and provenance
 providers/    # pluggable LLM provider implementations (local/Ollama, OpenAI, Gemini)
@@ -32,7 +32,7 @@ projects/     # per‑project data storage (empty by default)
 storage/      # persistent storage (indices, snapshots, etc.)
 ui/           # simple Streamlit UI for evidence‑first exploration
 cli/          # Typer‑based command line interface
-utils/        # common utilities (logging, etc.)
+utils/        # common utilities (logging, chunking, serialization, etc.)
 tests/        # pytest suite (currently minimal)
 docs/         # documentation
 ```
@@ -52,28 +52,37 @@ implemented and registered via `retrieve/rag/factory.py`.
 
 ## PrecisionMiner Pipeline
 
-The `parse/` package contains the full implementation of the
-PrecisionMiner pipeline.  It consists of:
+The logic for the PrecisionMiner pipeline, formerly in the `parse/` package, has been refactored and distributed into more modular, function-oriented packages for better clarity and maintainability.
 
-* **Blueprints** (`parse/blueprints`) – data models and Pydantic
-  schemas describing structured sections, references and extraction
-  results.
-* **Configs** (`parse/configs`) – configuration classes controlling
-  search parameters and pipeline behaviour.
-* **Extraction** (`parse/extraction`) – modules for paper
-  classification and LLM‑driven information extraction.
-* **Processing** (`parse/processing`) – pipeline orchestrating GROBID
-  parsing, figure/table extraction and concurrent execution.
-* **Indexing** (`parse/indexing`) – FAISS‑based indexing of
-  structured chunks for efficient retrieval.
-* **Querying** (`parse/querying`) – HyDE query generation and RAG
-  querying over structured chunks.
-* **Utils** (`parse/utils`) – helpers for serialization and caching.
+The core components are now organized as follows:
 
-The PrecisionMiner pipeline currently mirrors the functionality of
-`source_extraction_mod` in the original repository but has been
-repackaged under `parse/` for clarity.  Future work will further
-refactor and test these modules.
+*   **Pipelines** (`pipelines/`) – This new directory contains the high-level orchestration for complex processes.
+    *   `precision_miner_pipeline.py`: Implements the main PrecisionMiner workflow, inheriting from a `BatchRAGPipeline` base class.
+    *   `classification_pipeline.py`: Contains the `PaperClassifier` and `DataExtractor`, which represent a specialized RAG pipeline for classifying papers and extracting data based on the classification.
+
+*   **Core Blueprints** (`core/blueprints/`) – Contains the fundamental data models (`StructuredSection`, `PaperMetadata`, `Reference`, `ExtractionResult`, etc.) used across the entire application.
+
+*   **Generation** (`generate/`) – Contains components responsible for generating content, including structured data.
+    *   `llm_extractor.py`: The `LLMExtractor` is now a specific implementation of the abstract `Generator` class and is responsible for extracting structured information from text using an LLM.
+
+*   **Retrieval** (`retrieve/`) – Contains components for retrieving information.
+    *   `specialized_retriever.py`: The `RAGQuerier` was moved here, as it's a specialized retriever for the PrecisionMiner pipeline.
+    *   `chunk_searcher.py`: The `ChunkSearcher` is a specialized retriever that uses different strategies to find relevant chunks.
+    *   `rerankers.py`: Contains the `ResultRanker` for reranking search results, based on an abstract `Reranker` class.
+
+*   **Indexing** (`index/`) – Contains indexing components.
+    *   `specialized_faiss_indexer.py`: The `EmbeddingIndexer`, a specialized `FaissIndexer` for the PrecisionMiner pipeline, is now located here.
+
+*   **Utilities** (`utils/`) – Common utility functions are now centralized here.
+    *   `chunking.py`: Contains text chunking functions.
+    *   `serialization.py`: Provides base classes for serializable data structures.
+    *   `processing_utils.py`: Contains `TextProcessor` and `QueryGenerator`.
+    *   `result_utils.py`: Contains functions for creating result dictionaries and markdown summaries.
+
+*   **Configs** (`configs/`) – All configurations are now centralized.
+    *   `parse_configs.py`: Contains the configurations for the PrecisionMiner pipeline (`SearchConfig`, `PipelineConfig`, etc.).
+
+This new structure improves modularity and better separates concerns, making the codebase easier to understand, maintain, and extend.
 
 ## Logging and Configuration
 

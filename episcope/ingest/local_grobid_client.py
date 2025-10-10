@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from ..parse.blueprints.data_blueprints import (
+from ..core.blueprints.data_blueprints import (
     StructuredSection,
     PaperMetadata,
     Reference

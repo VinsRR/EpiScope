@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-from ..parse.blueprints.data_blueprints import (
+from ..core.blueprints.data_blueprints import (
     PaperMetadata,
     Reference,
     StructuredSection,

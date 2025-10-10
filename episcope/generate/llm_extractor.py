@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
-from ..blueprints.extraction_blueprints import DataSourceItem, ExtractionResult, DataSourceSchema
+from ..core.blueprints.extraction_blueprints import DataSourceItem, ExtractionResult, DataSourceSchema
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,9 @@ def _extract_json_blob(text: str) -> Optional[str]:
 
 
 
-class LLMExtractor:
+from .base import Generator
+
+class LLMExtractor(Generator):
     """Robust LLM wrapper for extracting structured data from chunk text.
 
     - Accepts an injectable `chat_fn` that performs the chat call:
@@ -90,7 +92,7 @@ class LLMExtractor:
             """
         return prompt.strip()
 
-    def extract_data_sources(
+    def generate(
             self, 
             relevant_chunks: List[Dict], 
             references: List[Any], 

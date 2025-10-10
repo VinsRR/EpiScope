@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 
 import faiss
 import numpy as np
-from ...retrieve.embeddings import SimplifiedEmbedder
-from ..blueprints.data_blueprints import Chunk
+from .embeddings import SimplifiedEmbedder
+from ..core.blueprints.data_blueprints import Chunk
 
 logger = logging.getLogger(__name__)
 

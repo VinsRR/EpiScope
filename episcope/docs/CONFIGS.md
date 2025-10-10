@@ -58,7 +58,7 @@ runtime.
 ## PrecisionMiner Configs
 
 The PrecisionMiner pipeline is configured via the dataclasses and
-constants defined in `parse/configs/configs.py`.  Key parameters
+constants defined in `configs/parse_configs.py`.  Key parameters
 include:
 
 * `SearchConfig` – controls query generation and search parameters for

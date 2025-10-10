@@ -33,8 +33,8 @@ sys.modules.setdefault(
     ),
 )
 
-from episcope.parse.indexing.embeddings import EmbeddingIndexer
-from episcope.parse.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.index.specialized_faiss_indexer import EmbeddingIndexer
+from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
 
 class TestEmbeddingIndexer(unittest.TestCase):
     """Test cases for EmbeddingIndexer file creation."""

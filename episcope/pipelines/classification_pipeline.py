@@ -10,9 +10,9 @@ import faiss
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 
-from ...retrieve.embeddings import SimplifiedEmbedder
-from ..blueprints.data_blueprints import StructuredSection, Reference, PaperMetadata, PaperType, ClassificationResult, ClassificationOutput, DataSource, ExtractionResult
-from ..configs.configs import PaperClassifierConfig
+from ..retrieve.embeddings import SimplifiedEmbedder
+from ..core.blueprints.data_blueprints import StructuredSection, Reference, PaperMetadata, PaperType, ClassificationResult, ClassificationOutput, DataSource, ExtractionResult
+from ..configs.parse_configs import PaperClassifierConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

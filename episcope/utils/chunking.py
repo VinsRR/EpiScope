@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from ..blueprints.data_blueprints import StructuredSection
+from ..core.blueprints.data_blueprints import StructuredSection
 
 
 def paragraph_chunking(section: StructuredSection, min_chunk_size: int) -> List[Dict[str, Any]]:

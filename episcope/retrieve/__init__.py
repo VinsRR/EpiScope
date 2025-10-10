@@ -19,6 +19,7 @@ from __future__ import annotations
 __all__ = ["RAGFactory"]
 
 try:
+    from . import embeddings
     # Attempt to import the concrete RAGFactory implementation.  This
     # import may fail if optional dependencies like qdrant_client or
     # fastembed are not installed.  In that case, we provide a stub

@@ -103,10 +103,10 @@ class FaissIndexer(AbstractIndexer):
                 logger.warning(f"Failed to build FAISS index; falling back to numpy: {e}")
         self.save(ns)
 
-    def save(self, namespace: str) -> None:
+    def save(self, namespace: str) -> Optional[str]:
         """Save the index for a given namespace to disk."""
         if not self.index_dir:
-            return
+            return None
         ns_dir = self.index_dir / namespace
         ns_dir.mkdir(parents=True, exist_ok=True)
         # Save metadata
@@ -114,11 +114,15 @@ class FaissIndexer(AbstractIndexer):
             json.dump(self._metadata[namespace], f, indent=2)
         # Save FAISS index
         if _HAS_FAISS and namespace in self._faiss_indices:
-            faiss.write_index(self._faiss_indices[namespace], str(ns_dir / "index.faiss"))
+            index_path = str(ns_dir / "index.faiss")
+            faiss.write_index(self._faiss_indices[namespace], index_path)
+            logger.debug(f"Saved index for namespace {namespace} to {ns_dir}")
+            return index_path
         else:
             # Save numpy embeddings as a fallback
             np.save(ns_dir / "embeddings.npy", self._embeddings[namespace])
-        logger.debug(f"Saved index for namespace {namespace} to {ns_dir}")
+            logger.debug(f"Saved index for namespace {namespace} to {ns_dir}")
+            return str(ns_dir / "embeddings.npy")
 
     def load(self, namespace: str) -> bool:
         """Load the index for a given namespace from disk."""

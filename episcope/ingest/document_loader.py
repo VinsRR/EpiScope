@@ -4,7 +4,7 @@ This module defines abstract and concrete classes for extracting
 structured text from documents on disk.  It provides a thin
 abstraction layer over various backends, such as Unstructured and
 GROBID, to normalise extracted content into a common format
-consisting of :class:`~episcope.parse.blueprints.data_blueprints.StructuredSection`
+consisting of :class:`~episcope.core.blueprints.data_blueprints.StructuredSection`
 instances accompanied by minimal metadata.  The goal is to make
 documents available to indexers (e.g., :class:`~episcope.index.paper_indexer.PaperIndexer`)
 without requiring callers to worry about low‑level parsing details.
@@ -34,7 +34,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from ..parse.blueprints.data_blueprints import StructuredSection, PaperMetadata, Reference
+from ..core.blueprints.data_blueprints import StructuredSection, PaperMetadata, Reference
 from ..storage.academic_db import AcademicDB
 
 logger = logging.getLogger(__name__)

@@ -12,9 +12,12 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any
 
-from ...index.faiss_indexer import FaissIndexer
-from ..blueprints.data_blueprints import StructuredSection, PaperMetadata
-from .chunking import paragraph_chunking
+from .faiss_indexer import FaissIndexer, _HAS_FAISS
+import json
+import numpy as np
+import faiss
+from ..core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from ..utils.chunking import paragraph_chunking
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -54,7 +57,20 @@ class EmbeddingIndexer(FaissIndexer):
 
         # Use the parent FaissIndexer to save the index and chunks to files
         if self.index_dir is None: self.index_dir = Path(output_dir)
-        return self.save(namespace=paper_id) #, output_dir=output_dir, paper_id=paper_id)
+        
+        # Custom save logic to match test expectations
+        index_path = self.index_dir / f"{paper_id}_structured_index.faiss"
+        chunks_path = self.index_dir / f"{paper_id}_structured_chunks.json"
+
+        with open(chunks_path, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, indent=2)
+
+        if _HAS_FAISS and paper_id in self._faiss_indices:
+            faiss.write_index(self._faiss_indices[paper_id], str(index_path))
+        else:
+            np.save(str(index_path).replace(".faiss", ".npy"), self._embeddings[paper_id])
+        
+        return str(index_path)
 
     def _create_chunks(
         self,
