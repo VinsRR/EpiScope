@@ -48,7 +48,7 @@ sys.modules.setdefault(
 )
 
 from episcope.pipelines.classification_pipeline import PaperClassifier
-from episcope.retrieve.embeddings import SimplifiedEmbedder
+from episcope.rag.retrieval.embeddings import SimplifiedEmbedder
 from .configs import test_model_hf_embedding, test_model_ollama
 
 model_name_emb = test_model_hf_embedding

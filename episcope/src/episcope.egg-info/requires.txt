@@ -1,0 +1,12 @@
+fastapi
+pydantic
+typer
+numpy
+scikit-learn
+pandas
+torch
+transformers
+faiss-cpu
+unstructured
+ollama
+pymongo

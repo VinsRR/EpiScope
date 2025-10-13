@@ -34,8 +34,8 @@ sys.modules.setdefault(
 )
 
 from unittest.mock import patch, MagicMock
-from episcope.index.specialized_faiss_indexer import EmbeddingIndexer
-from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.rag.indexing.specialized_faiss_indexer import EmbeddingIndexer
+# from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
 
 class TestEmbeddingIndexer(unittest.TestCase):
     """Test cases for EmbeddingIndexer file creation."""

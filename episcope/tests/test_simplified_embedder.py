@@ -36,7 +36,7 @@ sys.modules.setdefault(
     types.ModuleType("llama_index.embeddings.huggingface"),
 )
 
-from episcope.retrieve.embeddings import SimplifiedEmbedder
+from episcope.rag.retrieval.embeddings import SimplifiedEmbedder
 
 
 class DummyHF:
@@ -52,10 +52,10 @@ class TestSimplifiedEmbedder(unittest.TestCase):
     def test_embed_text_uses_underlying_embedder(self) -> None:
         class DummyConfig:
             hidden_size = 1
-    
-        with patch("episcope.retrieve.embeddings.HuggingFaceEmbedding", return_value=DummyHF()) as mock_hf, \
-             patch("episcope.retrieve.embeddings.AutoConfig.from_pretrained", return_value=DummyConfig()):
-            
+
+        with patch("episcope.rag.retrieval.embeddings.HuggingFaceEmbedding", return_value=DummyHF()) as mock_hf, \
+             patch("episcope.rag.retrieval.embeddings.AutoConfig.from_pretrained", return_value=DummyConfig()):
+
             embedder = SimplifiedEmbedder(embed_model="dummy-model")
             embedding = embedder.embed_text("hello")
             self.assertEqual(embedding, [5])

@@ -14,7 +14,7 @@ import types
 
 # Attempt to import AnswerGenerator; if dependencies are missing, skip the test.
 try:
-    from episcope.generate.answer import AnswerGenerator  # type: ignore
+    from episcope.rag.generation.answer import AnswerGenerator  # type: ignore
     _IMPORT_ERROR = False
 except Exception:
     # Do not raise here; record that import failed so we can skip tests.

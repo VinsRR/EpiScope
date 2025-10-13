@@ -49,7 +49,7 @@ class TestRAGFactory(unittest.TestCase):
             "tqdm": types.SimpleNamespace(tqdm=lambda x, *a, **k: x),
         }
         with mock.patch.dict(sys.modules, dummy_modules, clear=False):
-            from episcope.retrieve.rag.factory import RAGFactory  # type: ignore
+            from episcope.rag.retrieval.rag.factory import RAGFactory  # type: ignore
             klass = RAGFactory._registry.get("text")  # type: ignore[attr-defined]
             self.assertIsNotNone(klass)
             self.assertEqual(klass.__name__, "TextRAG")
@@ -91,7 +91,7 @@ class TestRAGFactory(unittest.TestCase):
             "tqdm": types.SimpleNamespace(tqdm=lambda x, *a, **k: x),
         }
         with mock.patch.dict(sys.modules, dummy_modules, clear=False):
-            from episcope.retrieve.rag.factory import RAGFactory  # type: ignore
+            from episcope.rag.retrieval.rag.factory import RAGFactory  # type: ignore
             with self.assertRaises(ValueError):
                 RAGFactory.get("unknown")
 

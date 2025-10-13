@@ -11,15 +11,15 @@ import unittest
 class TestSmoke(unittest.TestCase):
 
     def test_import_indexers(self) -> None:
-        from episcope.index.faiss_indexer import FaissIndexer  # noqa: F401
-        from episcope.index.paper_indexer import PaperIndexer  # noqa: F401
+        from episcope.rag.indexing.faiss_indexer import FaissIndexer  # noqa: F401
+        from episcope.rag.indexing.paper_indexer import PaperIndexer  # noqa: F401
 
     def test_import_retrievers(self) -> None:
-        from episcope.retrieve.text_retriever import TextRetriever  # noqa: F401
-        from episcope.retrieve.precision import PrecisionMinerRetriever  # noqa: F401
+        from episcope.rag.retrieval.text_retriever import TextRetriever  # noqa: F401
+        from episcope.rag.retrieval.precision import PrecisionMinerRetriever  # noqa: F401
 
     def test_import_generator(self) -> None:
-        from episcope.generate.simple_generator import SimpleGenerator  # noqa: F401
+        from episcope.rag.generation.simple_generator import SimpleGenerator  # noqa: F401
 
 
 if __name__ == "__main__":

@@ -12,8 +12,8 @@ for the index.
 import unittest
 from unittest.mock import Mock
 
-from episcope.retrieve.text_retriever import TextRetriever
-from episcope.index.faiss_indexer import FaissIndexer
+from episcope.rag.retrieval.text_retriever import TextRetriever
+from episcope.rag.indexing.faiss_indexer import FaissIndexer
 
 from .configs import test_model_hf_embedding
 embed_model = test_model_hf_embedding

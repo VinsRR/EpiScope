@@ -6,7 +6,7 @@ context.  The generator does not invoke any external LLMs.
 """
 
 import unittest
-from episcope.generate.simple_generator import SimpleGenerator
+from episcope.rag.generation.simple_generator import SimpleGenerator
 
 
 class TestSimpleGenerator(unittest.TestCase):

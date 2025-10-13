@@ -12,8 +12,8 @@ import tempfile
 #         IndexFlatL2=type("IndexFlatL2", (), {}),
 #     )
 
-from episcope.storage.in_memory_academic_db import InMemoryAcademicDB
-from episcope.core.blueprints.data_blueprints import PaperMetadata, StructuredSection
+from episcope.db.in_memory_academic_db import InMemoryAcademicDB
+from episcope.utils.data_blueprints import PaperMetadata, StructuredSection
 from episcope.pipelines.precision_miner_pipeline import PipelineProcessor
 # from episcope.config import Config, SearchConfig
 
@@ -42,7 +42,7 @@ class TestPipelineProcessor(unittest.TestCase):
     @patch("episcope.pipelines.precision_miner_pipeline.PaperClassifier")
     @patch("episcope.pipelines.precision_miner_pipeline.RAGQuerier")
     @patch("episcope.pipelines.precision_miner_pipeline.LLMExtractor")
-    @patch("episcope.retrieve.embeddings.SimplifiedEmbedder")
+    @patch("episcope.rag.retrieval.embeddings.SimplifiedEmbedder")
     def test_run_pipeline(self, MockSimplifiedEmbedder, MockLLMExtractor, MockRAGQuerier, MockPaperClassifier, MockEmbeddingIndexer):
         # Setup mocks
         mock_embedder = MockSimplifiedEmbedder.return_value

@@ -14,7 +14,7 @@ import types
 class TestRetrieveUtils(unittest.TestCase):
     def setUp(self) -> None:
         # Prepare dummy modules for dependencies that may be imported by
-        # ``episcope.retrieve.utils``.  Only minimal attributes are
+        # ``episcope.rag.retrieval.utils``.  Only minimal attributes are
         # provided to satisfy import statements.
         self.dummy_modules = {
             "qdrant_client": types.SimpleNamespace(http=types.SimpleNamespace(models=types.SimpleNamespace())),
@@ -35,14 +35,14 @@ class TestRetrieveUtils(unittest.TestCase):
         self.patch.stop()
 
     def test_find_pathogen_keyword(self) -> None:
-        from episcope.retrieve.utils import find_pathogen_keyword
+        from episcope.rag.retrieval.utils import find_pathogen_keyword
 
         self.assertEqual(find_pathogen_keyword("this_is_covid19_report.pdf"), "covid19")
         self.assertEqual(find_pathogen_keyword("/data/mpox/case.txt"), "mpox")
         self.assertIsNone(find_pathogen_keyword("random_document.pdf"))
 
     def test_token_count_and_budget(self) -> None:
-        from episcope.retrieve.utils import estimate_token_count, validate_token_budget, get_context_length
+        from episcope.rag.retrieval.utils import estimate_token_count, validate_token_budget, get_context_length
 
         messages = [
             {"role": "system", "content": "Hello world"},
@@ -53,7 +53,7 @@ class TestRetrieveUtils(unittest.TestCase):
 
         # Patch get_context_length to return a small context window
         with mock.patch(
-            "episcope.retrieve.utils.get_context_length", return_value=20
+            "episcope.rag.retrieval.utils.get_context_length", return_value=20
         ):
             # Should pass for short messages
             validate_token_budget("dummy", messages)

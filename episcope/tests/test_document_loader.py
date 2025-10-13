@@ -12,11 +12,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from episcope.ingest.document_loader import (
+from episcope.rag.ingestion.document_loader import (
     UnstructuredDocumentLoader,
     DocumentLoaderFactory,
 )
-from episcope.storage.in_memory_academic_db import InMemoryAcademicDB
+from episcope.db.in_memory_academic_db import InMemoryAcademicDB
 
 
 

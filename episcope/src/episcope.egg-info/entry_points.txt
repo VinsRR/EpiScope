@@ -1,0 +1,2 @@
+[console_scripts]
+episcope = episcope.episcope:app

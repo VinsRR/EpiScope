@@ -3,12 +3,12 @@ import os
 from unittest.mock import patch, MagicMock
 import tempfile
 
-from episcope.index.specialized_faiss_indexer import EmbeddingIndexer
-from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.rag.indexing.specialized_faiss_indexer import EmbeddingIndexer
+from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
 
 class TestEmbeddingIndexer(unittest.TestCase):
-    @patch("episcope.index.specialized_faiss_indexer.SimplifiedEmbedder")
-    @patch("episcope.index.specialized_faiss_indexer.faiss")
+    @patch("episcope.rag.indexing.specialized_faiss_indexer.SimplifiedEmbedder")
+    @patch("episcope.rag.indexing.specialized_faiss_indexer.faiss")
     def test_create_index_files(self, mock_faiss, mock_embedder) -> None:
         """Ensure create_index creates both index and chunks files."""
         with tempfile.TemporaryDirectory() as test_dir:

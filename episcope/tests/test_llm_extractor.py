@@ -8,7 +8,7 @@ are replaced with dummy functions to avoid network dependencies.
 import unittest
 from typing import Any, Dict, List
 
-from episcope.generate.llm_extractor import LLMExtractor, _extract_json_blob
+from episcope.rag.generation.llm_extractor import LLMExtractor, _extract_json_blob
 
 
 class TestLLMExtractor(unittest.TestCase):

@@ -8,9 +8,9 @@ embedding fallback.
 
 import unittest
 
-from episcope.index.paper_indexer import PaperIndexer
-from episcope.retrieve.precision import PrecisionMinerRetriever
-from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.rag.indexing.paper_indexer import PaperIndexer
+from episcope.rag.retrieval.precision import PrecisionMinerRetriever
+from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
 
 
 class TestPrecisionMinerRetriever(unittest.TestCase):

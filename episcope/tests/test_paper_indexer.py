@@ -8,8 +8,8 @@ appropriately and that the search returns the expected contexts.
 """
 
 import unittest
-from episcope.index.paper_indexer import PaperIndexer
-from episcope.core.blueprints.data_blueprints import StructuredSection, PaperMetadata
+from episcope.rag.indexing.paper_indexer import PaperIndexer
+from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
 
 
 class TestPaperIndexer(unittest.TestCase):
