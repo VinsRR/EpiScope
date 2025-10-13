@@ -30,6 +30,7 @@ class InMemoryAcademicDB(AcademicDB):
         self._store: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._backup_file = backup_file
         if self._backup_file and os.path.exists(self._backup_file):
+            logger.info(f"Loading backup from {self._backup_file}")
             self._load_backup()
 
     def _load_backup(self) -> None:
