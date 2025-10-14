@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
-from .chunk_searcher import SearchResult
+from episcope.src.episcope.utils.types import SearchResult
 
 class Reranker(ABC):
     """Abstract base class for rerankers."""

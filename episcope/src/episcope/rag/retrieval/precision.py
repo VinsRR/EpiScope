@@ -1,34 +1,16 @@
 """Retriever implementation for the PrecisionMiner pipeline.
-
-The PrecisionMinerRetriever orchestrates a per‑paper retrieval and
-extraction pipeline.  Given a query and one or more target papers,
-it retrieves relevant contexts from a per‑paper index, classifies
-the paper type, extracts structured data sources using a simple
-heuristic extractor, and returns a harmonised result for each
-paper.  This retriever is deliberately lightweight to avoid
-dependencies on heavy LLM and FAISS libraries while still
-demonstrating the expected behaviour of the PrecisionMiner
-workflow.
-
-Actual classification and extraction logic can be replaced by
-injections of :class:`PaperClassifier` and :class:`LLMExtractor`
-instances when full models are available.  In the absence of such
-dependencies, basic string heuristics are used.
 """
-
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.utils.data_blueprints import PaperType, DataSource, ExtractionResult
-from episcope.rag.vectordb.base import AbstractVectorDB
+from episcope.vectordb.base import AbstractVectorDB
 from episcope.rag.embeddings import SimplifiedEmbedder
 
 logger = logging.getLogger(__name__)
-
 
 class PrecisionMinerRetriever(AbstractRetriever):
     """Specialised retriever for the PrecisionMiner pipeline."""
@@ -36,12 +18,11 @@ class PrecisionMinerRetriever(AbstractRetriever):
     def __init__(
         self,
         db: AbstractVectorDB,
-        embed_model: str = "distilbert-base-uncased",
         classifier_fn: Optional[Any] = None,
         extractor_fn: Optional[Any] = None,
     ) -> None:
         self.db = db
-        self.embedder = SimplifiedEmbedder(embed_model=embed_model)
+        self.embedders: Dict[str, SimplifiedEmbedder] = {}
         self.classifier_fn = classifier_fn
         self.extractor_fn = extractor_fn
 
@@ -56,14 +37,21 @@ class PrecisionMinerRetriever(AbstractRetriever):
         """Retrieve structured results for the given query across papers."""
         results: List[Dict[str, Any]] = []
         if not paper_ids:
-            # This is a limitation of the new design; the retriever doesn't know all namespaces.
-            # The caller must provide the paper_ids.
             logger.warning("PrecisionMinerRetriever requires a list of paper_ids to search.")
             return []
 
-        query_vector = self.embedder.embed_text(query)
-
         for pid in paper_ids:
+            embed_model_name = self.db.get_embedding_model(pid)
+            if not embed_model_name:
+                logger.warning(f"No embedding model found for paper {pid}. Skipping.")
+                continue
+
+            if embed_model_name not in self.embedders:
+                self.embedders[embed_model_name] = SimplifiedEmbedder(embed_model=embed_model_name)
+            
+            embedder = self.embedders[embed_model_name]
+            query_vector = embedder.embed_text(query)
+
             contexts = self.db.search(query_vector, top_k=top_k, namespace=pid)
             if not contexts:
                 continue
@@ -80,23 +68,11 @@ class PrecisionMinerRetriever(AbstractRetriever):
             })
         return results
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _classify_paper(self, contexts: Sequence[Dict[str, Any]]) -> PaperType:
-        """Classify a paper based on retrieved contexts.
-
-        If an external classifier function was provided at
-        construction time, it will be used.  Otherwise a simple
-        keyword heuristic is applied: if any context contains the
-        word 'review' (case‑insensitive) the paper is considered a
-        literature review, otherwise it is classified as data
-        analysis.  Future extensions can incorporate more labels.
-        """
+        """Classify a paper based on retrieved contexts."""
         if self.classifier_fn is not None:
             try:
-                return self.classifier_fn(contexts)  # type: ignore[no-any-return]
+                return self.classifier_fn(contexts)
             except Exception as exc:
                 logger.warning(f"Classifier function failed: {exc}; falling back to heuristic")
         for ctx in contexts:
@@ -106,21 +82,18 @@ class PrecisionMinerRetriever(AbstractRetriever):
         return PaperType.DATA_ANALYSIS
 
     def _extract_data_sources(
-        self, contexts: Sequence[Dict[str, Any]], paper_type: PaperType, query: str
+        self,
+        contexts: Sequence[Dict[str, Any]],
+        paper_type: PaperType,
+        query: str,
     ) -> ExtractionResult:
-        """Extract structured data sources from contexts.
-
-        When an external extractor function is supplied at
-        construction time it will be invoked.  Otherwise this method
-        searches for mentions of datasets or supplementary material
-        using a simple regex and constructs a :class:`ExtractionResult`.
-        """
+        """Extract structured data sources from contexts."""
         if self.extractor_fn is not None:
             try:
-                return self.extractor_fn(contexts, paper_type, query)  # type: ignore[no-any-return]
+                return self.extractor_fn(contexts, paper_type, query)
             except Exception as exc:
                 logger.warning(f"Extractor function failed: {exc}; falling back to heuristic")
-        # Heuristic: find lines containing 'data' or 'supplement'
+        
         found: List[DataSource] = []
         for ctx in contexts:
             content = (ctx.get("content") or ctx.get("text") or "")

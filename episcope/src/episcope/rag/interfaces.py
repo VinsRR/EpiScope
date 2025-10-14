@@ -59,12 +59,13 @@ class AbstractRetriever(ABC):
     """
 
     @abstractmethod
-    def retrieve(self, query: str, *, top_k: int = 5, **kwargs: Any) -> Sequence[Dict[str, Any]]:
+    def retrieve(self, query: str, *, top_k: int = 5, similarity_threshold: float = 0.0, **kwargs: Any) -> Sequence[Dict[str, Any]]:
         """Retrieve contexts for a query.
 
         Args:
             query: The user query.
             top_k: Maximum number of contexts to return.
+            similarity_threshold: Minimum similarity score for a context to be returned.
             **kwargs: Additional arguments for the retrieval strategy.
 
         Returns:
