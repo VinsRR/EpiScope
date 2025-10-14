@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple
 import json
 
 from episcope.utils.processing_utils import TextProcessor
-from .specialized_retriever import RAGQuerier
+from .querier import ChunkQuerier
 
 @dataclass
 class SearchResult:
@@ -20,7 +20,7 @@ class SearchResult:
 class ChunkSearcher:
     """Handles different search strategies for finding relevant chunks."""
     
-    def __init__(self, config, querier: RAGQuerier, text_processor: TextProcessor):
+    def __init__(self, config, querier: ChunkQuerier, text_processor: TextProcessor):
         self.config = config
         self.querier = querier
         self.text_processor = text_processor
@@ -36,11 +36,11 @@ class ChunkSearcher:
         
         for query, weight, reason in queries:
             try:
-                chunks = self.querier.query_structured_chunks(
+                chunks = self.querier.retrieve(
                     query=query,
+                    top_k=self.config.top_k_semantic,
                     index_path=index_path,
                     chunks_path=chunks_path,
-                    top_k=self.config.top_k_semantic,
                     similarity_threshold=self.config.similarity_threshold
                 )
                 

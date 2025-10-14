@@ -21,29 +21,27 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from episcope.rag.interfaces import AbstractIndexer, AbstractRetriever
+import numpy as np
+from episcope.rag.interfaces import AbstractRetriever
 from episcope.utils.data_blueprints import PaperType, DataSource, ExtractionResult
+from episcope.rag.vectordb.base import AbstractVectorDB
+from episcope.rag.embeddings import SimplifiedEmbedder
 
 logger = logging.getLogger(__name__)
 
 
 class PrecisionMinerRetriever(AbstractRetriever):
-    """Specialised retriever for the PrecisionMiner pipeline.
-
-    This retriever expects a per‑paper indexer that supports
-    ``index_paper`` and ``search`` methods.  It optionally accepts
-    externally supplied classification and extraction callables to
-    support heavy LLM‑powered implementations.  When those
-    callables are not provided, fallback heuristics are used.
-    """
+    """Specialised retriever for the PrecisionMiner pipeline."""
 
     def __init__(
         self,
-        indexer: AbstractIndexer,
+        db: AbstractVectorDB,
+        embed_model: str = "distilbert-base-uncased",
         classifier_fn: Optional[Any] = None,
         extractor_fn: Optional[Any] = None,
     ) -> None:
-        self.indexer = indexer
+        self.db = db
+        self.embedder = SimplifiedEmbedder(embed_model=embed_model)
         self.classifier_fn = classifier_fn
         self.extractor_fn = extractor_fn
 
@@ -55,29 +53,22 @@ class PrecisionMinerRetriever(AbstractRetriever):
         paper_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Sequence[Dict[str, Any]]:
-        """Retrieve structured results for the given query across papers.
-
-        Args:
-            query: The user query to run against each paper.
-            top_k: Number of contexts to retrieve per paper.
-            paper_ids: A list of paper identifiers to restrict retrieval.
-            **kwargs: Unused in the fallback implementation.
-
-        Returns:
-            A list of result dictionaries, one per paper.  Each result
-            contains the paper_id, classification, extracted data
-            sources and the raw contexts retrieved.
-        """
+        """Retrieve structured results for the given query across papers."""
         results: List[Dict[str, Any]] = []
-        target_papers = paper_ids or list(self.indexer._embeddings.keys())  # type: ignore[attr-defined]
-        for pid in target_papers:
-            # Retrieve contexts for this paper
-            contexts = [c for c in self.indexer.search(query, top_k=top_k) if c.get("paper_id") == pid]
+        if not paper_ids:
+            # This is a limitation of the new design; the retriever doesn't know all namespaces.
+            # The caller must provide the paper_ids.
+            logger.warning("PrecisionMinerRetriever requires a list of paper_ids to search.")
+            return []
+
+        query_vector = self.embedder.embed_text(query)
+
+        for pid in paper_ids:
+            contexts = self.db.search(query_vector, top_k=top_k, namespace=pid)
             if not contexts:
                 continue
-            # Determine paper type
+            
             classification = self._classify_paper(contexts)
-            # Extract data sources
             extraction = self._extract_data_sources(contexts, classification, query)
             results.append({
                 "paper_id": pid,

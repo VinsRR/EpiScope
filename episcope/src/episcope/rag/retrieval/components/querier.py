@@ -9,20 +9,21 @@ from dataclasses import dataclass, field
 
 import faiss
 import numpy as np
-from .embeddings import SimplifiedEmbedder
+from episcope.rag.interfaces import AbstractRetriever
+from episcope.rag.embeddings import SimplifiedEmbedder
 from episcope.utils.data_blueprints import Chunk
 
 logger = logging.getLogger(__name__)
 
 
-class RAGQuerier:
+class ChunkQuerier(AbstractRetriever):
     """Efficient, simple retrieval over per-paper chunks with optional FAISS acceleration.
 
     - Loads chunks once per instance and caches them.
     - If an index_path is provided, it will try to use FAISS; otherwise it uses in-memory
       semantic ranking (embedding caching) and a small inverted index for keyword scans.
     - Public methods:
-        - query_structured_chunks(query, index_path, chunks_path, section_filter, top_k, similarity_threshold)
+        - retrieve(query, top_k, **kwargs)
         - query_keyword_chunks(chunks_path, keywords, top_k)
         - get_section_types(chunks_path)
     """
@@ -110,15 +111,21 @@ class RAGQuerier:
             return None
 
     # ---------- public methods ----------
-    def query_structured_chunks(
+    def retrieve(
         self,
         query: str,
-        index_path: str,
-        chunks_path: str,
-        section_filter: Optional[List[str]] = None,
+        *,
         top_k: int = 5,
-        similarity_threshold: float = 0.0,
+        **kwargs: Any
     ) -> List[Dict]:
+        index_path = kwargs.get("index_path")
+        chunks_path = kwargs.get("chunks_path")
+        section_filter = kwargs.get("section_filter")
+        similarity_threshold = kwargs.get("similarity_threshold", 0.0)
+
+        if not index_path or not chunks_path:
+            raise ValueError("index_path and chunks_path must be provided in kwargs")
+
         chunks = self._load_chunks(chunks_path)
         if not chunks:
             return []

@@ -83,7 +83,7 @@ def validate_token_budget(model_name: str, messages: Iterable[dict[str, str]]) -
 # maintain backwards compatibility, we provide a thin wrapper that
 # delegates to the unified implementation.  New code should import
 # ``HYDE`` from ``episcope.core.hyde`` directly.
-from .hyde import HYDE as _CoreHYDE
+from episcope.rag.retrieval.components.hyde import HYDE as _CoreHYDE
 
 
 class HYDE(_CoreHYDE):

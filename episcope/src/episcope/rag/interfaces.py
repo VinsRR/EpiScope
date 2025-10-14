@@ -43,21 +43,6 @@ class AbstractIndexer(ABC):
                 ignore this parameter.
         """
 
-    @abstractmethod
-    def search(self, query: str, *, top_k: int = 5, namespace: Optional[str] = None) -> Sequence[Dict[str, Any]]:
-        """Search the index with a textual query.
-
-        Args:
-            query: The search query.
-            top_k: The maximum number of results to return.
-            namespace: Optional namespace to restrict search.
-
-        Returns:
-            A sequence of result dictionaries.  Each result should
-            include at least the fields ``content`` (the indexed
-            document text) and ``score`` (similarity score).  Extra
-            metadata present at indexing time may also be returned.
-        """
 
 
 class AbstractRetriever(ABC):

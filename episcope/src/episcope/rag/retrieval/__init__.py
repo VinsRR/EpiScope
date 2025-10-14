@@ -24,7 +24,7 @@ try:
     # import may fail if optional dependencies like qdrant_client or
     # fastembed are not installed.  In that case, we provide a stub
     # class instead.
-    from .rag.factory import RAGFactory as _ConcreteRAGFactory
+    from episcope.rag.factory import RAGFactory as _ConcreteRAGFactory
     RAGFactory = _ConcreteRAGFactory
 except Exception:
     class RAGFactory:  # type: ignore

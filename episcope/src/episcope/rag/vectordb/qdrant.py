@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
+
+
 # Attempt to import Qdrant; provide fallbacks if unavailable.
 try:
     from qdrant_client import QdrantClient  # type: ignore[assignment]
@@ -98,8 +100,10 @@ def _batch_iterate(iterable: Iterable[Any], batch_size: int) -> Iterable[List[An
         yield batch
 
 
-class UnifiedQdrantIndex:
-    """Unified wrapper for Qdrant supporting dense, sparse and late interaction vectors."""
+from .base import AbstractVectorDB
+
+class QdrantDB(AbstractVectorDB):
+    """Wrapper for Qdrant supporting dense, sparse and late interaction vectors."""
 
     def __init__(
         self,
@@ -124,6 +128,7 @@ class UnifiedQdrantIndex:
             timeout=timeout,
             prefer_grpc=prefer_grpc,
         )
+        # self.create_collection()
 
     def create_collection(
         self,
@@ -134,23 +139,7 @@ class UnifiedQdrantIndex:
         sparse: bool = False,
         late_interaction: bool = False,
     ) -> None:
-        """Create the collection if it does not already exist.
-
-        Parameters
-        ----------
-        multivector: bool
-            Whether to enable multi‑vector mode on the primary dense vector.
-        on_disk: bool
-            Whether to store vectors on disk (recommended for large datasets).
-        optimizers_config: Optional[models.OptimizersConfigDiff]
-            Tuning parameters for Qdrant's internal optimizers.
-        quantization_config: Optional[models.BinaryQuantization]
-            Configuration for binary quantization of vectors.
-        sparse: bool
-            Whether to add a sparse BM25 vector field called ``"sparse"``.
-        late_interaction: bool
-            Whether to add a separate late‑interaction vector field called ``"late_interaction"``.
-        """
+        """Create the collection if it does not already exist."""
         if self.client.collection_exists(self.collection):
             return
 
@@ -184,7 +173,7 @@ class UnifiedQdrantIndex:
                 ),
             }
         else:
-            vectors_config = dense_params  # type: ignore[assignment]
+            vectors_config = dense_params
 
         sparse_config: Optional[Dict[str, models.SparseVectorParams]] = None
         if sparse:
@@ -201,30 +190,37 @@ class UnifiedQdrantIndex:
             on_disk_payload=on_disk,
         )
 
-    def upsert(self, points: Iterable[models.PointStruct], wait: bool = True) -> None:
+    def upsert(self, points: Iterable[models.PointStruct], namespace: Optional[str] = None) -> None:
         """Upsert points into the collection in batches."""
+        # The namespace is handled at the payload level in Qdrant
         for batch in _batch_iterate(points, self.batch_size):
             self.client.upsert(
                 collection_name=self.collection,
                 points=list(batch),
-                wait=wait,
+                wait=True,
             )
 
     def search(
         self,
-        vector: Any,
+        query_vector: List[float],
         top_k: int = 5,
-        with_payload: bool = True,
-        search_params: Optional[models.SearchParams] = None,
-        query_filter: Optional[models.Filter] = None,
-    ) -> Any:
+        namespace: Optional[str] = None,
+    ) -> Sequence[Dict[str, Any]]:
         """Perform a similarity search on the collection."""
-        return self.client.search(
+        query_filter = None
+        if namespace:
+            query_filter = models.Filter(
+                must=[models.FieldCondition(key="namespace", match=models.MatchValue(value=namespace))]
+            )
+        
+        results = self.client.search(
             collection_name=self.collection,
-            query_vector=vector,
+            query_vector=query_vector,
             limit=top_k,
-            with_payload=with_payload,
-            search_params=search_params,
+            with_payload=True,
             query_filter=query_filter,
         )
+        return [
+            {**hit.payload, "score": hit.score} for hit in results
+        ]
 

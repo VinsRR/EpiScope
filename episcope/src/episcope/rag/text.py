@@ -17,9 +17,10 @@ from typing import Iterable, List, Optional, Sequence
 
 from qdrant_client.http import models
 
-from ..embeddings import SimplifiedEmbedder
-from ..utils import HYDE, validate_token_budget, find_pathogen_keyword
-from ...indexing.unified_db import UnifiedQdrantIndex
+from episcope.rag.embeddings import SimplifiedEmbedder
+from episcope.rag.retrieval.components.hyde import HYDE
+from episcope.rag.retrieval.utils import validate_token_budget, find_pathogen_keyword
+from episcope.rag.indexing.unified_db import UnifiedQdrantIndex
 from episcope.rag.main import AbstractRAG
 from episcope.text_only import (
     EMBED_MODEL as DEFAULT_EMBED_MODEL,

@@ -9,17 +9,8 @@ import pandas as pd
 from episcope.db.academic_db import AcademicDB
 from episcope.utils.data_blueprints import StructuredSection, Reference, PaperMetadata
 from episcope.parse_configs import PipelineConfig
-from episcope.rag.indexing.specialized_faiss_indexer import EmbeddingIndexer
-from episcope.rag.retrieval.chunk_searcher import ChunkSearcher
-from episcope.rag.retrieval.rerankers import ResultRanker
-from episcope.utils.processing_utils import TextProcessor, QueryGenerator
-from episcope.utils.result_utils import create_result_dict, create_result_markdown
-from episcope.pipelines.base import BatchRAGPipeline
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+from episcope.rag.indexing.indexer import Indexer
+from episcope.src.episcope.rag.vectordb.file import PaperFileDB
 
 class PipelineProcessor(BatchRAGPipeline):
     """Main pipeline processor with simplified architecture."""
@@ -44,123 +35,56 @@ class PipelineProcessor(BatchRAGPipeline):
     def _init_components(self):
         """Initialize all pipeline components."""
         from episcope.pipelines.classification_pipeline import PaperClassifier
-        from episcope.rag.retrieval.specialized_retriever import RAGQuerier
         from episcope.rag.generation.llm_extractor import LLMExtractor
-        from episcope.rag.retrieval.embeddings import SimplifiedEmbedder
+        from episcope.rag.embeddings import SimplifiedEmbedder
 
         # Create a single embedder instance for consistency
         embedder = SimplifiedEmbedder(embed_model=self.config.embedding_model)
+        
+        # The pipeline now uses a file-based PaperFileDB
+        vector_db = PaperFileDB(index_dir=str(self.index_dir))
+        self.indexer = Indexer(db=vector_db, embed_model=self.config.embedding_model)
 
-        # Initialize components with the shared embedder
-        self.indexer = EmbeddingIndexer(model_name=self.config.embedding_model)
         self.paper_classifier = PaperClassifier(self.config.classifier_model, embedder=embedder)
-        self.querier = RAGQuerier(embedder=embedder)
         self.extractor = LLMExtractor(self.config.llm_model)
         
         # Initialize text processor and searcher
         self.text_processor = TextProcessor()
-        self.chunk_searcher = ChunkSearcher(self.config.search, self.querier, self.text_processor)
+        # The searcher now needs a retriever, not a querier.
+        # This part of the code will need further refactoring to be fully functional
+        # For now, we remove the ChunkSearcher as it depends on the old querier.
+        # self.chunk_searcher = ChunkSearcher(self.config.search, self.querier, self.text_processor)
         
         # Initialize HyDE if configured
         self.hyde_generate = None
         if self.config.use_hyde:
             try:
-                from episcope.rag.retrieval.hyde import HYDE
+                from episcope.rag.retrieval.components.hyde import HYDE
                 hyde = HYDE(self.config.hyde_model)
                 self.hyde_generate = lambda prompt: list(hyde.generate(prompt, n=4))
             except Exception:
                 logger.debug("HyDE not available")
-    
-    def process_item(self, paper_id: str, strategy_name: str = "default") -> Dict[str, Any]:
-        """Process a single paper from the database."""
-        logger.info(f"Processing {paper_id}")
-        
-        # Load extracted data from DB
-        metadata, sections, references = self._load_extracted_data(paper_id, strategy_name)
-        pdf_path = metadata.file_path
-        if not pdf_path:
-            raise ValueError(f"PDF path not found in metadata for paper {paper_id}")
 
-        # Create/load index and chunks
-        index_path, chunks_path = self._prepare_index_and_chunks(sections, metadata, paper_id, Path(pdf_path).parent, strategy_name)
-        
-        # Classify paper type
-        paper_type = self._classify_paper_type(metadata, index_path, chunks_path)
-        
-        # Extract data sources
-        extraction_result, confidence_scores = self._extract_data_sources(
-            paper_type, index_path, chunks_path, references, pdf_path, metadata
-        )
-        
-        # Create result dictionary
-        result_dict = create_result_dict(
-            paper_id, pdf_path, metadata, sections, references, 
-            paper_type, extraction_result, confidence_scores
-        )
-
-        result_markdown = create_result_markdown(paper_id, pdf_path, metadata, sections, references,
-            paper_type, extraction_result, confidence_scores)
-
-        logger.info(f"Completed processing {paper_id}")
-        return result_dict, result_markdown
-    
-    def _load_extracted_data(self, paper_id: str, strategy_name: str):
-        """Load metadata, sections, and references from the database."""
-        try:
-            metadata = self.db.retrieve(paper_id, "metadata", strategy_name)
-            sections = self.db.retrieve(paper_id, "sections", strategy_name)
-            references = self.db.retrieve(paper_id, "references", strategy_name)
-
-            if not metadata or not sections:
-                raise FileNotFoundError(f"Data not found in DB for paper {paper_id} with strategy {strategy_name}")
-
-            return metadata, sections, references or []
-            
-        except Exception as e:
-            logger.error(f"Failed to load extracted data for {paper_id} from DB: {e}")
-            raise
-    
     def _prepare_index_and_chunks(self, sections, metadata, paper_id: str, base_dir: Path, strategy_name: str):
         """Prepare index and chunks files."""
-        index_path = None
+        strategy_dir = self.index_dir / strategy_name
+        strategy_dir.mkdir(exist_ok=True, parents=True)
+        
         if self.indexer:
             try:
-                index_path = self.indexer.create_index(sections, metadata, str(self.index_dir), paper_id)
+                self.indexer.index_paper(
+                    sections=sections,
+                    metadata=metadata,
+                    paper_id=paper_id,
+                )
             except Exception as e:
                 logger.warning(f"Index creation failed for {paper_id}: {e}")
         
-        strategy_dir = self.index_dir / strategy_name
-        strategy_dir.mkdir(exist_ok=True, parents=True)
-        chunks_path = strategy_dir / f"{paper_id}_structured_chunks.json"
-
-        if not chunks_path.exists():
-            chunks = []
-            for i, section in enumerate(sections):
-                if isinstance(section, StructuredSection):
-                    chunk = {
-                        "id": i,
-                        "section_type": section.section_type,
-                        "title": section.title,
-                        "text": section.content,
-                        "strategy": strategy_name,
-                    }
-                elif isinstance(section, dict):
-                    chunk = {
-                        "id": i,
-                        "section_type": section.get("section_type", "other"),
-                        "title": section.get("title", ""),
-                        "text": section.get("content", ""),
-                        "strategy": strategy_name,
-                    }
-                else:
-                    assert False, f"Unexpected section type: {type(section)}"
-
-                chunks.append(chunk)
-                
-            with open(chunks_path, "w", encoding="utf-8") as f:
-                json.dump(chunks, f, ensure_ascii=False, indent=2)
-        
-        return str(index_path) if index_path else "", str(chunks_path)
+        # The new design does not explicitly return paths, as the DB handles it.
+        # For the file-based pipeline, we can construct them.
+        index_path = strategy_dir / paper_id / "embeddings.npy"
+        chunks_path = strategy_dir / paper_id / "metadata.json"
+        return str(index_path), str(chunks_path)
     
     def _classify_paper_type(self, metadata, index_path: str, chunks_path: str) -> str:
         """Classify the paper type."""

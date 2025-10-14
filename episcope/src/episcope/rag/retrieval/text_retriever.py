@@ -13,40 +13,32 @@ from __future__ import annotations
 
 from typing import Any, Dict, Sequence, List, Optional
 
-from episcope.rag.interfaces import AbstractIndexer, AbstractRetriever
-from episcope.rag.retrieval.hyde import HYDE
-
+from episcope.rag.interfaces import AbstractRetriever
+from episcope.rag.retrieval.components.hyde import HYDE
+from episcope.rag.vectordb.base import AbstractVectorDB
+from episcope.rag.embeddings import SimplifiedEmbedder
 
 class TextRetriever(AbstractRetriever):
-    """Standard semantic retriever for Explorer mode.
+    """Standard semantic retriever for Explorer mode."""
 
-    Instances of this class combine a document indexer with an
-    optional HYDE model.  When a HYDE instance is supplied, the
-    retriever will first generate hypothetical documents from the
-    query and append them to the query to improve recall.  The
-    final query is then passed to the indexer to retrieve the top
-    matching contexts.
-    """
-
-    def __init__(self, indexer: AbstractIndexer, hyde: Optional[HYDE] = None) -> None:
-        self.indexer = indexer
+    def __init__(self, db: AbstractVectorDB, embed_model: str = "distilbert-base-uncased", hyde: Optional[HYDE] = None) -> None:
+        self.db = db
+        self.embedder = SimplifiedEmbedder(embed_model=embed_model)
         self.hyde = hyde
 
     def retrieve(self, query: str, *, top_k: int = 5, namespace: Optional[str] = None, **kwargs: Any) -> Sequence[Dict[str, Any]]:
-        # If HYDE is provided, augment the query
         final_query = query
         if self.hyde is not None:
-            # generate a single hypothetical document and append
             hyp = self.hyde.generate(query)
-            # Append separated by newline for clarity
             if hyp:
-                final_query = f"{query}\n\n{hyp}"
-        # Delegate to the indexer
-        results = self.indexer.search(final_query, top_k=top_k, namespace=namespace)
-        # Ensure each result contains a 'content' key expected by generators
+                final_query = f"{query}\\n\\n{hyp}"
+        
+        query_vector = self.embedder.embed_text(final_query)
+        
+        results = self.db.search(query_vector, top_k=top_k, namespace=namespace)
+        
         contexts: List[Dict[str, Any]] = []
         for res in results:
-            # Copy metadata and rename 'text' or 'content' to 'content'
             content = res.get("text") or res.get("content") or ""
             ctx = {**res, "content": content}
             contexts.append(ctx)
