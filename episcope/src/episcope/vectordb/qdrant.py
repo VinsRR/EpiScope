@@ -107,17 +107,16 @@ class QdrantDB(AbstractVectorDB):
         )
         return [{**hit.payload, "score": hit.score} for hit in results]
 
-    def get_points(self, namespace: str, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
-        if not namespace:
-            return []
-            
-        must_conditions = [models.FieldCondition(key="paper_id", match=models.MatchValue(value=namespace))]
+        must_conditions = []
+        if namespace:
+            must_conditions.append(models.FieldCondition(key="paper_id", match=models.MatchValue(value=namespace)))
         if filter:
             for key, value in filter.items():
                 must_conditions.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
         
-        query_filter = models.Filter(must=must_conditions)
+        query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
         points, _ = self.client.scroll(
             collection_name=self.collection,

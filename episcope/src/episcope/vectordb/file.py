@@ -124,11 +124,15 @@ class FileDB(AbstractVectorDB):
             results.append({**meta, "score": float(sims[idx_local])})
         return results
 
-    def get_points(self, namespace: str, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
         combined_filter = dict(filter or {})
-        combined_filter["paper_id"] = namespace
+        if namespace:
+            combined_filter["paper_id"] = namespace
         
+        if not combined_filter:
+            return self._metadata
+
         return [
             point for point in self._metadata
             if all(point.get(key) == value for key, value in combined_filter.items())

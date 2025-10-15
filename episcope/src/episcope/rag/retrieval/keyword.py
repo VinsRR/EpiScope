@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Optional
 
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.vectordb.base import AbstractVectorDB
@@ -12,22 +12,33 @@ class KeywordRetriever(AbstractRetriever):
 
     def __init__(self, vectordb: AbstractVectorDB):
         self.vectordb = vectordb
+        self._allowed_filter_keys = self.vectordb.get_payload_keys()
 
-    def retrieve(self, query: str, *, top_k: int = 5, **kwargs: Any) -> Sequence[SearchResult]:
+    def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        filter: Optional[Dict[str, Any]] = None,
+    ) -> Sequence[SearchResult]:
         """
         Perform keyword-based search.
         The query is a space-separated string of keywords.
+        An optional 'filter' dictionary can be used for metadata filtering.
         """
-        paper_id = kwargs.get("paper_id")
-        if not paper_id:
-            raise ValueError("paper_id must be provided for keyword search.")
+        final_filter = filter.copy() if filter else {}
+        namespace = final_filter.pop("paper_id", None) or final_filter.pop("namespace", None)
+
+        for key in final_filter:
+            if key not in self._allowed_filter_keys:
+                raise ValueError(f"Invalid filter key: {key}. Allowed keys are: {self._allowed_filter_keys}")
 
         keywords = query.lower().split()
         if not keywords:
             return []
 
         try:
-            chunks = self.vectordb.get_points(namespace=paper_id)
+            chunks = self.vectordb.get_points(namespace=namespace, filter=final_filter if final_filter else None)
             
             hits = []
             for chunk in chunks:
@@ -53,5 +64,27 @@ class KeywordRetriever(AbstractRetriever):
             return results
 
         except Exception as e:
-            logger.debug(f"Keyword search failed for paper {paper_id}: {e}")
+            log_msg = f"Keyword search failed for query '{query}'"
+            if namespace:
+                log_msg += f" on namespace {namespace}"
+            if final_filter:
+                log_msg += f" with filter {final_filter}"
+            log_msg += f": {e}"
+            logger.debug(log_msg)
             return []
+
+    def retrieve_by_paper(
+        self,
+        query: str,
+        paper_id: str,
+        *,
+        top_k: int = 5,
+    ) -> Sequence[SearchResult]:
+        """
+        Perform keyword search for a single query scoped to a specific paper.
+        """
+        return self.retrieve(
+            query,
+            top_k=top_k,
+            filter={"paper_id": paper_id},
+        )

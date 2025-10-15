@@ -26,23 +26,16 @@ class SemanticRetriever(AbstractRetriever):
         top_k: int = 5,
         similarity_threshold: float = 0.0,
         filter: Optional[Dict[str, Any]] = None,
-        # **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform semantic search for a single query.
-        'paper_id' or 'namespace' should be passed in the filter dictionary to scope the search.
-        An optional 'filter' dictionary can be used for more specific metadata filtering.
+        An optional 'filter' dictionary can be used for metadata filtering,
+        including scoping to a 'paper_id'.
         """
-        namespace = None
-        filter = filter.copy() if filter else {}
+        final_filter = filter.copy() if filter else {}
+        namespace = final_filter.pop("paper_id", None) or final_filter.pop("namespace", None)
 
-        # Extract namespace or paper_id from filter if present
-        if "namespace" in filter:
-            namespace = filter.pop("namespace")
-        elif "paper_id" in filter:
-            namespace = filter["paper_id"]
-
-        for key in filter:
+        for key in final_filter:
             if key not in self._allowed_filter_keys:
                 raise ValueError(f"Invalid filter key: {key}. Allowed keys are: {self._allowed_filter_keys}")
 
@@ -58,7 +51,7 @@ class SemanticRetriever(AbstractRetriever):
                 query_vector=query_embedding,
                 top_k=top_k,
                 namespace=namespace,
-                filter=filter if filter else None,
+                filter=final_filter if final_filter else None,
             )
 
             results = []
@@ -84,8 +77,8 @@ class SemanticRetriever(AbstractRetriever):
             log_msg = f"Semantic search failed for query '{query}'"
             if namespace:
                 log_msg += f" on namespace {namespace}"
-            if filter:
-                log_msg += f" with filter {filter}"
+            if final_filter:
+                log_msg += f" with filter {final_filter}"
             log_msg += f": {e}"
             logger.debug(log_msg)
             return []
@@ -97,7 +90,6 @@ class SemanticRetriever(AbstractRetriever):
         *,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
-        # **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform semantic search for a single query scoped to a specific paper.
@@ -107,5 +99,4 @@ class SemanticRetriever(AbstractRetriever):
             top_k=top_k,
             similarity_threshold=similarity_threshold,
             filter={"paper_id": paper_id},
-            # **kwargs,
         )

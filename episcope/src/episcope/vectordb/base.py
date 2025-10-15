@@ -24,7 +24,7 @@ class AbstractVectorDB(ABC):
         pass
 
     @abstractmethod
-    def get_points(self, namespace: str, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
         pass
 
