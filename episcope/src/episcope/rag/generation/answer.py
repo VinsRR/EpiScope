@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from episcope.rag.retrieval import RAGFactory
+
 from episcope.rag.provenance import Evidence, Provenance
 from episcope.rag.providers.base import ProviderFactory
 from episcope.settings import CONFIG
@@ -23,7 +23,7 @@ class AnswerGenerator:
 
     def __init__(self, rag_method: str = "text") -> None:
         self.rag_method_name = rag_method
-        self.rag = RAGFactory.get(rag_method)
+        self.rag = RAGFactory.get(rag_method) # Rag factory no longer exists
         self.provider = ProviderFactory.create(CONFIG.provider.provider, model=CONFIG.provider.model, api_key=CONFIG.provider.api_key)
 
     def answer_question(self, query: str, top_k: int = 5) -> Provenance:

@@ -16,7 +16,7 @@ from episcope.rag.interfaces import AbstractGenerator
 from episcope.rag.provenance import Provenance, Evidence
 
 
-class SimpleGenerator(AbstractGenerator):
+class NoLLMGenerator(AbstractGenerator):
     """Concatenate context snippets into an answer string.
 
     This generator simply joins the ``content`` fields of the
@@ -25,14 +25,14 @@ class SimpleGenerator(AbstractGenerator):
     performed.
     """
 
-    def generate(self, question: str, contexts: Sequence[Dict[str, Any]], **kwargs: Any) -> Provenance:
+    def generate(self, contexts: Sequence[Dict[str, Any]], **kwargs: Any) -> Provenance:
         answer_parts: List[str] = []
         evidences: List[Evidence] = []
         for ctx in contexts:
-            content = ctx.get("content") or ctx.get("text") or ""
+            content = ctx.text or "" 
             answer_parts.append(content)
-            paper_id = str(ctx.get("paper_id", ctx.get("id", "unknown")))
-            section = ctx.get("section_type") or ctx.get("section", None)
+            paper_id = ctx.paper_id
+            section = ctx.section_type
             evidences.append(Evidence(
                 paper_id=paper_id,
                 snippet=content,

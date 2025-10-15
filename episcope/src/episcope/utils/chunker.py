@@ -1,6 +1,3 @@
-"""
-A centralized utility for chunking documents before indexing.
-"""
 import uuid
 from typing import List, Dict, Any
 from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
