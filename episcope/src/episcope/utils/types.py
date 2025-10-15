@@ -5,6 +5,7 @@ from typing import Any, Dict
 class SearchResult:
     """Represents a search result chunk with metadata."""
     id: str
+    paper_id: str 
     text: str
     section_type: str = "other"
     title: str = ""

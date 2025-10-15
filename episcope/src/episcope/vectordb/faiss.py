@@ -8,7 +8,15 @@ import numpy as np
 from .base import AbstractVectorDB
 
 class FaissDB(AbstractVectorDB):
-    """A file-based vector database using FAISS."""
+    """
+    A file-based vector database using FAISS.
+
+    This implementation keeps a separate copy of the embeddings (`_embeddings`) alongside
+    the FAISS index (`_faiss_index`). The `_embeddings` array serves as the source of
+    truth, allowing for easier updates (upserts) by rebuilding the index from scratch.
+    The `_faiss_index` is treated as a performance cache for efficient searching.
+    This design simplifies the upsert logic at the cost of performance for frequent updates.
+    """
 
     def __init__(self, index_dir: str):
         self.index_dir = Path(index_dir)
@@ -19,7 +27,18 @@ class FaissDB(AbstractVectorDB):
         self._model: Optional[str] = None
         self._payload_keys: set[str] = set()
         self._loaded = False
+        self._dirty = False
         self._load()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.save()
+
+    def __del__(self):
+        # Fallback save mechanism. Note: __del__ is not guaranteed to be called.
+        self.save()
 
     def _load(self):
         try:
@@ -37,10 +56,9 @@ class FaissDB(AbstractVectorDB):
                 with open(self.index_dir / "config.json", "r", encoding="utf-8") as f:
                     config = json.load(f)
                     self._model = config.get("embed_model")
-            
-            if (self.index_dir / "payload_keys.json").exists():
-                with open(self.index_dir / "payload_keys.json", "r", encoding="utf-8") as f:
-                    self._payload_keys = set(json.load(f))
+                    payload_keys = config.get("payload_keys")
+                    if payload_keys is not None:
+                        self._payload_keys = set(payload_keys)
                 self._loaded = True
         except Exception:
             # Silently fail if loading fails, will start with an empty DB
@@ -48,12 +66,16 @@ class FaissDB(AbstractVectorDB):
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
         if embed_model:
-            self._model = embed_model
+            # Only set the DB-level model if it's not already configured.
+            if self._model is None:
+                self._model = embed_model
+                self._dirty = True
+            elif self._model != embed_model:
+                assert False, f"Warning: upsert called with embed_model={embed_model} but DB already has embed_model={self._model}; DB model not changed"
+
 
         points_list = list(points)
         if not points_list:
-            if embed_model:
-                self.save()
             return
 
         if not self._loaded:  # if this is the first instantiation create the payload keys
@@ -87,7 +109,7 @@ class FaissDB(AbstractVectorDB):
                 index.add(all_embeddings)
                 self._faiss_index = index
         
-        self.save()
+        self._dirty = True
 
     def search(
         self,
@@ -147,6 +169,9 @@ class FaissDB(AbstractVectorDB):
         return self._model
 
     def save(self) -> None:
+        if not self._dirty:
+            return
+
         self.index_dir.mkdir(parents=True, exist_ok=True)
         
         with open(self.index_dir / "metadata.json", "w", encoding="utf-8") as f:
@@ -165,3 +190,5 @@ class FaissDB(AbstractVectorDB):
         
         with open(self.index_dir / "payload_keys.json", "w", encoding="utf-8") as f:
             json.dump(list(self._payload_keys), f, indent=2)
+        
+        self._dirty = False

@@ -26,19 +26,25 @@ class SemanticRetriever(AbstractRetriever):
         top_k: int = 5,
         similarity_threshold: float = 0.0,
         filter: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
+        # **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform semantic search for a single query.
-        A 'paper_id' or 'namespace' can be passed in kwargs to scope the search.
+        'paper_id' or 'namespace' should be passed in the filter dictionary to scope the search.
         An optional 'filter' dictionary can be used for more specific metadata filtering.
         """
-        namespace = kwargs.get("paper_id") or kwargs.get("namespace")
+        namespace = None
+        filter = filter.copy() if filter else {}
 
-        if filter:
-            for key in filter:
-                if key not in self._allowed_filter_keys:
-                    raise ValueError(f"Invalid filter key: {key}. Allowed keys are: {self._allowed_filter_keys}")
+        # Extract namespace or paper_id from filter if present
+        if "namespace" in filter:
+            namespace = filter.pop("namespace")
+        elif "paper_id" in filter:
+            namespace = filter["paper_id"]
+
+        for key in filter:
+            if key not in self._allowed_filter_keys:
+                raise ValueError(f"Invalid filter key: {key}. Allowed keys are: {self._allowed_filter_keys}")
 
         final_query = query
         if self.hyde:
@@ -52,7 +58,7 @@ class SemanticRetriever(AbstractRetriever):
                 query_vector=query_embedding,
                 top_k=top_k,
                 namespace=namespace,
-                filter=filter,
+                filter=filter if filter else None,
             )
 
             results = []
@@ -64,6 +70,7 @@ class SemanticRetriever(AbstractRetriever):
                 results.append(
                     SearchResult(
                         id=str(chunk.get("id", "")),
+                        paper_id=chunk.get("paper_id", ""),
                         text=chunk.get("text", ""),
                         section_type=chunk.get("section_type", "other"),
                         title=chunk.get("title", ""),
@@ -90,7 +97,7 @@ class SemanticRetriever(AbstractRetriever):
         *,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
-        **kwargs: Any,
+        # **kwargs: Any,
     ) -> Sequence[SearchResult]:
         """
         Perform semantic search for a single query scoped to a specific paper.
@@ -100,5 +107,5 @@ class SemanticRetriever(AbstractRetriever):
             top_k=top_k,
             similarity_threshold=similarity_threshold,
             filter={"paper_id": paper_id},
-            **kwargs,
+            # **kwargs,
         )

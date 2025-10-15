@@ -42,6 +42,7 @@ class KeywordRetriever(AbstractRetriever):
             for chunk, score in hits[:top_k]:
                 results.append(SearchResult(
                     id=str(chunk.get("id", "")),
+                    paper_id=chunk.get("paper_id", ""),
                     text=chunk.get("text", ""),
                     section_type=chunk.get("section_type", "other"),
                     title=chunk.get("title", ""),

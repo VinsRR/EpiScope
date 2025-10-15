@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
+import logging
 
 from .base import AbstractVectorDB
 
@@ -17,7 +18,18 @@ class FileDB(AbstractVectorDB):
         self._model: Optional[str] = None
         self._payload_keys: set[str] = set()
         self._loaded = False
+        self._dirty = False
         self._load()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.save()
+
+    def __del__(self):
+        # Fallback save mechanism. Note: __del__ is not guaranteed to be called.
+        self.save()
 
     def _load(self):
         try:
@@ -30,9 +42,9 @@ class FileDB(AbstractVectorDB):
                 with open(self.index_dir / "config.json", "r", encoding="utf-8") as f:
                     config = json.load(f)
                     self._model = config.get("embed_model")
-            if (self.index_dir / "payload_keys.json").exists():
-                with open(self.index_dir / "payload_keys.json", "r", encoding="utf-8") as f:
-                    self._payload_keys = set(json.load(f))
+                    payload_keys = config.get("payload_keys")
+                    if payload_keys is not None:
+                        self._payload_keys = set(payload_keys)
                 self._loaded = True
         except Exception:
             # Silently fail if loading fails, will start with an empty DB
@@ -40,15 +52,18 @@ class FileDB(AbstractVectorDB):
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
         if embed_model:
-            self._model = embed_model
+            # Only set the DB-level model if it's not already configured.
+            if self._model is None:
+                self._model = embed_model
+                self._dirty = True
+            elif self._model != embed_model:
+                assert False, f"Warning: upsert called with embed_model={embed_model} but DB already has embed_model={self._model}; DB model not changed"
 
         points_list = list(points)
         if not points_list:
-            if embed_model: # Save model even if no points
-                self.save()
             return
 
-        if not self._loaded: # if this is the first instanstiation create the payload keys
+        if not self._loaded:  # if this is the first instantiation create the payload keys
             for p in points_list:
                 payload = p.setdefault("payload", {})
                 if namespace:
@@ -70,7 +85,7 @@ class FileDB(AbstractVectorDB):
 
         self._embeddings = np.array([p["vector"] for p in updated_points], dtype="float32")
         self._metadata = [p["payload"] for p in updated_points]
-        self.save()
+        self._dirty = True
 
     def search(
         self,
@@ -131,6 +146,9 @@ class FileDB(AbstractVectorDB):
         return self._model
 
     def save(self) -> None:
+        if not self._dirty:
+            return
+
         self.index_dir.mkdir(parents=True, exist_ok=True)
         
         if self._embeddings.size > 0:
@@ -145,3 +163,5 @@ class FileDB(AbstractVectorDB):
         
         with open(self.index_dir / "payload_keys.json", "w", encoding="utf-8") as f:
             json.dump(list(self._payload_keys), f, indent=2)
+        
+        self._dirty = False
