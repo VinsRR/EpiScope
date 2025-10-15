@@ -59,9 +59,11 @@ class TestPaperClassifier(unittest.TestCase):
     def test_deduplicate_and_rank_chunks(self) -> None:
         """Ensure deduplication keeps the highest score and sorts descending."""
         mock_embedder = SimplifiedEmbedder(embed_model=model_name_emb)
+        mock_vectordb = MagicMock(spec=AbstractVectorDB)
         classifier = PaperClassifier(
             model_name=model_name,
-            embedder=mock_embedder
+            embedder=mock_embedder,
+            vectordb=mock_vectordb
         )
         aggregated = {
             "literature_review": [

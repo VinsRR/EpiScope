@@ -158,11 +158,11 @@ class FileDB(AbstractVectorDB):
         with open(self.index_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(self._metadata, f, indent=2)
 
-        if self._model:
-            with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
-                json.dump({"embed_model": self._model}, f, indent=2)
-        
-        with open(self.index_dir / "payload_keys.json", "w", encoding="utf-8") as f:
-            json.dump(list(self._payload_keys), f, indent=2)
+        config = {
+            "embed_model": self._model,
+            "payload_keys": list(self._payload_keys)
+        }
+        with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
         
         self._dirty = False
