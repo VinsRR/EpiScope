@@ -40,18 +40,18 @@ class PrecisionMinerRetriever(AbstractRetriever):
             logger.warning("PrecisionMinerRetriever requires a list of paper_ids to search.")
             return []
 
+        embed_model_name = self.db.get_embedding_model()
+        if not embed_model_name:
+            logger.warning("No embedding model found for database. Skipping.")
+            return []
+
+        if embed_model_name not in self.embedders:
+            self.embedders[embed_model_name] = SimplifiedEmbedder(embed_model=embed_model_name)
+        
+        embedder = self.embedders[embed_model_name]
+        query_vector = embedder.embed_text(query)
+
         for pid in paper_ids:
-            embed_model_name = self.db.get_embedding_model(pid)
-            if not embed_model_name:
-                logger.warning(f"No embedding model found for paper {pid}. Skipping.")
-                continue
-
-            if embed_model_name not in self.embedders:
-                self.embedders[embed_model_name] = SimplifiedEmbedder(embed_model=embed_model_name)
-            
-            embedder = self.embedders[embed_model_name]
-            query_vector = embedder.embed_text(query)
-
             contexts = self.db.search(query_vector, top_k=top_k, namespace=pid)
             if not contexts:
                 continue

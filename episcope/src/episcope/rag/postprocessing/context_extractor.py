@@ -2,8 +2,8 @@ import logging
 from typing import Any, Dict, List, Sequence
 
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.rag.vectordb.base import AbstractVectorDB
-from episcope.src.episcope.utils.types import SearchResult
+from episcope.vectordb.base import AbstractVectorDB
+from episcope.utils.types import SearchResult
 from episcope.utils.processing_utils import TextProcessor
 
 logger = logging.getLogger(__name__)

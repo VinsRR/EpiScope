@@ -12,9 +12,12 @@ import numpy as np
 class Indexer:
     """A unified indexer that chunks, embeds, and stores documents in a VectorDB."""
 
-    def __init__(self, db: AbstractVectorDB, embed_model: str = "distilbert-base-uncased", batch_size: int = 8):
+    def __init__(self, db: AbstractVectorDB, embed_model: str = None, batch_size: int = 8):
         self.db = db
+        if embed_model != db.get_embedding_model() and db.get_embedding_model() is not None:
+            assert False, f"Warning: embed_model '{embed_model}' does not match VectorDB model '{db.get_embedding_model()}'"
         self.embed_model = embed_model
+        assert embed_model is not None, "An embedding model 'embed_model' must be specified if this is the first time the VectorDB is used."
         self.embedder = SimplifiedEmbedder(embed_model=embed_model, batch_size=batch_size)
 
     def index_documents(self, docs: Iterable[Dict[str, Any]], namespace: Optional[str] = None) -> None:

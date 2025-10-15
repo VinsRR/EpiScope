@@ -3,10 +3,10 @@ from unittest.mock import Mock
 import tempfile
 import shutil
 
-from episcope.rag.retrieval.retrievers.semantic import SemanticRetriever
-from episcope.rag.vectordb.faiss import FaissDB
+from episcope.rag.retrieval.semantic import SemanticRetriever
+from episcope.vectordb.faiss import FaissDB
 from episcope.rag.embeddings import SimplifiedEmbedder
-from episcope.rag.retrieval.hyde import HYDE
+from episcope.utils.hyde import HYDE
 
 class TestSemanticRetriever(unittest.TestCase):
 

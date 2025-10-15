@@ -36,7 +36,7 @@ sys.modules.setdefault(
     types.ModuleType("llama_index.embeddings.huggingface"),
 )
 
-from episcope.rag.retrieval.embeddings import SimplifiedEmbedder
+from episcope.rag.embeddings import SimplifiedEmbedder
 
 
 class DummyHF:

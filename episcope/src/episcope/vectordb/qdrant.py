@@ -50,6 +50,7 @@ class QdrantDB(AbstractVectorDB):
         self.distance = getattr(models.Distance, distance)
         self.batch_size = batch_size
         self.client = QdrantClient(url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc)
+        self._payload_keys: Optional[set[str]] = None
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
         """Upsert points into the collection in batches."""
@@ -57,9 +58,13 @@ class QdrantDB(AbstractVectorDB):
         for point in points:
             payload = point.get("payload", {})
             if namespace:
-                payload["namespace"] = namespace
+                payload["paper_id"] = namespace
             if embed_model:
                 payload["embed_model"] = embed_model
+            
+            if self._payload_keys is not None:
+                self._payload_keys.update(payload.keys())
+
             qdrant_points.append(
                 models.PointStruct(
                     id=point["id"],
@@ -85,7 +90,7 @@ class QdrantDB(AbstractVectorDB):
         """Perform a similarity search on the collection."""
         must_conditions = []
         if namespace:
-            must_conditions.append(models.FieldCondition(key="namespace", match=models.MatchValue(value=namespace)))
+            must_conditions.append(models.FieldCondition(key="paper_id", match=models.MatchValue(value=namespace)))
         
         if filter:
             for key, value in filter.items():
@@ -107,7 +112,7 @@ class QdrantDB(AbstractVectorDB):
         if not namespace:
             return []
             
-        must_conditions = [models.FieldCondition(key="namespace", match=models.MatchValue(value=namespace))]
+        must_conditions = [models.FieldCondition(key="paper_id", match=models.MatchValue(value=namespace))]
         if filter:
             for key, value in filter.items():
                 must_conditions.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
@@ -123,16 +128,10 @@ class QdrantDB(AbstractVectorDB):
         )
         return [p.payload for p in points if p.payload is not None]
 
-    def get_embedding_model(self, namespace: str) -> Optional[str]:
-        """Get the name of the embedding model used for a given namespace."""
-        if not namespace:
-            return None
-        
+    def get_embedding_model(self) -> Optional[str]:
+        """Get the name of the embedding model used for the database."""
         points, _ = self.client.scroll(
             collection_name=self.collection,
-            scroll_filter=models.Filter(
-                must=[models.FieldCondition(key="namespace", match=models.MatchValue(value=namespace))]
-            ),
             limit=1,
             with_payload=True,
             with_vectors=False
@@ -142,3 +141,22 @@ class QdrantDB(AbstractVectorDB):
             return points[0].payload.get("embed_model")
         
         return None
+
+    def get_payload_keys(self) -> set[str]:
+        """Get the set of all available payload keys by sampling a few records."""
+        if self._payload_keys is not None:
+            return self._payload_keys
+
+        points, _ = self.client.scroll(
+            collection_name=self.collection,
+            limit=100,
+            with_payload=True,
+            with_vectors=False
+        )
+        keys = set()
+        for point in points:
+            if point.payload:
+                keys.update(point.payload.keys())
+        
+        self._payload_keys = keys
+        return self._payload_keys

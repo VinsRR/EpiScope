@@ -16,7 +16,7 @@ from episcope.rag.postprocessing.context_extractor import ContextualSnippetRetri
 from episcope.rag.postprocessing.reranker import ResultRanker
 from episcope.rag.retrieval.keyword import KeywordRetriever
 from episcope.rag.retrieval.semantic import SemanticRetriever
-from episcope.rag.vectordb.file import FileDB
+from episcope.vectordb.file import FileDB
 from episcope.utils.data_blueprints import PaperMetadata, StructuredSection
 from episcope.parse_configs import PipelineConfig
 from episcope.utils.processing_utils import QueryGenerator, TextProcessor
@@ -51,7 +51,7 @@ class PipelineProcessor(BatchRAGPipeline):
         self.text_processor = TextProcessor()
 
         # Retrievers
-        self.semantic_retriever = SemanticRetriever(embedder, self.vector_db)
+        self.semantic_retriever = SemanticRetriever(self.vector_db)
         self.keyword_retriever = KeywordRetriever(self.vector_db)
         self.context_retriever = ContextualSnippetRetriever(self.vector_db, self.text_processor)
 

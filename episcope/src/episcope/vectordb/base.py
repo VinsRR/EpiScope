@@ -29,6 +29,11 @@ class AbstractVectorDB(ABC):
         pass
 
     @abstractmethod
-    def get_embedding_model(self, namespace: str) -> Optional[str]:
-        """Get the name of the embedding model used for a given namespace."""
+    def get_payload_keys(self) -> set[str]:
+        """Get the set of all available payload keys."""
+        pass
+
+    @abstractmethod
+    def get_embedding_model(self) -> Optional[str]:
+        """Get the name of the embedding model used for the database."""
         pass

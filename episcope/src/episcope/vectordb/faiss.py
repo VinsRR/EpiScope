@@ -1,6 +1,3 @@
-"""
-A file-based vector database using FAISS.
-"""
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -16,35 +13,58 @@ class FaissDB(AbstractVectorDB):
     def __init__(self, index_dir: str):
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        self._embeddings: Dict[str, np.ndarray] = {}
-        self._metadata: Dict[str, List[Dict[str, Any]]] = {}
-        self._faiss_indices: Dict[str, faiss.Index] = {}
-        self._models: Dict[str, str] = {}
-        self._load_existing_indices()
+        self._embeddings: np.ndarray = np.array([])
+        self._metadata: List[Dict[str, Any]] = []
+        self._faiss_index: Optional[faiss.Index] = None
+        self._model: Optional[str] = None
+        self._payload_keys: set[str] = set()
+        self._loaded = False
+        self._load()
 
-    def _load_existing_indices(self):
-        for ns_dir in self.index_dir.iterdir():
-            if ns_dir.is_dir():
-                namespace = ns_dir.name
-                self.load(namespace)
+    def _load(self):
+        try:
+            if (self.index_dir / "metadata.json").exists():
+                with open(self.index_dir / "metadata.json", "r", encoding="utf-8") as f:
+                    self._metadata = json.load(f)
+            
+            if (self.index_dir / "embeddings.npy").exists():
+                self._embeddings = np.load(self.index_dir / "embeddings.npy")
+
+            if (self.index_dir / "index.faiss").exists():
+                self._faiss_index = faiss.read_index(str(self.index_dir / "index.faiss"))
+
+            if (self.index_dir / "config.json").exists():
+                with open(self.index_dir / "config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    self._model = config.get("embed_model")
+            
+            if (self.index_dir / "payload_keys.json").exists():
+                with open(self.index_dir / "payload_keys.json", "r", encoding="utf-8") as f:
+                    self._payload_keys = set(json.load(f))
+                self._loaded = True
+        except Exception:
+            # Silently fail if loading fails, will start with an empty DB
+            pass
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
-        ns = namespace or "default"
-        
         if embed_model:
-            self._models[ns] = embed_model
+            self._model = embed_model
 
         points_list = list(points)
         if not points_list:
             if embed_model:
-                self.save(ns)
+                self.save()
             return
 
-        if ns not in self._metadata:
-            self.load(ns)
+        if not self._loaded:  # if this is the first instantiation create the payload keys
+            for p in points_list:
+                payload = p.setdefault("payload", {})
+                if namespace:
+                    payload["paper_id"] = namespace
+                self._payload_keys.update(payload.keys())
 
-        existing_meta = self._metadata.setdefault(ns, [])
-        existing_embeds_list = self._embeddings.get(ns, np.array([])).tolist()
+        existing_meta = self._metadata
+        existing_embeds_list = self._embeddings.tolist() if self._embeddings.size > 0 else []
 
         id_to_index = {meta.get("id"): i for i, meta in enumerate(existing_meta)}
 
@@ -60,12 +80,14 @@ class FaissDB(AbstractVectorDB):
 
         if existing_embeds_list:
             all_embeddings = np.array(existing_embeds_list, dtype="float32")
-            self._embeddings[ns] = all_embeddings
-            index = faiss.IndexFlatIP(all_embeddings.shape[1])
-            index.add(all_embeddings)
-            self._faiss_indices[ns] = index
+            if all_embeddings.shape[0] > 0:
+                self._embeddings = all_embeddings
+                self._metadata = existing_meta
+                index = faiss.IndexFlatIP(all_embeddings.shape[1])
+                index.add(all_embeddings)
+                self._faiss_index = index
         
-        self.save(ns)
+        self.save()
 
     def search(
         self,
@@ -74,28 +96,29 @@ class FaissDB(AbstractVectorDB):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
-        ns = namespace or "default"
-        if ns not in self._faiss_indices:
-            if not self.load(ns):
-                return []
+        if self._faiss_index is None or self._faiss_index.ntotal == 0:
+            return []
+
+        combined_filter = dict(filter or {})
+        if namespace:
+            combined_filter["paper_id"] = namespace
 
         q_emb = np.array(query_vector, dtype="float32").reshape(1, -1)
-        index = self._faiss_indices[ns]
-
+        
         search_k = top_k
-        if filter:
-            search_k = min(index.ntotal, max(top_k * 5, 20))
+        if combined_filter:
+            search_k = min(self._faiss_index.ntotal, max(top_k * 5, 100))
 
-        distances, indices = index.search(q_emb, search_k)
+        distances, indices = self._faiss_index.search(q_emb, search_k)
         
         results = []
         for dist, idx in zip(distances[0], indices[0]):
-            if idx < 0 or idx >= len(self._metadata[ns]):
+            if idx < 0 or idx >= len(self._metadata):
                 continue
             
-            meta = self._metadata[ns][idx]
+            meta = self._metadata[idx]
 
-            if filter and not all(meta.get(key) == value for key, value in filter.items()):
+            if combined_filter and not all(meta.get(key) == value for key, value in combined_filter.items()):
                 continue
             
             results.append({**meta, "score": float(dist)})
@@ -105,63 +128,40 @@ class FaissDB(AbstractVectorDB):
                 
         return results
 
-    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(self, namespace: str, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
-        ns = namespace or "default"
-        if ns not in self._metadata:
-            if not self.load(ns):
-                return []
+        combined_filter = dict(filter or {})
+        combined_filter["paper_id"] = namespace
         
-        points = self._metadata.get(ns, [])
+        return [
+            point for point in self._metadata
+            if all(point.get(key) == value for key, value in combined_filter.items())
+        ]
 
-        if filter:
-            return [
-                point for point in points
-                if all(point.get(key) == value for key, value in filter.items())
-            ]
-            
-        return points
+    def get_payload_keys(self) -> set[str]:
+        """Get the set of all available payload keys."""
+        return self._payload_keys
 
-    def get_embedding_model(self, namespace: str) -> Optional[str]:
-        """Get the name of the embedding model used for a given namespace."""
-        if namespace not in self._models:
-            self.load(namespace)
-        return self._models.get(namespace)
+    def get_embedding_model(self) -> Optional[str]:
+        """Get the name of the embedding model used for the database."""
+        return self._model
 
-    def save(self, namespace: str) -> None:
-        ns_dir = self.index_dir / namespace
-        ns_dir.mkdir(parents=True, exist_ok=True)
+    def save(self) -> None:
+        self.index_dir.mkdir(parents=True, exist_ok=True)
         
-        if namespace in self._metadata:
-            with open(ns_dir / "metadata.json", "w", encoding="utf-8") as f:
-                json.dump(self._metadata[namespace], f, indent=2)
+        with open(self.index_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(self._metadata, f, indent=2)
         
-        if namespace in self._faiss_indices:
-            index_path = str(ns_dir / "index.faiss")
-            faiss.write_index(self._faiss_indices[namespace], index_path)
+        if self._embeddings.size > 0:
+            np.save(self.index_dir / "embeddings.npy", self._embeddings)
 
-        if namespace in self._models:
-            with open(ns_dir / "config.json", "w", encoding="utf-8") as f:
-                json.dump({"embed_model": self._models[namespace]}, f, indent=2)
+        if self._faiss_index is not None:
+            index_path = str(self.index_dir / "index.faiss")
+            faiss.write_index(self._faiss_index, index_path)
 
-    def load(self, namespace: str) -> bool:
-        ns_dir = self.index_dir / namespace
-        if not ns_dir.exists():
-            return False
-            
-        try:
-            if (ns_dir / "metadata.json").exists():
-                with open(ns_dir / "metadata.json", "r", encoding="utf-8") as f:
-                    self._metadata[namespace] = json.load(f)
-            
-            if (ns_dir / "index.faiss").exists():
-                self._faiss_indices[namespace] = faiss.read_index(str(ns_dir / "index.faiss"))
-
-            if (ns_dir / "config.json").exists():
-                with open(ns_dir / "config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                    self._models[namespace] = config.get("embed_model")
-            
-            return True
-        except Exception:
-            return False
+        if self._model:
+            with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
+                json.dump({"embed_model": self._model}, f, indent=2)
+        
+        with open(self.index_dir / "payload_keys.json", "w", encoding="utf-8") as f:
+            json.dump(list(self._payload_keys), f, indent=2)

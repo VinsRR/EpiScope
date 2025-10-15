@@ -9,7 +9,7 @@ import ollama
 from sklearn.metrics.pairwise import cosine_similarity
 
 from episcope.rag.embeddings import SimplifiedEmbedder
-from episcope.rag.vectordb.base import AbstractVectorDB
+from episcope.vectordb.base import AbstractVectorDB
 from episcope.utils.data_blueprints import (
     ClassificationOutput,
     ClassificationResult,
