@@ -36,10 +36,6 @@ class FaissDB(AbstractVectorDB):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.save()
 
-    def __del__(self):
-        # Fallback save mechanism. Note: __del__ is not guaranteed to be called.
-        self.save()
-
     def _load(self):
         try:
             if (self.index_dir / "metadata.json").exists():
