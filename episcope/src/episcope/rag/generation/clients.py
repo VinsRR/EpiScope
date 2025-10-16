@@ -8,14 +8,17 @@ components to be written without being tied to a specific LLM provider.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
-from dataclasses import dataclass
+import os
 import json
+from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
+from dataclasses import dataclass, field
 
-import requests  # only used by the Ollama client; swap as needed
+import requests
+from openai import OpenAI
+import google.generativeai as genai
 
 
-# ---------- Provider-agnostic interface ----------
+# Provider-agnostic interface 
 
 class LLMClient(Protocol):
     """Minimal interface to support multiple LLM providers."""
@@ -31,7 +34,7 @@ class LLMClient(Protocol):
         """Return the assistant text for a chat-style prompt."""
 
 
-# ---------- Ollama implementation ----------
+# Provider-specific implementations
 
 @dataclass
 class OllamaClient(LLMClient):
@@ -92,18 +95,29 @@ class OllamaClient(LLMClient):
             return "".join(parts)
 
 
-# ---------- Optional: placeholder for other providers ----------
+# Proprietary 
+
 
 @dataclass
 class OpenAIClient(LLMClient):
     """
-    Example stub to show how you'd extend to other providers.
-    Replace with real implementation using openai>=1.0 SDK, etc.
-    """
-    api_key: str
-    base_url: Optional[str] = None  # e.g., Azure/OpenAI-compatible endpoints
+    Client for OpenAI API compatible endpoints (including Azure).
 
-    def chat(  # type: ignore[override]
+    - Reads `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` from environment.
+    - `api_key` and `base_url` can be passed explicitly to override env vars.
+    """
+    api_key: Optional[str] = field(default=None, repr=False)
+    base_url: Optional[str] = field(default=None)
+    _client: Any = field(init=False, repr=False)
+
+    def __post_init__(self):
+        key = self.api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError("`api_key` not provided and `OPENAI_API_KEY` env var not set.")
+        url = self.base_url or os.environ.get("OPENAI_BASE_URL")
+        self._client = OpenAI(api_key=key, base_url=url)
+
+    def chat(
         self,
         messages: Sequence[Mapping[str, str]],
         *,
@@ -112,24 +126,59 @@ class OpenAIClient(LLMClient):
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> str:
-        raise NotImplementedError("Provide an OpenAI/Azure implementation if needed.")
+        """Call the OpenAI Chat Completions endpoint."""
+        response = self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+
+
 
 @dataclass
 class GeminiClient(LLMClient):
     """
-    Example stub to show how you'd extend to other providers.
-    Replace with real implementation using google.generativeai>=0.3.0 SDK, etc.
-    """
-    api_key: str
-    base_url: Optional[str] = None  # e.g., Gemini-compatible endpoints
+    Client for Google's Gemini models via the google-generativeai SDK.
 
-    def chat(  # type: ignore[override]
+    - Reads `GOOGLE_API_KEY` from the environment.
+    - `api_key` can be passed explicitly to override env var.
+    """
+    api_key: Optional[str] = field(default=None, repr=False)
+    _model: Any = field(init=False, repr=False)
+
+    def __post_init__(self):
+        key = self.api_key or os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            raise ValueError("`api_key` not provided and `GOOGLE_API_KEY` env var not set.")
+        genai.configure(api_key=key)
+
+    def chat(
         self,
         messages: Sequence[Mapping[str, str]],
         *,
-        model: str,
+        model: str = "gemini-1.5-pro",
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> str:
-        raise NotImplementedError("Provide a Gemini implementation if needed.")
+        """Call the Gemini API."""
+        self._model = genai.GenerativeModel(model)
+        # The Gemini API expects a list of content blobs, not a role-based chat history.
+        # We can simulate this by concatenating the messages.
+        full_prompt = "\n".join(
+            f"{m['role']}: {m['content']}" for m in messages
+        )
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+        response = self._model.generate_content(
+            full_prompt,
+            generation_config=generation_config,
+            **kwargs,
+        )
+        return response.text

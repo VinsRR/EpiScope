@@ -25,7 +25,7 @@ from episcope.rag.interfaces import AbstractGenerator
 from episcope.rag.provenance import Provenance, Evidence
 from .clients import LLMClient, OllamaClient
 
-# ---------- Utility: safe context access ----------
+# Utility: safe context access 
 
 def _get(ctx: Any, key: str, default: Any = None) -> Any:
     """Support both dict-like and attr-like contexts."""
@@ -34,7 +34,6 @@ def _get(ctx: Any, key: str, default: Any = None) -> Any:
     return getattr(ctx, key, default)
 
 
-# ---------- Prompt construction ----------
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a careful scientific assistant. Using ONLY the provided contexts, "
@@ -73,7 +72,6 @@ def build_messages_from_contexts(
     ]
 
 
-# ---------- The LLM-backed generator ----------
 
 class LLMGenerator(AbstractGenerator):
     """
