@@ -31,6 +31,12 @@ class AcademicDB(ABC):
         """Retrieve a single extraction record."""
         pass
 
+    def get_paper_metadata(
+            self, paper_id: str, strategy_name: str):
+        """Retrieve metadata for a given paper ID."""
+        return self.retrieve(paper_id, "metadata", strategy_name)
+
+
     @abstractmethod
     def delete_by_strategy(self, strategy_name: str) -> int:
         """Delete all records associated with a given strategy."""

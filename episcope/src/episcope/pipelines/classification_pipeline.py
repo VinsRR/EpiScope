@@ -25,20 +25,23 @@ class PaperClassifier(AbstractRAG):
 
     def __init__(self, retriever: AbstractRetriever, generator: Generator,
                  config: Optional[PaperClassifierConfig] = None,
-                 academic_db: Optional[AcademicDB] = None):
+                 academic_db: Optional[AcademicDB] = None,
+                 strategy_name: Optional[str] = None): # IS THERE A BETTER APPROCH THAN PASSING ACADEMIC DB AND (ESPECIALLY) STRATEGY NAME?
         super().__init__(retriever, generator)
         self.config = config or PaperClassifierConfig()
         self.academic_db = academic_db
         self.template_paragraphs = self.config.template_paragraphs
         self.classification_mapping = self.config.classification_mapping
         self.category_labels = self.config.category_labels
+        #
+        self.strategy_name = strategy_name
 
     def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ClassificationResult:
         """
         Run the classification pipeline for a single paper.
         """
         if self.academic_db:
-            metadata = self.academic_db.get_paper_metadata(paper_id)
+            metadata = self.academic_db.get_paper_metadata(paper_id, self.strategy_name)
         elif not metadata:
             raise ValueError("metadata must be provided when academic_db is not available.")
 

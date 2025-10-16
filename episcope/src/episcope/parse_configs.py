@@ -72,6 +72,7 @@ class PaperClassifierConfig:
     """Configuration for the paper classifier."""
     model_name: str = "qwen2.5vl:3b" #"deepseek-r1:7b"
     similarity_threshold: float = 0.75
+    top_k: int = 10
     embedding_model: str = "jinaai/jina-embeddings-v3"
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "literature_review": [

@@ -84,6 +84,9 @@ class InMemoryAcademicDB(AcademicDB):
 
         logger.debug(f"No document found in-memory for key: {key}")
         return None
+    
+
+
 
     def delete_by_strategy(self, strategy_name: str) -> int:
         keys_to_delete = [k for k in self._store if k[2] == strategy_name]
