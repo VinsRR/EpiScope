@@ -45,8 +45,9 @@ class PipelineProcessor(BatchRAGPipeline):
         """Initialize all pipeline components."""
         from episcope.pipelines.classification_pipeline import PaperClassifier
 
-        embedder = SimplifiedEmbedder(embed_model=self.config.embedding_model)
+        
         self.vector_db = FileDB(index_dir=str(self.index_dir))
+        embedder = SimplifiedEmbedder(embed_model=self.vector_db._model or self.config.embedding_model)
         self.indexer = Indexer(db=self.vector_db, embed_model=self.config.embedding_model)
         self.text_processor = TextProcessor()
 

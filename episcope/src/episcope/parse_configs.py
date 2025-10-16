@@ -64,9 +64,51 @@ class PipelineConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
 
 
+from episcope.utils.data_blueprints import PaperType
+from typing import Dict, List
+
 @dataclass
 class PaperClassifierConfig:
     """Configuration for the paper classifier."""
     model_name: str = "qwen2.5vl:3b" #"deepseek-r1:7b"
     similarity_threshold: float = 0.75
     embedding_model: str = "jinaai/jina-embeddings-v3"
+    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
+        "literature_review": [
+            "Several studies have examined the relationship between X and Y. Smith et al. (2020) found significant associations, while Jones et al. (2021) reported mixed results. A systematic review by Brown et al. (2019) identified 45 relevant studies.",
+            "We conducted a systematic literature search across PubMed, Embase, and Web of Science databases. Studies were included if they met inclusion criteria. Two reviewers independently screened titles and abstracts.",
+        ],
+        "data_analysis": [
+            "We analyzed data from the National Health Survey (n=15,432 participants). Data collection occurred between January 2020 and December 2022. Statistical analyses were performed using R version 4.2.",
+            "The dataset contained 23,891 observations across 15 variables. Missing data patterns were examined using multiple imputation. Primary outcomes were measured using validated instruments.",
+        ],
+    })
+    classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: {
+        "A": PaperType.LITERATURE_REVIEW,
+        "B": PaperType.DATA_ANALYSIS
+    })
+    category_labels: Dict[str, str] = field(default_factory=lambda: {
+        "A": "Literature Review",
+        "B": "Data Analysis"
+    })
+    prompt_template: str = """You are an expert academic classifier. Your task is to determine the primary type of a research paper.
+**Categories:**
+{categories}
+
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
+
+**Relevant Extracts:**
+{chunks_info}
+
+**Instructions:**
+1. Analyze the evidence to determine the paper's main contribution.
+2. Select a single letter that best represents the paper's primary classification.
+3. Return a single JSON object adhering to the schema. Do not add extra text.
+
+**Schema:**
+{schema}
+"""
+

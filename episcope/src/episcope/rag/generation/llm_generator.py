@@ -134,15 +134,19 @@ class LLMGenerator(AbstractGenerator):
         *,
         question: Optional[str] = None,
         extra_messages: Optional[Sequence[Mapping[str, str]]] = None,
+        message_builder: Optional[Callable] = None,
         **kwargs: Any,
     ) -> Provenance:
         # 1) Build messages
-        messages = build_messages_from_contexts(
-            contexts,
-            user_question=question,
-            system_prompt=self.system_prompt,
-            joiner=self.joiner,
-        )
+        if message_builder:
+            messages = message_builder(contexts=contexts, question=question, **kwargs)
+        else:
+            messages = build_messages_from_contexts(
+                contexts,
+                user_question=question,
+                system_prompt=self.system_prompt,
+                joiner=self.joiner,
+            )
         if extra_messages:
             messages.extend(extra_messages)
 
@@ -153,6 +157,7 @@ class LLMGenerator(AbstractGenerator):
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            **kwargs,
         )
         latency_s = time.time() - started  # kept local; attach if you log metrics
 

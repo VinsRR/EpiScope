@@ -1,15 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-class BatchRAGPipeline(ABC):
-    """Abstract base class for batch RAG pipelines."""
+from episcope.rag.generation.base import Generator
+from episcope.rag.interfaces import AbstractRetriever
+
+
+class AbstractRAG(ABC):
+    """Abstract base class for a RAG pipeline."""
+
+    def __init__(self, retriever: AbstractRetriever, generator: Generator):
+        self.retriever = retriever
+        self.generator = generator
 
     @abstractmethod
-    def process_item(self, item: Any) -> Any:
-        """Process a single item in the batch."""
-        pass
-
-    @abstractmethod
-    def run(self, items: List[Any]) -> List[Any]:
-        """Run the pipeline on a batch of items."""
+    def run(self, **kwargs) -> Any:
+        """Run the RAG pipeline."""
         pass

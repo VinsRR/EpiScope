@@ -69,6 +69,8 @@ class OllamaClient(LLMClient):
         }
         if max_tokens is not None:
             payload["options"]["num_predict"] = max_tokens
+        if kwargs.get("format") == "json":
+            payload["format"] = "json"
 
         # POST and handle (possibly streaming) response
         with requests.post(url, json=payload, timeout=self.timeout_s, stream=self.stream) as r:
