@@ -6,11 +6,10 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
 from episcope.utils.extraction_blueprints import DataSourceItem, ExtractionResult, DataSourceSchema
+from episcope.rag.generation.clients import LLMClient, OllamaClient
 
 
 logger = logging.getLogger(__name__)
-
-import ollama
 
 # Helper: locate JSON in a longer model response
 def _extract_json_blob(text: str) -> Optional[str]:
@@ -40,26 +39,16 @@ from episcope.rag.generation.base import Generator
 class LLMExtractor(Generator):
     """Robust LLM wrapper for extracting structured data from chunk text.
 
-    - Accepts an injectable `chat_fn` that performs the chat call:
-        chat_fn(model_name: str, messages: list, options: dict) -> {'content': '<str>'}
+    - Accepts an injectable `LLMClient` that performs the chat call.
       This keeps the extractor testable.
     - Validates the model output against DataSourceSchema and returns ExtractionResult.
     """
 
-    def __init__(self, model_name: str = "deepseek-r1:7b", chat_fn: Optional[Callable] = None, enable_eval: bool = False):
+    def __init__(self, model_name: str = "deepseek-r1:7b", client: Optional[LLMClient] = None, enable_eval: bool = False):
         self.model_name = model_name
-        self.chat_fn = chat_fn or self._default_ollama_chat
+        self.client = client or OllamaClient()
         # optional external evaluator plugin (like codex) can be injected later
         self.enable_eval = enable_eval
-
-    def _default_ollama_chat(self, model_name: str, messages: List[Dict], options: Dict):
-        try:
-            c = ollama.Client()
-            r = c.chat(model=model_name, messages=messages, stream=False, options=options)
-            # normalize return
-            return {"content": getattr(r, "message", {}).get("content", "") if hasattr(r, 'message') else getattr(r, 'content', '')}
-        except Exception as e:
-            raise RuntimeError(f"OLLAMA client not available or failed: {e}")
 
     def _prepare_prompt(self, metadata, chunks_text: str, query: str, paper_type: str) -> str:
         # Single canonical prompt with substitutions; keep it concise
@@ -106,8 +95,7 @@ class LLMExtractor(Generator):
         messages = [{"role": "user", "content": prompt}]
         print(messages)
         try:
-            resp = self.chat_fn(self.model_name, messages, options={"temperature": 0})
-            raw = resp.get("content", "")
+            raw = self.client.chat(messages, model=self.model_name, temperature=0)
             # try to directly parse as JSON
             print(raw)
             parsed = None
@@ -142,4 +130,3 @@ class LLMExtractor(Generator):
         except Exception as e:
             logger.exception(f"LLMExtractor failed: {e}")
             return ExtractionResult(data_sources_description="EXTRACTION_ERROR", data_sources=[]), None
-

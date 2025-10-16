@@ -6,9 +6,26 @@ These tests validate helper functions and core extraction logic in
 are replaced with dummy functions to avoid network dependencies.
 """
 import unittest
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence, Mapping, Optional
 
 from episcope.rag.generation.llm_extractor import LLMExtractor, _extract_json_blob
+from episcope.rag.generation.clients import LLMClient
+
+
+class MockLLMClient(LLMClient):
+    def __init__(self, response_text: str):
+        self.response_text = response_text
+
+    def chat(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        *,
+        model: str,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
+        return self.response_text
 
 
 class TestLLMExtractor(unittest.TestCase):
@@ -21,17 +38,15 @@ class TestLLMExtractor(unittest.TestCase):
 
     def test_extract_data_sources_parses_valid_json(self) -> None:
         """extract_data_sources should parse JSON and construct an ExtractionResult."""
-        # Dummy chat_fn that returns a valid JSON string
-        def dummy_chat_fn(model_name: str, messages: List[Dict], options: Dict) -> Dict[str, str]:
-            return {
-                "content": (
-                    '{"data_sources_description": "A data source description",'
-                    ' "data_sources": [{"source_name": "Dataset1", "url": "N/A", "explanation": "Used for analysis", "section_found": "Methods"}],'
-                    ' "references": []}'
-                )
-            }
+        # Mock client that returns a valid JSON string
+        mock_response = (
+            '{"data_sources_description": "A data source description",'
+            ' "data_sources": [{"source_name": "Dataset1", "url": "N/A", "explanation": "Used for analysis", "section_found": "Methods"}],'
+            ' "references": []}'
+        )
+        mock_client = MockLLMClient(response_text=mock_response)
 
-        extractor = LLMExtractor(chat_fn=dummy_chat_fn)
+        extractor = LLMExtractor(client=mock_client)
         # Create minimal metadata object with required attributes
         class Meta:
             title = "Test Title"

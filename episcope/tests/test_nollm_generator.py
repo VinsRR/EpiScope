@@ -6,17 +6,17 @@ context.  The generator does not invoke any external LLMs.
 """
 
 import unittest
-from episcope.rag.generation.simple_generator import SimpleGenerator
+from episcope.rag.generation.nollm_generator import NoLLMGenerator
 
 
-class TestSimpleGenerator(unittest.TestCase):
+class TestNoLLMGenerator(unittest.TestCase):
     def test_generate_concatenates_contexts(self) -> None:
-        generator = SimpleGenerator()
+        generator = NoLLMGenerator()
         contexts = [
-            {"content": "First snippet.", "paper_id": "A", "section_type": "Intro"},
-            {"content": "Second snippet.", "paper_id": "B", "section_type": "Methods"},
+            type('obj', (object,),{"text": "First snippet.", "paper_id": "A", "section_type": "Intro"}),
+            type('obj', (object,),{"text": "Second snippet.", "paper_id": "B", "section_type": "Methods"})
         ]
-        prov = generator.generate("What is the question?", contexts)
+        prov = generator.generate(contexts)
         # The answer should be concatenated with a blank line
         self.assertEqual(prov.answer, "First snippet.\n\nSecond snippet.")
         # There should be two evidences
