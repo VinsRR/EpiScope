@@ -51,6 +51,8 @@ class AbstractDocumentLoader(abc.ABC):
     to support batch loading; the default implementation iterates
     over files in the directory and calls :meth:`load` on each.
     """
+    def __init__(self) -> None:
+        super().__init__()
 
     @abc.abstractmethod
     def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata]:
@@ -65,6 +67,7 @@ class AbstractDocumentLoader(abc.ABC):
             textual content and ``metadata`` is a minimal
             :class:`PaperMetadata` instance (e.g., title and abstract).
         """
+
 
     def load_with_references(
         self, file_path: Union[str, Path]
@@ -108,7 +111,10 @@ class AbstractDocumentLoader(abc.ABC):
             if child.is_file() and self._is_supported(child):
                 # try:
                     sections, meta = self.load(child)
-                    results[str(child)] = (sections, meta)
+                    results[
+                        # str(child)
+                        child.stem
+                        ] = (sections, meta)
                 # except Exception as exc:
                     # logger.warning(f"Failed to load {child}: {exc}")
         return results
@@ -129,16 +135,14 @@ class AbstractDocumentLoader(abc.ABC):
         This function uses the loader's ``load_with_references`` method to obtain
         sections, metadata and references from a document. The results
         are inserted into the provided :class:`AcademicDB` under
-        the specified ``strategy_name``.  Optionally, the same data are
-        written to disk in a hierarchical directory structure for
-        debugging.
+        the specified ``strategy_name``. If and `AcademicDB` is not
+        provided, the extraction is performed but not persisted.
 
         Args:
             file_path: Location of the document to process.
             strategy_name: Namespace under which to store the results.
             db: Instance of :class:`AcademicDB` to persist data.
-            output_dir: Optional base directory for writing local JSON
-                files.  If omitted or ``None`` local writing is skipped.
+            output_dir:. If omitted or ``None`` local writing is skipped.
 
         Raises:
             FileNotFoundError: If the document file does not exist.
@@ -193,6 +197,7 @@ class AbstractDocumentLoader(abc.ABC):
                     logger.error(f"Failed to process {child}: {exc}")
 
 
+
 class UnstructuredDocumentLoader(AbstractDocumentLoader):
     """Document loader that uses the Unstructured library when available.
 
@@ -204,6 +209,8 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
     (e.g., ``.txt`` or ``.md``) the loader simply reads the file
     contents and wraps it in a single :class:`StructuredSection`.
     """
+    def __init__(self) -> None:
+        super().__init__()
 
     def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata]:  # noqa: D401
         path = Path(file_path)
@@ -257,7 +264,11 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             if isinstance(el, (Title, Header)):
                 # Flush previous section
                 if current_content:
-                    sections.append(StructuredSection(title=current_title, content="\n".join(current_content)))
+                    sections.append(
+                        StructuredSection(
+                        title=current_title, 
+                        content="\n".join(current_content)
+                        ))  
                     current_content = []
                 current_title = el.text.strip()
             elif isinstance(el, TextElement):
@@ -266,7 +277,11 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
                     current_content.append(text)
         # Flush trailing content
         if current_content:
-            sections.append(StructuredSection(title=current_title, content="\n".join(current_content)))
+            sections.append(
+                StructuredSection(
+                    title=current_title, 
+                    content="\n".join(current_content)
+                    ))
         # Provide minimal metadata (title unknown for now)
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
