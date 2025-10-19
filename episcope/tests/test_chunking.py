@@ -4,7 +4,7 @@ Tests for the chunking utilities.
 import unittest
 
 from episcope.utils.chunking import paragraph_chunking, split_into_sentences
-from episcope.utils.data_blueprints import StructuredSection
+from episcope.schemas import StructuredSection
 
 class TestChunking(unittest.TestCase):
     """Test cases for chunking utilities."""

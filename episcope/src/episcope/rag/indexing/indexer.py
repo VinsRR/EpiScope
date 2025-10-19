@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from episcope.rag.embeddings import SimplifiedEmbedder
 from episcope.vectordb.base import AbstractVectorDB
 from episcope.utils.chunker import chunk_paper
-from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
+from episcope.schemas import StructuredSection, PaperMetadata
 import numpy as np
 
 class Indexer:

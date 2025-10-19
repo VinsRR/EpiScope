@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Sequence
 
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.vectordb.base import AbstractVectorDB
-from episcope.utils.types import SearchResult
+from episcope.schemas import SearchResult
 from episcope.utils.processing_utils import TextProcessor
 
 logger = logging.getLogger(__name__)

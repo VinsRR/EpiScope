@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from episcope.utils.data_blueprints import StructuredSection
+from episcope.schemas import StructuredSection
 
 
 def paragraph_chunking(section: StructuredSection, min_chunk_size: int) -> List[Dict[str, Any]]:

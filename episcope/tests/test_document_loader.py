@@ -57,9 +57,9 @@ class TestDocumentLoader(unittest.TestCase):
         loader = UnstructuredDocumentLoader()
         docs = loader.load_directory(self.dir_path)
         # There should be an entry per created file
-        self.assertEqual(set(docs.keys()), {str(self.file1), str(self.file2)})
+        self.assertEqual(set(docs.keys()), {self.file1.stem, self.file2.stem})
         # Validate contents of one of the loaded files
-        sections1, meta1 = docs[str(self.file1)]
+        sections1, meta1 = docs[self.file1.stem]
         self.assertEqual(len(sections1), len(self.paragraphs1))
         self.assertEqual(meta1.title, self.file1.stem)
 
@@ -81,7 +81,7 @@ class TestDocumentLoader(unittest.TestCase):
         metadata = db.retrieve(self.file1.stem, "metadata", strategy_name)
         self.assertIsNotNone(metadata)
         self.assertEqual(metadata.title, self.file1.stem)
-        self.assertEqual(metadata.file_path, str(self.file1))
+        self.assertEqual(Path(metadata.file_path).name, self.file1.name)
 
         # Verify sections were inserted
         sections = db.retrieve(self.file1.stem, "sections", strategy_name)

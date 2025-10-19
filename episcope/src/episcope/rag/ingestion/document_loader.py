@@ -34,7 +34,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from episcope.utils.data_blueprints import StructuredSection, PaperMetadata, Reference
+from episcope.schemas import StructuredSection, PaperMetadata, Reference
 from episcope.db.academic_db import AcademicDB
 
 logger = logging.getLogger(__name__)

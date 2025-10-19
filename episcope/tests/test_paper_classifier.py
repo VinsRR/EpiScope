@@ -12,6 +12,7 @@ deduplication and ranking of chunks.
 # out the SentenceTransformer class: https://docs.python.org/3/library/unittest.mock.html
 
 import unittest
+from unittest.mock import MagicMock
 
 # Stub external modules that are unavailable in the test environment.
 import sys
@@ -47,6 +48,7 @@ sys.modules.setdefault(
     ),
 )
 
+from episcope.vectordb.base import AbstractVectorDB
 from episcope.pipelines.classification_pipeline import PaperClassifier
 from episcope.rag.embeddings import SimplifiedEmbedder
 from .configs import test_model_hf_embedding, test_model_ollama

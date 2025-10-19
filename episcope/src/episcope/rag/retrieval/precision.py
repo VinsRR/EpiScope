@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional, Sequence
 
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.utils.data_blueprints import PaperType, DataSource, ExtractionResult
+from episcope.schemas import PaperType, DataSource, ExtractionResult
 from episcope.vectordb.base import AbstractVectorDB
 from episcope.rag.embeddings import SimplifiedEmbedder
 

@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Dict, Any
-from episcope.utils.data_blueprints import StructuredSection, PaperMetadata
+from episcope.schemas import StructuredSection, PaperMetadata
 from episcope.utils.chunking import paragraph_chunking
 
 def chunk_paper(

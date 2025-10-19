@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
-from episcope.utils.types import SearchResult
+from episcope.schemas import SearchResult
 
 class Reranker(ABC):
     """Abstract base class for rerankers."""

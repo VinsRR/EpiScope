@@ -3,9 +3,9 @@ from typing import Any, Dict, Optional, Sequence
 
 from episcope.rag.embeddings import SimplifiedEmbedder
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.utils.hyde import HYDE
+from episcope.rag.retrieval.hyde import HYDE
 from episcope.vectordb.base import AbstractVectorDB
-from episcope.utils.types import SearchResult
+from episcope.schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from episcope.parse_configs import PaperClassifierConfig
 from episcope.pipelines.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.utils.data_blueprints import (
+from episcope.schemas import (
     ClassificationOutput,
     ClassificationResult,
     PaperMetadata,

@@ -146,16 +146,16 @@ class GeminiClient(LLMClient):
     """
     Client for Google's Gemini models via the google-generativeai SDK.
 
-    - Reads `GOOGLE_API_KEY` from the environment.
+    - Reads `GEMINI_API_KEY` from the environment.
     - `api_key` can be passed explicitly to override env var.
     """
     api_key: Optional[str] = field(default=None, repr=False)
     _model: Any = field(init=False, repr=False)
 
     def __post_init__(self):
-        key = self.api_key or os.environ.get("GOOGLE_API_KEY")
+        key = self.api_key or os.environ.get("GEMINI_API_KEY")
         if not key:
-            raise ValueError("`api_key` not provided and `GOOGLE_API_KEY` env var not set.")
+            raise ValueError("`api_key` not provided and `GEMINI_API_KEY` env var not set.")
         genai.configure(api_key=key)
 
     def chat(

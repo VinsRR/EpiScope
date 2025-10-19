@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
-from episcope.utils.extraction_blueprints import DataSource, ExtractionResult, DataSourceSchema, Reference
+from episcope.schemas import DataSource, ExtractionResult, DataSourceSchema, Reference, ExtractionItem
 from episcope.rag.generation.clients import LLMClient, OllamaClient
 
 
@@ -116,17 +116,29 @@ class LLMExtractor(Generator):
 
             if parsed is None:
                 logger.warning("LLMExtractor: could not parse JSON from model response; returning fallback")
-                return ExtractionResult(data_sources_description="PARSE_FAILED", data_sources=[]), None
+                return ExtractionResult(description="PARSE_FAILED", items=[]), None
 
             # validate with pydantic
             validated = DataSourceSchema(**parsed)
+            
             # convert into ExtractionResult dataclass
+            items = []
+            for ds in validated.data_sources or []:
+                items.append(
+                    ExtractionItem(
+                        item_type="data_source",
+                        name=ds.source_name,
+                        url=ds.url,
+                        explanation=ds.explanation,
+                        section_found=ds.section_found,
+                    )
+                )
+            
             er = ExtractionResult(
-                data_sources_description=validated.data_sources_description,
-                data_sources=[DataSource(**ds) for ds in validated.data_sources or []],
-                references=[Reference.from_dict(ref) for ref in validated.references or []],
+                description=validated.data_sources_description,
+                items=items,
             )
             return er, None
         except Exception as e:
             logger.exception(f"LLMExtractor failed: {e}")
-            return ExtractionResult(data_sources_description="EXTRACTION_ERROR", data_sources=[]), None
+            return ExtractionResult(description="EXTRACTION_ERROR", items=[]), None

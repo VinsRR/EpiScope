@@ -1,4 +1,4 @@
-from episcope.utils.data_blueprints import PaperType
+from episcope.schemas import PaperType
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 

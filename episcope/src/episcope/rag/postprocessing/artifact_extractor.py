@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
-from episcope.utils.types import SearchResult
+from episcope.schemas import SearchResult
 from episcope.utils.processing_utils import TextProcessor
 
 class Postprocessor(ABC):

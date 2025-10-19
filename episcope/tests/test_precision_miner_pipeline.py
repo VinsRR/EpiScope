@@ -8,8 +8,7 @@ from episcope.pipelines.precision_miner_pipeline import PrecisionMiner
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.rag.provenance import Provenance
-from episcope.utils.data_blueprints import PaperMetadata, ExtractionResult, ExtractionItem
-from episcope.utils.types import SearchResult
+from episcope.schemas import PaperMetadata, ExtractionResult, ExtractionItem, SearchResult
 
 
 class MockRetriever(AbstractRetriever):

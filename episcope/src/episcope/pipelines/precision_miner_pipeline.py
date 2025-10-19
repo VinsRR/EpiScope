@@ -7,12 +7,12 @@ from episcope.parse_configs import PrecisionMinerConfig, FindDataSourcesConfig
 from episcope.pipelines.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.utils.data_blueprints import (
+from episcope.schemas import (
     ExtractionResult,
     PaperMetadata,
     ExtractionItem,
+    ExtractionResultSchema,
 )
-from episcope.utils.extraction_blueprints import ExtractionResultSchema
 
 logger = logging.getLogger(__name__)
 

@@ -1,12 +1,7 @@
 from typing import Any, Dict, List, Optional
-from enum import Enum
 from dataclasses import asdict, dataclass, field
 
 from .serialization import Serializable, SerializableList
-
-
-
-from dataclasses import dataclass, field
 
 @dataclass
 class StructuredSection(Serializable):
@@ -59,9 +54,6 @@ class Reference(Serializable):
             url=data.get("url", "")
         )
 
-
-from dataclasses import asdict, dataclass, field
-
 @dataclass
 class PaperMetadata(Serializable):
     """Represents metadata for an academic paper."""
@@ -107,81 +99,3 @@ class ReferenceList(SerializableList):
     @classmethod
     def _item_class(cls):
         return Reference
-    
-
-
-
-
-
-# ============================================================================
-# DATA MODELS
-# ============================================================================
-
-from pydantic import BaseModel, Field 
-from dataclasses import dataclass, field
-
-# @dataclass
-# class Reference:
-#     raw_text: str
-#     is_data_source: bool = False
-    
-@dataclass
-class DataSource:
-    source_name: str
-    url: str = "N/A"
-    explanation: str = ""
-    section_found: str = ""
-
-@dataclass
-class ExtractionItem:
-    item_type: str
-    name: str
-    url: Optional[str] = None
-    explanation: Optional[str] = None
-    section_found: Optional[str] = None
-    raw_text: Optional[str] = None
-
-@dataclass
-class ExtractionResult():
-    description: str
-    items: List[ExtractionItem] = field(default_factory=list)
-
-
-
-
-@dataclass
-class ClassificationResult:
-    paper_type: 'PaperType'
-    confidence: float
-    class_probabilities: Dict[str, float] = field(default_factory=dict)
-    evidence: Dict = field(default_factory=dict)
-
-
-class PaperType(Enum):
-    LITERATURE_REVIEW = "literature_review"
-    DATA_ANALYSIS = "data_analysis" 
-    # METHODS_TOOLS = "methods_tools"
-    # CASE_STUDY = "case_study"
-    # COMMENTARY = "commentary"
-    # OTHER = "other"
-    # UNCLEAR = "unclear"
-
-
-# Pydantic schema for structured LLM output
-class ClassificationOutput(BaseModel):
-    classification: str = Field(..., description="One of: A,B")
-    reasoning: str = Field(..., description="Short 1-2 sentence explanation")
-    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
-    class_probabilities: Optional[Dict[str, float]] = None
-
-
-
-
-
-@dataclass
-class Chunk:
-    id: str
-    section_type: str
-    title: str
-    text: str
-    metadata: Dict = field(default_factory=dict)
