@@ -1,71 +1,6 @@
-GT_PAPER_TYPES = {
-    "2020_He_infectious_period": "data",
-    "2020_Lin_r0_basic_": "review",
-    "2021_Ahammed_r0": "review",
-    "2021_Zhu_infectious_period": "data",
-    "2022_Du_k": "review",
-    "2020_Xie_r0_basic_": "review",
-    "2020_Izadi_r0_basic_": "review",
-    "2020_Park_ifr": "review",
-    "2020_Rai_serial_interval": "review",
-    "2020_Yang_serial_interval": "data",
-    "2021_Alene_incubation_period": "review",
-    "2021_Ali_serial_interval": "review",
-    "2021_Davies_r0": "data",
-    "2021_Liu_and_Rocklöv_r0_basic_": "review",
-    "2022_Águila-Mejía_infectious_period": "data",
-    "2022_Garcia-Knight_infectious_period": "data",
-    "2022_Guo_k": "review",
-    "2022_Hart_latent_period": "data",
-    "2022_Heiden_and_Buchholz_serial_interval": "data",
-    "2022_Kremer_serial_interval": "data",
-    "2022_Liu_r0_basic_": "review",
-    "2022_Ryu__k": "data",
-    "2022_Wu_incubation_period": "review", # PDF WAS WRONG (only supp was available)
-    "2022_Zhao_k": "data",
-    "2023_Galmiche_incubation_period": "data",
-    "2023_Xu_incubation_period": "review",
-    "2023_Yuan_cfr": "review",
-    "2023_Zeng_serial_interval": "data",
-    "2023_Zhang_and_Nishiura__ifr": "data",
-    "2024_Ahmad__cfr": "review",
-    "2024_Li__incubation_period": "data",
-    "2024_Ward_ifr": "data"
-}
-
-SELECTED_TYPE = "review"  # for development/testing
-
-grobid_url="http://192.168.1.250:8070"
-
-from dataclasses import dataclass, field
-
-
-@dataclass
-class SearchConfig:
-    """Configuration for search strategies."""
-    use_semantic_search: bool = True
-    use_keyword_search: bool = True
-    use_context_extraction: bool = True
-    top_k_semantic: int = 20
-    top_k_keyword: int = 10
-    top_k_final: int = 30
-    context_window_chars: int = 500
-    similarity_threshold: float = 0.0
-
-@dataclass
-class PipelineConfig:
-    """Main pipeline configuration."""
-    embedding_model: str = "jinaai/jina-embeddings-v3"
-    llm_model: str = "deepseek-r1:7b" # "qwen2.5vl:3b" #
-    hyde_model: str = "tinyllama:1.1b"
-    classifier_model: str = "qwen2.5vl:3b"
-    use_hyde: bool = False
-    max_workers: int = 2
-    search: SearchConfig = field(default_factory=SearchConfig)
-
-
 from episcope.utils.data_blueprints import PaperType
-from typing import Dict, List
+from typing import Dict, List, Optional
+from dataclasses import dataclass, field
 
 @dataclass
 class PaperClassifierConfig:
@@ -113,3 +48,107 @@ Keywords: {keywords}
 {schema}
 """
 
+
+
+
+
+#########################################################################################################
+#########################################################################################################
+#########################################################################################################
+
+
+
+@dataclass
+class PrecisionMinerConfig:
+    """Base configuration for the Precision Miner. Do not use directly.
+    Instead, use one of the specialized configurations below."""
+    model_name: str = "deepseek-r1:7b"
+    top_k: int = 10
+    retrieval_templates: List[str] = field(default_factory=list)
+    section_filters: Optional[List[str]] = None
+    prompt_template: str = ""
+
+@dataclass
+class FindDataSourcesConfig(PrecisionMinerConfig):
+    """Configuration for finding data sources."""
+    retrieval_templates: List[str] = field(default_factory=lambda: [
+        "What are the primary data sources used in this study?",
+        "Describe the data collection methods and sources.",
+        "What is the population or sample for this study?",
+    ])
+    section_filters: Optional[List[str]] = field(default_factory=lambda: ["Methods", "Data", "Study Design", "Participants"])
+    prompt_template: str = """You are an expert data extractor. Your task is to extract structured information about data sources from a research paper.
+
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
+
+**Relevant Extracts:**
+{chunks_info}
+
+**Instructions:**
+1. Analyze the evidence to identify the key data sources.
+2. For each data source, provide its name, a URL if available, a brief explanation, and the section where it was found.
+3. Return a single JSON object adhering to the schema. Do not add extra text.
+
+**Schema:**
+{schema}
+"""
+
+@dataclass
+class FindSupplementaryLinksConfig(PrecisionMinerConfig):
+    """Configuration for finding supplementary links."""
+    top_k: int = 5
+    retrieval_templates: List[str] = field(default_factory=lambda: [
+        "Are there any supplementary materials or appendices?",
+        "Where can I find the supplementary data?",
+        "Is there a link to the appendix?",
+    ])
+    prompt_template: str = """You are an expert data extractor. Your task is to find links to supplementary materials from a research paper.
+
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
+
+**Relevant Extracts:**
+{chunks_info}
+
+**Instructions:**
+1. Analyze the evidence to identify links to supplementary materials, appendices, or supplementary data.
+2. For each link, provide the name of the material and the URL.
+3. Return a single JSON object adhering to the schema. Do not add extra text.
+
+**Schema:**
+{schema}
+"""
+
+@dataclass
+class IdentifyKeyReferencesConfig(PrecisionMinerConfig):
+    """Configuration for identifying key references."""
+    top_k: int = 15
+    retrieval_templates: List[str] = field(default_factory=lambda: [
+        "What are the key references in the introduction?",
+        "What are the most cited works in the literature review?",
+        "What are the foundational papers for this study?",
+    ])
+    section_filters: Optional[List[str]] = field(default_factory=lambda: ["Introduction", "Literature Review", "Background"])
+    prompt_template: str = """You are an expert literature analyst. Your task is to identify key references from a research paper.
+
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
+
+**Relevant Extracts:**
+{chunks_info}
+
+**Instructions:**
+1. Analyze the evidence to identify the most important references cited in the paper.
+2. For each key reference, provide the raw text of the reference.
+3. Return a single JSON object adhering to the schema. Do not add extra text.
+
+**Schema:**
+{schema}
+"""

@@ -23,10 +23,13 @@ logger = logging.getLogger(__name__)
 class PaperClassifier(AbstractRAG):
     """Multi-modal paper classification using RAG and semantic similarity."""
 
-    def __init__(self, retriever: AbstractRetriever, generator: Generator,
+    def __init__(self, 
+                 retriever: AbstractRetriever, 
+                 generator: Generator,
+                 strategy_name: str = None,
                  config: Optional[PaperClassifierConfig] = None,
-                 academic_db: Optional[AcademicDB] = None,
-                 strategy_name: Optional[str] = None): # IS THERE A BETTER APPROCH THAN PASSING ACADEMIC DB AND (ESPECIALLY) STRATEGY NAME?
+                 academic_db: Optional[AcademicDB] = None
+    ):
         super().__init__(retriever, generator)
         self.config = config or PaperClassifierConfig()
         self.academic_db = academic_db
@@ -71,7 +74,7 @@ class PaperClassifier(AbstractRAG):
                 if text and (text not in unique_chunks or score > unique_chunks[text]):
                     unique_chunks[text] = score
 
-            sorted_chunks = sorted(unique_chunks.items(), key=lambda x: x[1], reverse=True)[:top_k]
+            sorted_chunks = sorted(unique_chunks.items(), key=lambda x: x[1], reverse=True)[:top_k] # COULD USE A RERANKER HERE
             final_chunks[paper_type] = sorted_chunks
         return final_chunks
 

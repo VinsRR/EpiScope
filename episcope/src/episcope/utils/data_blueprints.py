@@ -131,12 +131,21 @@ class DataSource:
     url: str = "N/A"
     explanation: str = ""
     section_found: str = ""
-    
+
 @dataclass
-class ExtractionResult:
+class ExtractionItem:
+    item_type: str
+    name: str
+    url: Optional[str] = None
+    explanation: Optional[str] = None
+    section_found: Optional[str] = None
+    raw_text: Optional[str] = None
+
+@dataclass
+class ExtractionResult():
     description: str
-    data_sources: List[DataSource] = field(default_factory=list)
-    references: List[Reference] = field(default_factory=list)
+    items: List[ExtractionItem] = field(default_factory=list)
+
 
 
 

@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
-from episcope.utils.extraction_blueprints import DataSourceItem, ExtractionResult, DataSourceSchema
+from episcope.utils.extraction_blueprints import DataSource, ExtractionResult, DataSourceSchema, Reference
 from episcope.rag.generation.clients import LLMClient, OllamaClient
 
 
@@ -123,8 +123,8 @@ class LLMExtractor(Generator):
             # convert into ExtractionResult dataclass
             er = ExtractionResult(
                 data_sources_description=validated.data_sources_description,
-                data_sources=[DataSourceItem(**(ds if isinstance(ds, dict) else {})) for ds in validated.data_sources or []],
-                references=validated.references or [],
+                data_sources=[DataSource(**ds) for ds in validated.data_sources or []],
+                references=[Reference.from_dict(ref) for ref in validated.references or []],
             )
             return er, None
         except Exception as e:

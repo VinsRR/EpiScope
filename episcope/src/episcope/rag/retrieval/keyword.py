@@ -57,7 +57,7 @@ class KeywordRetriever(AbstractRetriever):
                     text=chunk.get("text", ""),
                     section_type=chunk.get("section_type", "other"),
                     title=chunk.get("title", ""),
-                    similarity_score=0.0,
+                    similarity_score=0.0,  # NOT USED IN KEYWORD SEARCH -- kept for compatibility, but should include some WARNING when a keyword retriever is called in a context where similarity_score is expected
                     source="keyword",
                     rank_score=float(score) # Store hit count in rank_score
                 ))
@@ -79,12 +79,15 @@ class KeywordRetriever(AbstractRetriever):
         paper_id: str,
         *,
         top_k: int = 5,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[SearchResult]:
         """
         Perform keyword search for a single query scoped to a specific paper.
         """
+        final_filter = filter.copy() if filter else {}
+        final_filter["paper_id"] = paper_id
         return self.retrieve(
             query,
             top_k=top_k,
-            filter={"paper_id": paper_id},
+            filter=final_filter,
         )

@@ -90,13 +90,16 @@ class SemanticRetriever(AbstractRetriever):
         *,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[SearchResult]:
         """
         Perform semantic search for a single query scoped to a specific paper.
         """
+        final_filter = filter.copy() if filter else {}
+        final_filter["paper_id"] = paper_id
         return self.retrieve(
             query,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
-            filter={"paper_id": paper_id},
+            filter=final_filter,
         )
