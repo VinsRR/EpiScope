@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import json
+import inspect
 from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
 from dataclasses import dataclass, field
 
@@ -60,6 +61,15 @@ class OllamaClient(LLMClient):
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> str:
+        # API payload structure; we'll filter kwargs into this.
+        # See: https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
+        SUPPORTED_TOP_LEVEL_KWARGS = {"format", "keep_alive", "template"}
+        SUPPORTED_OPTIONS_KWARGS = {
+            "mirostat", "mirostat_eta", "mirostat_tau", "num_ctx", "num_gqa",
+            "num_gpu", "num_thread", "repeat_last_n", "repeat_penalty",
+            "seed", "stop", "tfs_z", "top_k", "top_p",
+        }
+
         url = f"{self.base_url}/api/chat"
         payload: Dict[str, Any] = {
             "model": model,
@@ -69,8 +79,13 @@ class OllamaClient(LLMClient):
         }
         if max_tokens is not None:
             payload["options"]["num_predict"] = max_tokens
-        if kwargs.get("format") == "json":
-            payload["format"] = "json"
+        
+        # Filter and apply supported kwargs
+        for key, value in kwargs.items():
+            if key in SUPPORTED_TOP_LEVEL_KWARGS:
+                payload[key] = value
+            elif key in SUPPORTED_OPTIONS_KWARGS:
+                payload["options"][key] = value
 
         # POST and handle (possibly streaming) response
         with requests.post(url, json=payload, timeout=self.timeout_s, stream=self.stream) as r:
@@ -129,12 +144,14 @@ class OpenAIClient(LLMClient):
         **kwargs: Any,
     ) -> str:
         """Call the OpenAI Chat Completions endpoint."""
+        sig = inspect.signature(self._client.chat.completions.create)
+        supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         response = self._client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            **kwargs,
+            **supported_kwargs,
         )
         return response.choices[0].message.content or ""
 
@@ -178,9 +195,11 @@ class GeminiClient(LLMClient):
             temperature=temperature,
             max_output_tokens=max_tokens,
         )
+        sig = inspect.signature(self._model.generate_content)
+        supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         response = self._model.generate_content(
             full_prompt,
             generation_config=generation_config,
-            **kwargs,
+            **supported_kwargs,
         )
         return response.text
