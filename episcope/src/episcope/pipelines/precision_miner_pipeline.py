@@ -67,21 +67,21 @@ class PrecisionMiner(AbstractRAG):
     def generate_extraction(self, relevant_chunks: List[Dict], metadata: PaperMetadata) -> ExtractionResult:
         """Generate the structured extraction using the LLM."""
         for attempt in range(2):
-            # try:
-            provenance = self.generator.generate(
-                contexts=[],
-                message_builder=self._build_extraction_messages,
-                metadata=metadata,
-                relevant_chunks=relevant_chunks,
-                format="json"
-            )
-            response_content = provenance.answer
-            return response_content #self._parse_extraction_response(response_content)
-        #     except Exception as e:
-        #         logger.error(f"Extraction attempt {attempt + 1} failed: {e}")
-        #         if attempt == 1:
-        #             return ExtractionResult(description="Extraction failed", items=[])
-        # return ExtractionResult(description="Extraction failed", items=[])
+            try:
+                provenance = self.generator.generate(
+                    contexts=[],
+                    message_builder=self._build_extraction_messages,
+                    metadata=metadata,
+                    relevant_chunks=relevant_chunks,
+                    format="json"
+                )
+                response_content = provenance.answer
+                return self._parse_extraction_response(response_content)
+            except Exception as e:
+                logger.error(f"Extraction attempt {attempt + 1} failed: {e}")
+                if attempt == 1:
+                    return ExtractionResult(description="Extraction failed", items=[])
+        return ExtractionResult(description="Extraction failed", items=[])
 
     def _build_extraction_messages(self, **kwargs) -> List[Dict[str, str]]:
         """Build the prompt for the extraction task."""

@@ -12,11 +12,11 @@ class DataSource:
 
 @dataclass
 class ExtractionItem:
-    item_type: str
+    # item_type: str
     name: str
     url: Optional[str] = None
     explanation: Optional[str] = None
-    section_found: Optional[str] = None
+    # section_found: Optional[str] = None
     raw_text: Optional[str] = None
 
 @dataclass
