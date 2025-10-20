@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.schemas import PaperType, DataSource, ExtractionResult
 from episcope.vectordb.base import AbstractVectorDB
-from episcope.rag.embeddings import SimplifiedEmbedder
+from episcope.rag.embeddings.factory import EmbedderFactory
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,15 @@ class PrecisionMinerRetriever(AbstractRetriever):
         extractor_fn: Optional[Any] = None,
     ) -> None:
         self.db = db
-        self.embedders: Dict[str, SimplifiedEmbedder] = {}
         self.classifier_fn = classifier_fn
         self.extractor_fn = extractor_fn
+
+        model_name = self.db.get_embedding_model()
+        if not model_name:
+            raise ValueError("VectorDB does not have an embedding model configured.")
+
+        logger.info(f"VectorDB is configured with embedding model: '{model_name}'. Instantiating corresponding embedder for PrecisionMinerRetriever.")
+        self.embedder = EmbedderFactory.get_embedder(model_name)
 
     def retrieve(
         self,
@@ -40,16 +46,7 @@ class PrecisionMinerRetriever(AbstractRetriever):
             logger.warning("PrecisionMinerRetriever requires a list of paper_ids to search.")
             return []
 
-        embed_model_name = self.db.get_embedding_model()
-        if not embed_model_name:
-            logger.warning("No embedding model found for database. Skipping.")
-            return []
-
-        if embed_model_name not in self.embedders:
-            self.embedders[embed_model_name] = SimplifiedEmbedder(embed_model=embed_model_name)
-        
-        embedder = self.embedders[embed_model_name]
-        query_vector = embedder.embed_text(query)
+        query_vector = self.embedder.embed_text(query)
 
         for pid in paper_ids:
             contexts = self.db.search(query_vector, top_k=top_k, namespace=pid)

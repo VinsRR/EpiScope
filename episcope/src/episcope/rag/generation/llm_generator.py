@@ -23,7 +23,7 @@ import time
 
 from episcope.rag.interfaces import AbstractGenerator
 from episcope.rag.provenance import Provenance, Evidence
-from .clients import LLMClient, OllamaClient
+from episcope.clients import LLMClient, OllamaClient
 
 # Utility: safe context access 
 

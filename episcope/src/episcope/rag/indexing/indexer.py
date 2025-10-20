@@ -3,7 +3,7 @@ A unified indexer that uses a VectorDB instance to store embeddings.
 """
 from typing import Any, Dict, Iterable, List, Optional
 
-from episcope.rag.embeddings import SimplifiedEmbedder
+from episcope.rag.embeddings.base import Embedder
 from episcope.vectordb.base import AbstractVectorDB
 from episcope.utils.chunker import chunk_paper
 from episcope.schemas import StructuredSection, PaperMetadata
@@ -12,13 +12,9 @@ import numpy as np
 class Indexer:
     """A unified indexer that chunks, embeds, and stores documents in a VectorDB."""
 
-    def __init__(self, db: AbstractVectorDB, embed_model: str = None, batch_size: int = 8):
+    def __init__(self, db: AbstractVectorDB, embedder: Embedder):
         self.db = db
-        if embed_model != db.get_embedding_model() and db.get_embedding_model() is not None:
-            assert False, f"Warning: embed_model '{embed_model}' does not match VectorDB model '{db.get_embedding_model()}'"
-        self.embed_model = embed_model
-        assert embed_model is not None, "An embedding model 'embed_model' must be specified if this is the first time the VectorDB is used."
-        self.embedder = SimplifiedEmbedder(embed_model=embed_model, batch_size=batch_size)
+        self.embedder = embedder
 
     def index_documents(self, docs: Iterable[Dict[str, Any]], namespace: Optional[str] = None) -> None:
         docs_list = list(docs)
@@ -37,7 +33,7 @@ class Indexer:
             payload = {k: v for k, v in doc.items()}
             points.append({"vector": vec.tolist(), "payload": payload, "id": doc.get("id")})
         
-        self.db.upsert(points, namespace=namespace, embed_model=self.embed_model)
+        self.db.upsert(points, namespace=namespace, embed_model=self.embedder.model_name)
 
     def index_paper(
         self,

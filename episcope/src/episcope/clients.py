@@ -34,6 +34,15 @@ class LLMClient(Protocol):
     ) -> str:
         """Return the assistant text for a chat-style prompt."""
 
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str,
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        """Return embeddings for a list of texts."""
+
 
 # Provider-specific implementations
 
@@ -111,6 +120,23 @@ class OllamaClient(LLMClient):
                     break
             return "".join(parts)
 
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str,
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        url = f"{self.base_url}/api/embeddings"
+        embeddings = []
+        for text in texts:
+            payload = {"model": model, "prompt": text}
+            with requests.post(url, json=payload, timeout=self.timeout_s) as r:
+                r.raise_for_status()
+                response_data = r.json()
+                embeddings.append(response_data.get("embedding", []))
+        return embeddings
+
 
 # Proprietary 
 
@@ -155,7 +181,19 @@ class OpenAIClient(LLMClient):
         )
         return response.choices[0].message.content or ""
 
-
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str,
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        response = self._client.embeddings.create(
+            input=texts,
+            model=model,
+            **kwargs,
+        )
+        return [item.embedding for item in response.data]
 
 
 @dataclass
@@ -203,3 +241,18 @@ class GeminiClient(LLMClient):
             **supported_kwargs,
         )
         return response.text
+
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str = "models/embedding-001",
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        result = genai.embed_content(
+            model=model,
+            content=texts,
+            task_type="retrieval_document",
+            **kwargs,
+        )
+        return result["embedding"]

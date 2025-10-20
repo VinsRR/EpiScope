@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, Optional, Sequence
 
-from episcope.rag.embeddings import SimplifiedEmbedder
+from episcope.rag.embeddings.factory import EmbedderFactory
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.rag.retrieval.hyde import HYDE
 from episcope.vectordb.base import AbstractVectorDB
@@ -14,10 +14,15 @@ class SemanticRetriever(AbstractRetriever):
 
     def __init__(self, vectordb: AbstractVectorDB, hyde: Optional[HYDE] = None):
         self.vectordb = vectordb
-        embedder = SimplifiedEmbedder(embed_model=vectordb.get_embedding_model())
-        self.embedder = embedder
         self.hyde = hyde
         self._allowed_filter_keys = self.vectordb.get_payload_keys()
+
+        model_name = self.vectordb.get_embedding_model()
+        if not model_name:
+            raise ValueError("VectorDB does not have an embedding model configured. Cannot perform semantic search.")
+
+        logger.info(f"VectorDB is configured with embedding model: '{model_name}'. Instantiating corresponding embedder for retrieval.")
+        self.embedder = EmbedderFactory.get_embedder(model_name)
 
     def retrieve(
         self,
