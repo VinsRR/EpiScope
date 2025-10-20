@@ -90,14 +90,17 @@ class PrecisionMiner(AbstractRAG):
         chunks_info = self._format_chunks_for_prompt(relevant_chunks)
         schema = ExtractionResultSchema.model_json_schema()
 
-        prompt = self.config.prompt_template.format(
+        user_prompt = self.config.user_prompt_template.format(
             title=metadata.title,
             abstract=metadata.abstract or 'N/A',
             keywords=', '.join(metadata.keywords or []),
             chunks_info=chunks_info,
             schema= json.dumps(schema)
         )
-        return [{"role": "user", "content": prompt}]
+        return [
+            {"role": "system", "content": self.config.system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
 
     def _format_chunks_for_prompt(self, relevant_chunks: List[Dict]) -> str:
         """Format chunks information for the LLM prompt."""

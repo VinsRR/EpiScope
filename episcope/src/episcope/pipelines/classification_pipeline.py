@@ -126,7 +126,7 @@ class PaperClassifier(AbstractRAG):
         schema = ClassificationOutput.model_json_schema()
         categories = "\n".join(f"{key} – {value}" for key, value in self.category_labels.items())
 
-        prompt = self.config.prompt_template.format(
+        user_prompt = self.config.user_prompt_template.format(
             categories=categories,
             title=metadata.title,
             abstract=metadata.abstract or 'N/A',
@@ -134,7 +134,10 @@ class PaperClassifier(AbstractRAG):
             chunks_info=chunks_info,
             schema=json.dumps(schema)
         )
-        return [{"role": "user", "content": prompt}]
+        return [
+            {"role": "system", "content": self.config.system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
 
     def _parse_classification_response(self, response_content: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
