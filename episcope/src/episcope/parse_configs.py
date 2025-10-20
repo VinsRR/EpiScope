@@ -62,8 +62,8 @@ Keywords: {keywords}
 class PrecisionMinerConfig:
     """Base configuration for the Precision Miner. Do not use directly.
     Instead, use one of the specialized configurations below."""
-    model_name: str = "deepseek-r1:7b"
-    top_k: int = 10
+    model_name: str ="llama3.2:latest"  #"qwen2.5vl:3b" #"deepseek-r1:7b" # "llama3.2:latest"
+    top_k: int = 15
     retrieval_templates: List[str] = field(default_factory=list)
     section_filters: Optional[List[str]] = None
     prompt_template: str = ""
@@ -72,29 +72,55 @@ class PrecisionMinerConfig:
 class FindDataSourcesConfig(PrecisionMinerConfig):
     """Configuration for finding data sources."""
     retrieval_templates: List[str] = field(default_factory=lambda: [
-        "What are the primary data sources used in this study?",
-        "Describe the data collection methods and sources.",
-        "What is the population or sample for this study?",
+        "What datasets, databases, or data repositories were used in this study?",
+        "Where did the data come from? What are the sources of the data analyzed?",
+        "Which surveys, cohorts, or existing data collections does this study draw upon?",
+        "What external data sources, registries, or archives are referenced?",
+        "Describe the origin and provenance of the data used in the analysis.",
+        "What are the URLs or DOIs for the data used in this study?",
+        "Which data was obtained from external sources versus collected by the authors?",
+        "What publicly available datasets are cited or referenced?",
     ])
-    section_filters: Optional[List[str]] = field(default_factory=lambda: ["Methods", "Data", "Study Design", "Participants"])
-    prompt_template: str = """You are an expert data extractor. Your task is to extract structured information about data sources from a research paper.
+    section_filters: Optional[List[str]] = field(default_factory=lambda: None) # ["Methods", "Data", "Study Design", "Participants"]
+    prompt_template: str = """
+    You are a senior epidemiologist. 
+    You are scanning a research paper to identify key data sources utilized in the study.
+    You are interested in understanding where the data originated, if it was collected by the authors or sourced from existing datasets and, in the case of existing datasets, what they are.
+    You are particularly interested in collecting references to datasets, surveys, or repositories mentioned in the paper.
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
+    You have been provided with extracts from the paper that may contain relevant information.
+    **Relevant Extracts:**
+    {chunks_info}
+    **Instructions:**
+    1. Analyze the evidence to identify the key data sources.
+    2. For each data source, provide its name, a URL if available, a brief explanation
+    3. Return a single JSON object adhering to the schema. Do not add extra text.
+    **Schema:**
+    {schema}
 
-**Relevant Extracts:**
-{chunks_info}
+    **Example output:**
+    {{
+    "description": "This study utilized two primary data sources: the CDC WONDER database for mortality data and the UK Biobank for participant health records.",
+    "items": [
+    {{
+    "name": "CDC WONDER",
+    "url": "https://catalog.data.gov/dataset/cdc-wonder-detailed-mortality-underlying-cause-of-death",
+    "explanation": "This dataset provides the mortality data analyzed in the study. It is a comprehensive source of US death records.",
+    "raw_text": "For our analysis, we utilized mortality data from the CDC WONDER database (https://catalog.data.gov/dataset/cdc-wonder-detailed-mortality-underlying-cause-of-death), which includes detailed death records across the United States."
+    }},
+    {{
+    "name": "UK Biobank",
+    "url": "https://zenodo.org/records/13983170",
+    "explanation": "The UK Biobank dataset was used for training the predictive models. It contains extensive health and genetic data from half a million UK participants.",
+    "raw_text": "The predictive models were trained using data from the UK Biobank (https://zenodo.org/records/13983170), which offers a rich resource of health and genetic information from a large cohort."
+    }}
+    ]
+    }}
+    DO NOT return the example output above. Instead,
 
-**Instructions:**
-1. Analyze the evidence to identify the key data sources.
-2. For each data source, provide its name, a URL if available, a brief explanation, and the section where it was found.
-3. Return a single JSON object adhering to the schema. Do not add extra text.
-
-**Schema:**
-{schema}
-"""
+    Output **only** a single JSON object matching the schema above. **Do not** print the schema, do not add commentary. Do not just return the example output. 
+    If no data sources are found, return an empty list for items with an appropriate description.
+    """
 
 @dataclass
 class FindSupplementaryLinksConfig(PrecisionMinerConfig):
@@ -151,4 +177,6 @@ Keywords: {keywords}
 
 **Schema:**
 {schema}
+
+
 """

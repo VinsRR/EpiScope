@@ -16,7 +16,7 @@ Implements the :class:`AbstractGenerator` interface.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
+from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Callable
 from dataclasses import dataclass, field
 import json
 import time
