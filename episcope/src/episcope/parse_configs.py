@@ -62,7 +62,7 @@ Keywords: {keywords}
 class PrecisionMinerConfig:
     """Base configuration for the Precision Miner. Do not use directly.
     Instead, use one of the specialized configurations below."""
-    model_name: str ="llama3.2:latest"  #"qwen2.5vl:3b" #"deepseek-r1:7b" # "llama3.2:latest"
+    model_name: str ="phi3:3.8b"  #"qwen2.5vl:3b" #"deepseek-r1:7b" # "llama3.2:latest" "phi3:3.8b"
     top_k: int = 15
     retrieval_templates: List[str] = field(default_factory=list)
     section_filters: Optional[List[str]] = None
@@ -100,20 +100,15 @@ class FindDataSourcesConfig(PrecisionMinerConfig):
 
     **Example output:**
     {{
-    "description": "This study utilized two primary data sources: the CDC WONDER database for mortality data and the UK Biobank for participant health records.",
+    "description": "Brief summary of data sources identified",
     "items": [
     {{
-    "name": "CDC WONDER",
-    "url": "https://catalog.data.gov/dataset/cdc-wonder-detailed-mortality-underlying-cause-of-death",
-    "explanation": "This dataset provides the mortality data analyzed in the study. It is a comprehensive source of US death records.",
-    "raw_text": "For our analysis, we utilized mortality data from the CDC WONDER database (https://catalog.data.gov/dataset/cdc-wonder-detailed-mortality-underlying-cause-of-death), which includes detailed death records across the United States."
-    }},
-    {{
-    "name": "UK Biobank",
-    "url": "https://zenodo.org/records/13983170",
-    "explanation": "The UK Biobank dataset was used for training the predictive models. It contains extensive health and genetic data from half a million UK participants.",
-    "raw_text": "The predictive models were trained using data from the UK Biobank (https://zenodo.org/records/13983170), which offers a rich resource of health and genetic information from a large cohort."
+    "name": "Dataset/database name",
+    "url": "Full URL or null",
+    "explanation": "How it was used in the study",
+    "raw_text": "Direct quote from paper"
     }}
+    // ... more items as needed
     ]
     }}
     DO NOT return the example output above. Instead,
@@ -121,6 +116,7 @@ class FindDataSourcesConfig(PrecisionMinerConfig):
     Output **only** a single JSON object matching the schema above. **Do not** print the schema, do not add commentary. Do not just return the example output. 
     If no data sources are found, return an empty list for items with an appropriate description.
     """
+
 
 @dataclass
 class FindSupplementaryLinksConfig(PrecisionMinerConfig):
