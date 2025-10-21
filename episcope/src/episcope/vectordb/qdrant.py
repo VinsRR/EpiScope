@@ -52,8 +52,13 @@ class QdrantDB(AbstractVectorDB):
         self.client = QdrantClient(url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc)
         self._payload_keys: Optional[set[str]] = None
 
-    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
+    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
         """Upsert points into the collection in batches."""
+        if chunking_config:
+            db_config = self.get_chunking_config()
+            if db_config and db_config != chunking_config:
+                raise ValueError(f"Inconsistent chunking config. DB uses '{db_config}', but upsert was called with '{chunking_config}'.")
+
         qdrant_points = []
         for point in points:
             payload = point.get("payload", {})
@@ -61,6 +66,8 @@ class QdrantDB(AbstractVectorDB):
                 payload["paper_id"] = namespace
             if embed_model:
                 payload["embed_model"] = embed_model
+            if chunking_config:
+                payload["chunking_config"] = chunking_config
             
             if self._payload_keys is not None:
                 self._payload_keys.update(payload.keys())
@@ -138,6 +145,20 @@ class QdrantDB(AbstractVectorDB):
         
         if points and points[0].payload:
             return points[0].payload.get("embed_model")
+        
+        return None
+
+    def get_chunking_config(self) -> Optional[Dict[str, Any]]:
+        """Get the chunking configuration used for the database."""
+        points, _ = self.client.scroll(
+            collection_name=self.collection,
+            limit=1,
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        if points and points[0].payload:
+            return points[0].payload.get("chunking_config")
         
         return None
 

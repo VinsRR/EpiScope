@@ -8,7 +8,7 @@ class AbstractVectorDB(ABC):
     """Abstract base class for a vector database."""
 
     @abstractmethod
-    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
+    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
         """Upsert points into the vector database."""
         pass
 
@@ -36,4 +36,9 @@ class AbstractVectorDB(ABC):
     @abstractmethod
     def get_embedding_model(self) -> Optional[str]:
         """Get the name of the embedding model used for the database."""
+        pass
+
+    @abstractmethod
+    def get_chunking_config(self) -> Optional[Dict[str, Any]]:
+        """Get the chunking configuration used for the database."""
         pass

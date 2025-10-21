@@ -25,6 +25,7 @@ class FaissDB(AbstractVectorDB):
         self._metadata: List[Dict[str, Any]] = []
         self._faiss_index: Optional[faiss.Index] = None
         self._model: Optional[str] = None
+        self._chunking_config: Optional[Dict[str, Any]] = None
         self._payload_keys: set[str] = set()
         self._loaded = False
         self._dirty = False
@@ -52,6 +53,7 @@ class FaissDB(AbstractVectorDB):
                 with open(self.index_dir / "config.json", "r", encoding="utf-8") as f:
                     config = json.load(f)
                     self._model = config.get("embed_model")
+                    self._chunking_config = config.get("chunking_config")
                     payload_keys = config.get("payload_keys")
                     if payload_keys is not None:
                         self._payload_keys = set(payload_keys)
@@ -60,7 +62,7 @@ class FaissDB(AbstractVectorDB):
             # Silently fail if loading fails, will start with an empty DB
             pass
 
-    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None) -> None:
+    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
         if embed_model:
             # Only set the DB-level model if it's not already configured.
             if self._model is None:
@@ -69,6 +71,12 @@ class FaissDB(AbstractVectorDB):
             elif self._model != embed_model:
                 assert False, f"Warning: upsert called with embed_model={embed_model} but DB already has embed_model={self._model}; DB model not changed"
 
+        if chunking_config:
+            if self._chunking_config is None:
+                self._chunking_config = chunking_config
+                self._dirty = True
+            elif self._chunking_config != chunking_config:
+                raise ValueError(f"Inconsistent chunking config. DB uses '{self._chunking_config}', but upsert was called with '{chunking_config}'.")
 
         points_list = list(points)
         if not points_list:
@@ -168,6 +176,10 @@ class FaissDB(AbstractVectorDB):
         """Get the name of the embedding model used for the database."""
         return self._model
 
+    def get_chunking_config(self) -> Optional[Dict[str, Any]]:
+        """Get the name of the chunking strategy used for the database."""
+        return self._chunking_config
+
     def save(self) -> None:
         if not self._dirty:
             return
@@ -186,6 +198,7 @@ class FaissDB(AbstractVectorDB):
 
         config = {
             "embed_model": self._model,
+            "chunking_config": self._chunking_config,
             "payload_keys": list(self._payload_keys)
         }
         with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:

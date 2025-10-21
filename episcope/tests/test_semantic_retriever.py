@@ -6,7 +6,7 @@ import shutil
 from episcope.rag.retrieval.semantic import SemanticRetriever
 from episcope.vectordb.faiss import FaissDB
 from episcope.rag.embeddings import SimplifiedEmbedder
-from episcope.utils.hyde import HYDE
+from episcope.rag.retrieval.hyde import HYDE
 
 class TestSemanticRetriever(unittest.TestCase):
 

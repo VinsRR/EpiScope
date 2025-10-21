@@ -53,8 +53,8 @@ class TestSimplifiedEmbedder(unittest.TestCase):
         class DummyConfig:
             hidden_size = 1
 
-        with patch("episcope.rag.retrieval.embeddings.HuggingFaceEmbedding", return_value=DummyHF()) as mock_hf, \
-             patch("episcope.rag.retrieval.embeddings.AutoConfig.from_pretrained", return_value=DummyConfig()):
+        with patch("episcope.rag.embeddings.HuggingFaceEmbedding", return_value=DummyHF()) as mock_hf, \
+             patch("episcope.rag.embeddings.AutoConfig.from_pretrained", return_value=DummyConfig()):
 
             embedder = SimplifiedEmbedder(embed_model="dummy-model")
             embedding = embedder.embed_text("hello")

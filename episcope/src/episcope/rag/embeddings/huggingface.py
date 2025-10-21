@@ -27,7 +27,7 @@ except ImportError:
 class HuggingFaceEmbedder(Embedder):
     """Wrapper around a HuggingFace embedding model."""
 
-    def __init__(self, model: str, batch_size: int = 8) -> None:
+    def __init__(self, model: str = "sentence-transformers/all-MiniLM-L6-v2", batch_size: int = 8) -> None:
         self._model = model
         self._batch_size = batch_size
         self._embedder = HuggingFaceEmbedding(model_name=model, trust_remote_code=True)

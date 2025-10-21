@@ -9,7 +9,6 @@ settings.  See individual modules for details.
 
 # Explicitly import common configs so they are discoverable via
 # `from episcope.configs import text_only, colpali, graph`.
-from .___text_only import *  # noqa: F401,F403
 from .parse_configs import *  # noqa: F401,F403
 
 __version__ = "0.1.0"
