@@ -40,60 +40,35 @@ from episcope.db.academic_db import AcademicDB
 logger = logging.getLogger(__name__)
 
 
-
-
 class AbstractDocumentLoader(abc.ABC):
     """Abstract base class for document loaders.
 
     Concrete subclasses must implement the :meth:`load` method to
-    extract structured sections and minimal metadata from a single
+    extract structured sections, metadata, and references from a single
     document.  Optionally subclasses may override :meth:`load_directory`
-    to support batch loading; the default implementation iterates
-    over files in the directory and calls :meth:`load` on each.
+    to support batch loading.
     """
     def __init__(self) -> None:
         super().__init__()
 
     @abc.abstractmethod
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Extract structured sections and metadata from a document.
+    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
+        """Extract structured sections, metadata, and references from a document.
 
         Args:
             file_path: Path to a single document (PDF, text, etc.).
 
         Returns:
-            A tuple ``(sections, metadata)`` where ``sections`` is a
-            list of :class:`StructuredSection` objects containing
-            textual content and ``metadata`` is a minimal
-            :class:`PaperMetadata` instance (e.g., title and abstract).
+            A tuple ``(sections, metadata, references)``. For loaders that do not
+            support reference extraction, ``references`` will be an empty list.
         """
 
-
-    def load_with_references(
-        self, file_path: Union[str, Path]
-    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
-        """Extract sections, metadata, and references from a document.
-
-        The default implementation calls :meth:`load` and returns an
-        empty list of references. Subclasses that can extract
-        bibliographic data should override this method.
-
-        Args:
-            file_path: Path to a single document.
-
-        Returns:
-            A tuple ``(sections, metadata, references)``.
-        """
-        sections, metadata = self.load(file_path)
-        return sections, metadata, []
-
-    def load_directory(self, dir_path: Union[str, Path]) -> Dict[str, Tuple[List[StructuredSection], PaperMetadata]]:
+    def load_directory(self, dir_path: Union[str, Path]) -> Dict[str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]]:
         """Extract documents from all supported files under a directory.
 
         The default implementation walks the directory tree and
         applies :meth:`load` to each encountered file with a supported
         extension.  Subclasses may override this to provide more
-
         sophisticated behaviour (e.g. parallel extraction).
 
         Args:
@@ -101,27 +76,21 @@ class AbstractDocumentLoader(abc.ABC):
 
         Returns:
             A mapping from file names (as strings) to the extracted
-            sections and metadata for each file.
+            sections, metadata, and references for each file.
         """
-        results: Dict[str, Tuple[List[StructuredSection], PaperMetadata]] = {}
+        results: Dict[str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]] = {}
         path = Path(dir_path)
         if not path.is_dir():
             raise ValueError(f"Expected directory: {dir_path}")
         for child in path.rglob("*"):
             if child.is_file() and self._is_supported(child):
-                # try:
-                    sections, meta = self.load(child)
-                    results[
-                        # str(child)
-                        child.stem
-                        ] = (sections, meta)
-                # except Exception as exc:
-                    # logger.warning(f"Failed to load {child}: {exc}")
+                sections, meta, refs = self.load(child)
+                results[child.stem] = (sections, meta, refs)
         return results
 
     def _is_supported(self, file_path: Path) -> bool:
         """Return True if this loader can process the given file extension."""
-        return file_path.suffix.lower() in {".pdf", ".txt", ".md", ".text"}
+        return file_path.suffix.lower() in {'.pdf', '.txt', '.md', '.text'}
 
     def extract_paper(
         self,
@@ -132,17 +101,15 @@ class AbstractDocumentLoader(abc.ABC):
     ) -> None:
         """Extract structured data from a single document and persist it.
 
-        This function uses the loader's ``load_with_references`` method to obtain
+        This function uses the loader's ``load`` method to obtain
         sections, metadata and references from a document. The results
         are inserted into the provided :class:`AcademicDB` under
-        the specified ``strategy_name``. If and `AcademicDB` is not
-        provided, the extraction is performed but not persisted.
+        the specified ``strategy_name``.
 
         Args:
             file_path: Location of the document to process.
             strategy_name: Namespace under which to store the results.
             db: Instance of :class:`AcademicDB` to persist data.
-            output_dir:. If omitted or ``None`` local writing is skipped.
 
         Raises:
             FileNotFoundError: If the document file does not exist.
@@ -152,7 +119,7 @@ class AbstractDocumentLoader(abc.ABC):
             raise FileNotFoundError(f"File not found: {file_path}")
         paper_id = path.stem
 
-        sections, metadata, references = self.load_with_references(path)
+        sections, metadata, references = self.load(path)
         metadata.file_path = str(path)
 
         sections_dicts: List[Dict] = [s.to_dict() for s in sections]
@@ -165,8 +132,6 @@ class AbstractDocumentLoader(abc.ABC):
         logger.info(
             f"Persisted extraction for {paper_id} under strategy {strategy_name}."
         )
-
-
 
     def extract_directory(
         self,
@@ -191,11 +156,9 @@ class AbstractDocumentLoader(abc.ABC):
                         child,
                         strategy_name=strategy_name,
                         db=db,
-                        # output_dir=output_dir,
                     )
                 except Exception as exc:
                     logger.error(f"Failed to process {child}: {exc}")
-
 
 
 class UnstructuredDocumentLoader(AbstractDocumentLoader):
@@ -212,95 +175,71 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
     def __init__(self) -> None:
         super().__init__()
 
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata]:  # noqa: D401
+    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
+        
         suffix = path.suffix.lower()
         if suffix == ".pdf":
-            return self._load_pdf(path)
+            sections, metadata = self._load_pdf(path)
         else:
-            return self._load_text(path)
+            sections, metadata = self._load_text(path)
+        
+        return sections, metadata, []
 
     def _load_pdf(self, path: Path) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Parse a PDF using Unstructured, falling back on plain text.
+        """Parse a PDF using Unstructured, falling back on plain text."""
+        try:
+            from unstructured.partition.pdf import partition_pdf
+            from unstructured.documents.elements import Title, Header, Text as TextElement
+        except ImportError:
+            logger.warning("Unstructured library not found. PDFs will be treated as plain text.")
+            return self._load_text(path)
 
-        Unstructured's ``partition_pdf`` function emits a sequence of
-        document elements.  We interpret headings (``Title`` and
-        ``SectionHeader``) as section titles and accumulate
-        paragraphs until the next heading.  If Unstructured is not
-        installed, we fallback to reading the raw binary and treating
-        it as empty text.
-        """
-        # try:
-        from unstructured.partition.pdf import partition_pdf  # type: ignore
-        from unstructured.documents.elements import (
-            Title,
-            Header,
-            Text as TextElement,
-        )  # type: ignore
-        # from unstructured.partition.pdf import partition_pdf  # type: ignore
-        # from unstructured.documents.elements import Text as TextElement
-        # from unstructured.documents.elements.grouping import Title, SectionHeader
-        # except Exception as exc:
-        #     logger.warning(f"Unstructured not available, reading PDF as plain text: {exc}")
-        #     return self._load_text(path)
-        # Partition the PDF into elements
-        # try:
-        elements = partition_pdf(
-            filename=str(path),
-            infer_table_structure=False,
-            strategy="hi_res",
-            extract_image_block_types=[],
-        )
-        # except Exception as exc:
-        #     logger.warning(f"Failed to parse {path} with unstructured: {exc}")
-        #     return self._load_text(path)
+        try:
+            elements = partition_pdf(
+                filename=str(path),
+                infer_table_structure=False,
+                strategy="hi_res",
+                extract_image_block_types=[],
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to parse {path} with unstructured: {exc}")
+            return self._load_text(path)
+
         sections: List[StructuredSection] = []
         current_title: str = ""
         current_content: List[str] = []
         for el in elements:
-            # Titles and section headers start new sections
             if isinstance(el, (Title, Header)):
-                # Flush previous section
                 if current_content:
                     sections.append(
-                        StructuredSection(
-                        title=current_title, 
-                        content="\n".join(current_content)
-                        ))  
+                        StructuredSection(title=current_title, content="\n".join(current_content))
+                    )
                     current_content = []
                 current_title = el.text.strip()
             elif isinstance(el, TextElement):
                 text = el.text.strip()
                 if text:
                     current_content.append(text)
-        # Flush trailing content
+        
         if current_content:
             sections.append(
-                StructuredSection(
-                    title=current_title, 
-                    content="\n".join(current_content)
-                    ))
-        # Provide minimal metadata (title unknown for now)
+                StructuredSection(title=current_title, content="\n".join(current_content))
+            )
+        
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
 
     def _load_text(self, path: Path) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Load a plain text or markdown file into a single section.
-
-        The contents of the file are read as UTF‑8 text.  The file
-        name (sans extension) is used as the paper title.  The
-        entire text becomes a single section with an empty section
-        title.
-        """
+        """Load a plain text or markdown file into a single section."""
         try:
             content = path.read_text(encoding="utf-8")
         except Exception:
-            # As a last resort read bytes and decode errors
             with path.open("rb") as fh:
                 content = fh.read().decode("utf-8", errors="ignore")
-        # Split on blank lines to create pseudo sections
+        
         paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
         sections = [StructuredSection(title="", content=p) for p in paragraphs]
         metadata = PaperMetadata(title=path.stem)
@@ -321,32 +260,17 @@ class GrobidDocumentLoader(AbstractDocumentLoader):
         self.grobid_url = grobid_url
         self._fallback = UnstructuredDocumentLoader()
         try:
-            # from grobid_client.grobid_client import GrobidClient
             from episcope.rag.ingestion.local_grobid_client import GrobidClient
             self.client = GrobidClient(grobid_server=self.grobid_url or "http://localhost:8070")
         except ImportError as e:
             logger.warning(f"Could not import GrobidClient, GROBID loader will not be available: {e}")
             self.client = None
 
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Load a PDF and return structured sections and minimal metadata."""
-        sections, metadata, _ = self._load_from_grobid(file_path)
-        return sections, metadata
-
-    def load_with_references(
-        self, file_path: Union[str, Path]
-    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
+    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
         """Load a PDF and return sections, metadata and references."""
-        return self._load_from_grobid(file_path)
-
-    def _load_from_grobid(
-        self, file_path: Union[str, Path]
-    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
-        """Internal helper to process a file with GROBID and handle fallbacks."""
         path = Path(file_path)
         if path.suffix.lower() != ".pdf" or not self.client:
-            sections, metadata = self._fallback.load(path)
-            return sections, metadata, []
+            return self._fallback.load(path)
 
         try:
             metadata, sections, references = self.client.process_fulltext(str(path))
@@ -355,8 +279,7 @@ class GrobidDocumentLoader(AbstractDocumentLoader):
             logger.warning(
                 f"GROBID processing failed for {path}: {exc}; falling back to unstructured"
             )
-            sections, metadata = self._fallback.load(path)
-            return sections, metadata, []
+            return self._fallback.load(path)
 
 
 class DocumentLoaderFactory:

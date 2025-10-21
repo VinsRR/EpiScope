@@ -36,14 +36,14 @@ class EmbedderFactory:
             An instance of an Embedder subclass.
         """
         if "/" in model_name and not model_name.startswith("models/"):
-            logger.debug(f"Detected HuggingFace model '{model_name}'. Creating HuggingFaceEmbedder.")
-            return HuggingFaceEmbedder(embed_model=model_name, **kwargs)
+            logger.info(f"Detected HuggingFace model '{model_name}'. Creating HuggingFaceEmbedder.")
+            return HuggingFaceEmbedder(model=model_name, **kwargs)
         elif model_name in OPENAI_EMBEDDING_MODELS:
-            logger.debug(f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder.")
+            logger.info(f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder.")
             return OpenAIEmbedder(model=model_name, **kwargs)
         elif model_name.startswith("models/"):
-            logger.debug(f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder.")
+            logger.info(f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder.")
             return GeminiEmbedder(model=model_name, **kwargs)
         else:
-            logger.debug(f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder.")
+            logger.info(f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder.")
             return OllamaEmbedder(model=model_name, **kwargs)

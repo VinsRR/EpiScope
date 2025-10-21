@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from ..core.blueprints.data_blueprints import (
+from episcope.schemas import (
     StructuredSection,
     PaperMetadata,
     Reference
