@@ -8,6 +8,8 @@ import numpy as np
 
 from .utils import DOI_RE, YEAR_RE, default_normalize, simple_normalize
 
+from .config import LateInteractionConfig, SimpleSurnameMatcherConfig
+
 # Optional dependencies
 try:
     import torch
@@ -42,12 +44,8 @@ class LateInteractionMatcher:
     def __init__(
         self,
         references_norm: List[Any],
+        config: "LateInteractionConfig",
         normalize_fn = None,
-        transform_model_name: str = "distilbert-base-uncased",
-        device: Optional[str] = None,
-        top_k_prefilter: int = 200,
-        idf_smoothing: float = 1.0,
-        max_ref_tokens: int = 256,
     ):
         if not TORCH_AVAILABLE:
             raise RuntimeError("torch and transformers are required for LateInteractionMatcher")
@@ -56,12 +54,9 @@ class LateInteractionMatcher:
             raise RuntimeError("scikit-learn is required for LateInteractionMatcher")
 
         self.refs = list(references_norm)
+        self.config = config
         self.normalize = normalize_fn if normalize_fn is not None else default_normalize
-        self.top_k = top_k_prefilter
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_name = transform_model_name
-        self.idf_smoothing = idf_smoothing
-        self.max_ref_tokens = max_ref_tokens
+        self.device = config.device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         self.ref_texts = []
         for r in self.refs:
@@ -88,11 +83,11 @@ class LateInteractionMatcher:
             return
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModel.from_pretrained(self.model_name).to(self.device)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config.transform_model_name)
+            self.model = AutoModel.from_pretrained(self.config.transform_model_name).to(self.device)
             self.model.eval()
         except Exception as e:
-            logger.error(f"Failed to load transformer model {self.model_name}: {e}")
+            logger.error(f"Failed to load transformer model {self.config.transform_model_name}: {e}")
             raise
 
         self.ref_token_ids: List[List[int]] = []
@@ -106,7 +101,7 @@ class LateInteractionMatcher:
                     self.ref_token_embs.append(np.zeros((1, 768)))
                     continue
                 try:
-                    enc = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_ref_tokens)
+                    enc = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.config.max_ref_tokens)
                     input_ids = enc["input_ids"].squeeze(0).to(self.device)
                     attention_mask = enc["attention_mask"].squeeze(0).to(self.device)
                     outputs = self.model(input_ids=input_ids.unsqueeze(0), attention_mask=attention_mask.unsqueeze(0))
@@ -127,7 +122,7 @@ class LateInteractionMatcher:
         N = len(self.ref_texts)
         self.idf = {}
         for tid, df in df_counts.items():
-            self.idf[tid] = math.log((N + self.idf_smoothing) / (df + self.idf_smoothing)) + 1.0
+            self.idf[tid] = math.log((N + self.config.idf_smoothing) / (df + self.config.idf_smoothing)) + 1.0
 
     def split_subcands(self, text: str) -> List[str]:
         if not isinstance(text, str):
@@ -225,7 +220,7 @@ class LateInteractionMatcher:
         for sub, sub_tfidf in zip(subcands, sub_tfidfs):
             try:
                 sims = cosine_similarity(sub_tfidf, self.ref_tfidf).ravel()
-                top_idxs = np.argsort(-sims)[: self.top_k]
+                top_idxs = np.argsort(-sims)[: self.config.top_k_prefilter]
                 q_ids, q_embs = self.compute_query_token_embs(sub)
 
                 for ridx in top_idxs:
@@ -291,14 +286,12 @@ class SimpleSurnameMatcher:
     def __init__(
         self,
         references_norm: List[Any],
+        config: "SimpleSurnameMatcherConfig",
         normalize_fn=None,
-        fuzzy_threshold: int = 70,
-        fuzzy_title_threshold: int = 65,
     ):
         self.refs = list(references_norm)
+        self.config = config
         self.normalize = normalize_fn if normalize_fn is not None else default_normalize
-        self.fuzzy_threshold = int(fuzzy_threshold)
-        self.fuzzy_title_threshold = int(fuzzy_title_threshold)
 
         self.surname_index = defaultdict(list)
         for i, r in enumerate(self.refs):
@@ -339,7 +332,7 @@ class SimpleSurnameMatcher:
                 if sc > best_score:
                     best_score, best_entry = sc, e
             
-            if best_entry and best_score >= self.fuzzy_title_threshold:
+            if best_entry and best_score >= self.config.fuzzy_title_threshold:
                 return [{"matched_index": best_entry["index"], "score": float(best_score / 100.0), "reason": f"fuzzy_title_disambiguation({best_score})", **self._ref_info(best_entry)}]
             
             e = best_entry or exact_candidates[0]
@@ -351,19 +344,13 @@ class SimpleSurnameMatcher:
             if sc > best_score:
                 best_score, best_surname = sc, surname
 
-        if best_surname and best_score >= self.fuzzy_threshold:
+        if best_surname and best_score >= self.config.fuzzy_threshold:
+            # pick the top candidate for that surname (if multiple, try year, then title fuzzy)
             cand_list = self.surname_index[best_surname]
             if len(cand_list) == 1:
                 e = cand_list[0]
                 return [{"matched_index": e["index"], "score": float(best_score / 100.0), "reason": f"fuzzy_surname({best_score})", **self._ref_info(e)}]
 
-            best_title_score, best_entry = -1, None
-            for e in cand_list:
-                sc2 = _fuzzy_score(cand_norm, self._norm_titles.get(e["index"], ""))
-                if sc2 > best_title_score:
-                    best_title_score, best_entry = sc2, e
-            if best_entry:
-                return [{"matched_index": best_entry["index"], "score": float(max(best_score, best_title_score) / 100.0), "reason": f"fuzzy_surname_title({best_score},{best_title_score})", **self._ref_info(best_entry)}]
 
         return [{"matched_index": None, "score": 0.0, "reason": "no_match"}]
 
@@ -381,29 +368,26 @@ class ReferenceMatcher:
     Wrapper that exposes a unified API for different matching backends.
     """
 
-    def __init__(self, normalize_fn=None, **kwargs):
+    def __init__(self, config: "MatcherConfig", normalize_fn=None):
         self.normalize = normalize_fn if normalize_fn is not None else default_normalize
-        self._matcher_kwargs = kwargs
+        self.config = config
         self._matcher: Optional[Any] = None
         self._cached_refs_id = None
-        self.min_candidate_length = kwargs.get("min_candidate_length", 3)
-        self.matcher_backend = kwargs.get("matcher_backend", "simple")
 
     def prepare(self, references_norm: List[Any]):
         refs_id = id(references_norm)
         if self._matcher is not None and refs_id == self._cached_refs_id:
             return
 
-        backend_map = {
-            "simple": SimpleSurnameMatcher,
-            "late": LateInteractionMatcher,
-        }
-        matcher_class = backend_map.get(self.matcher_backend)
-        if not matcher_class:
-            raise ValueError(f"Unknown matcher backend: {self.matcher_backend}")
+        if isinstance(self.config, SimpleSurnameMatcherConfig):
+            matcher_class = SimpleSurnameMatcher
+        elif isinstance(self.config, LateInteractionConfig):
+            matcher_class = LateInteractionMatcher
+        else:
+            raise TypeError(f"Unsupported config type: {type(self.config)}")
 
         try:
-            self._matcher = matcher_class(references_norm, normalize_fn=self.normalize, **self._matcher_kwargs)
+            self._matcher = matcher_class(references_norm, config=self.config, normalize_fn=self.normalize)
             self._cached_refs_id = refs_id
         except Exception as e:
             logger.error(f"Failed to initialize {matcher_class.__name__}: {e}")
@@ -422,10 +406,11 @@ class ReferenceMatcher:
             logger.error("Matcher not initialized. Call prepare(references_norm) first.")
             return [{"matched_index": None, "score": 0.0, "reason": "matcher_not_initialized"}]
         
-        if not candidate_str or len(candidate_str.strip()) < self.min_candidate_length:
+        if not candidate_str or len(candidate_str.strip()) < self.config.min_candidate_length:
             return [{"matched_index": None, "score": 0.0, "reason": "too_short"}]
 
         try:
+            # Note: top_n and min_score are passed at runtime, overriding config for flexibility
             return self._matcher.match_candidate(candidate_str, top_n=top_n, min_score=min_score)
         except Exception as e:
             logger.error(f"Matching failed for candidate: {candidate_str[:50]}... Error: {e}")

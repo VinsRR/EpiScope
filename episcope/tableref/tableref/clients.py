@@ -12,13 +12,10 @@ except ImportError:
 
 def fetch_doi_from_crossref(
     title: str,
+    config: "CrossrefConfig",
     authors: Optional[Union[str, Sequence[str]]] = None,
     journal: Optional[str] = None,
     year: Optional[Union[str, int]] = None,
-    rows: int = 5,
-    timeout: float = 10.0,
-    min_crossref_title_score: float = 0.85,
-    user_agent_email: str = "you@example.com",
 ) -> Dict[str, Any]:
     """
     Query Crossref REST API to find DOI for a paper given bibliographic hints.
@@ -47,7 +44,7 @@ def fetch_doi_from_crossref(
     q = " ".join([p for p in q_parts if p]).strip()
     params = {
         "query.bibliographic": q,
-        "rows": rows,
+        "rows": config.rows,
     }
     # Prefer to filter by year if present (Crossref supports filter on from-pub-date/until-pub-date)
     if year:
@@ -58,11 +55,11 @@ def fetch_doi_from_crossref(
             pass
 
     headers = {
-        "User-Agent": f"ReferenceMatcher/1.0 (mailto:{user_agent_email})"
+        "User-Agent": f"ReferenceMatcher/1.0 (mailto:{config.user_agent_email})"
     }
 
     try:
-        resp = requests.get("https://api.crossref.org/works", params=params, headers=headers, timeout=timeout)
+        resp = requests.get("https://api.crossref.org/works", params=params, headers=headers, timeout=config.timeout)
         resp.raise_for_status()
         data = resp.json()
         items = data.get("message", {}).get("items", []) or []
@@ -84,7 +81,7 @@ def fetch_doi_from_crossref(
                 best_score = score
                 best = it
 
-        if best and best_score >= min_crossref_title_score:
+        if best and best_score >= config.min_title_score:
             out["doi"] = best.get("DOI")
             out["score"] = float(best_score)
             # minimal item info

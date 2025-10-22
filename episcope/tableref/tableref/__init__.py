@@ -1,13 +1,15 @@
 """
 TableRef Extractor Package
 """
-from .extractor import TableExtractor
+from .extractors.gmft import GmftExtractor
+from .extractors.img2table import Img2TableExtractor
 from .matching import ReferenceMatcher, SimpleSurnameMatcher, LateInteractionMatcher
 from .clients import fetch_doi_from_crossref
 from .utils import default_normalize
 
 __all__ = [
-    "TableExtractor",
+    "GmftExtractor",
+    "Img2TableExtractor",
     "ReferenceMatcher",
     "SimpleSurnameMatcher",
     "LateInteractionMatcher",
