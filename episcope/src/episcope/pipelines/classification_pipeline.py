@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from episcope.db.academic_db import AcademicDB
-from episcope.parse_configs import PaperClassifierConfig
+from episcope.config.classifier import PaperClassifierConfig
 from episcope.pipelines.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever

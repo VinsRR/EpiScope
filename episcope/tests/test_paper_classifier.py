@@ -3,69 +3,36 @@ Unit tests for paper classifier utilities.
 
 These tests exercise internal helper methods of the
 ``PaperClassifier`` class to ensure they behave deterministically.
-Heavy dependencies such as FAISS, Ollama and SentenceTransformer are
-not invoked here; instead we focus on pure Python logic like
-deduplication and ranking of chunks.
 """
-
-# The "dummy" embedding model could be used by using unittest.mock to stub
-# out the SentenceTransformer class: https://docs.python.org/3/library/unittest.mock.html
-
 import unittest
 from unittest.mock import MagicMock
 
-# Stub external modules that are unavailable in the test environment.
-import sys
-import types
-sys.modules.setdefault(
-    "torch",
-    types.SimpleNamespace(
-        cuda=types.SimpleNamespace(is_available=lambda: False),
-    ),
-)
-sys.modules.setdefault(
-    "faiss",
-    types.SimpleNamespace(
-        read_index=lambda *args, **kwargs: None,
-        write_index=lambda *args, **kwargs: None,
-        IndexFlatIP=lambda *args, **kwargs: None,
-        normalize_L2=lambda *args, **kwargs: None,
-    ),
-)
-sys.modules.setdefault(
-    "ollama",
-    types.SimpleNamespace(
-        Client=lambda *args, **kwargs: types.SimpleNamespace(chat=lambda *a, **kw: None),
-    ),
-)
-sys.modules.setdefault(
-    "episcope.retrieve.embeddings",
-    types.SimpleNamespace(
-        SimplifiedEmbedder=lambda *args, **kwargs: types.SimpleNamespace(
-            embed_text=lambda t: [len(t)],
-            embed_texts=lambda t_list: [[len(t)] for t in t_list]
-        )
-    ),
-)
-
-from episcope.vectordb.base import AbstractVectorDB
 from episcope.pipelines.classification_pipeline import PaperClassifier
-from episcope.rag.embeddings import SimplifiedEmbedder
-from .configs import test_model_hf_embedding, test_model_ollama
+from episcope.rag.generation.base import Generator
+from episcope.rag.interfaces import AbstractRetriever
 
-model_name_emb = test_model_hf_embedding
-model_name = test_model_ollama
+
+class MockRetriever(AbstractRetriever):
+    def retrieve(self, query: str, **kwargs):
+        pass
+
+    def retrieve_by_paper(self, query: str, paper_id: str, **kwargs):
+        pass
+
+class MockGenerator(Generator):
+    def generate(self, **kwargs):
+        pass
+
 class TestPaperClassifier(unittest.TestCase):
     """Tests for helper functions in PaperClassifier."""
 
     def test_deduplicate_and_rank_chunks(self) -> None:
         """Ensure deduplication keeps the highest score and sorts descending."""
-        mock_embedder = SimplifiedEmbedder(embed_model=model_name_emb)
-        mock_vectordb = MagicMock(spec=AbstractVectorDB)
+        mock_retriever = MockRetriever()
+        mock_generator = MockGenerator()
         classifier = PaperClassifier(
-            model_name=model_name,
-            embedder=mock_embedder,
-            vectordb=mock_vectordb
+            retriever=mock_retriever,
+            generator=mock_generator
         )
         aggregated = {
             "literature_review": [

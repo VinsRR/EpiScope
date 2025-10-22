@@ -12,6 +12,27 @@ class PaperType(Enum):
     # OTHER = "other"
     # UNCLEAR = "unclear"
 
+class DataAccessibility(Enum):
+    OPEN_ACCESS = "open_access"
+    RESTRICTED_ACCESS = "restricted_access"
+    NOT_AVAILABLE = "not_available"
+
+class DataNation(Enum):
+    USA = "usa"
+    UK = "uk"
+    CHINA = "china"
+    EUROPE_MULTIPLE = "europe_multiple"
+    GLOBAL = "global"
+    SYNTHETIC = "synthetic"
+    NOT_SPECIFIED = "not_specified"
+
+class DataType(Enum):
+    TRADITIONAL = "traditional"
+    NON_TRADITIONAL = "non_traditional"
+    SYNTHETIC = "synthetic"
+    NOT_SPECIFIED = "not_specified"
+
+
 
 # Pydantic schema for structured LLM output
 class ClassificationOutput(BaseModel):

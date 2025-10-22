@@ -3,7 +3,7 @@ import logging
 from typing import Dict, List, Optional
 
 from episcope.db.academic_db import AcademicDB
-from episcope.parse_configs import PrecisionMinerConfig, FindDataSourcesConfig
+from episcope.config.miner import PrecisionMinerConfig, FindDataSourcesConfig
 from episcope.pipelines.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
