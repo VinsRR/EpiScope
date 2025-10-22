@@ -1,7 +1,11 @@
 from .serialization import Serializable, SerializableList
 from .paper import StructuredSection, Reference, PaperMetadata, SectionList, ReferenceList
 from .results import DataSource, ExtractionItem, ExtractionResult, ClassificationResult, SearchResult
-from .classification import PaperType, ClassificationOutput
+from .classification import (
+    PaperType, ClassificationOutput, DataAccessibility, DataNation, DataType,
+    PaperTypeClassificationOutput, DataAccessibilityClassificationOutput,
+    DataNationClassificationOutput, DataTypeClassificationOutput
+)
 from .extraction import ExtractionItemSchema, ExtractionResultSchema, DataSourceSchema, ReferenceSchema, DataSourceItemSchema
 from .common import Chunk
 
@@ -20,6 +24,13 @@ __all__ = [
     "SearchResult",
     "PaperType",
     "ClassificationOutput",
+    "DataAccessibility",
+    "DataNation",
+    "DataType",
+    "PaperTypeClassificationOutput",
+    "DataAccessibilityClassificationOutput",
+    "DataNationClassificationOutput",
+    "DataTypeClassificationOutput",
     "ExtractionItemSchema",
     "ExtractionResultSchema",
     "DataSourceSchema",

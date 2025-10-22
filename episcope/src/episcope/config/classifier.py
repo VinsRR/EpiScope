@@ -1,13 +1,28 @@
-from episcope.schemas import PaperType, DataAccessibility, DataNation, DataType
-from typing import Dict, List, Optional
+from episcope.schemas import (
+    PaperType, DataAccessibility, DataNation, DataType, ClassificationOutput,
+    PaperTypeClassificationOutput, DataAccessibilityClassificationOutput,
+    DataNationClassificationOutput, DataTypeClassificationOutput
+)
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 
 @dataclass
-class PaperClassifierConfig:
-    """Configuration for the paper classifier."""
+class BaseClassifierConfig:
+    """Base configuration for a paper classifier."""
     similarity_threshold: float = 0.75
     top_k: int = 10
     embedding_model: str = "jinaai/jina-embeddings-v3"
+    template_paragraphs: Dict[str, List[str]] = field(default_factory=dict)
+    classification_mapping: Dict[str, Any] = field(default_factory=dict)
+    category_labels: Dict[str, str] = field(default_factory=dict)
+    system_prompt: str = ""
+    user_prompt_template: str = ""
+    output_schema: Any = ClassificationOutput
+    default_classification: Any = None
+
+@dataclass
+class PaperTypeClassifierConfig(BaseClassifierConfig):
+    """Configuration for the paper type classifier."""
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "literature_review": [
             "Several studies have examined the relationship between X and Y. Smith et al. (2020) found significant associations, while Jones et al. (2021) reported mixed results. A systematic review by Brown et al. (2019) identified 45 relevant studies.",
@@ -27,7 +42,6 @@ class PaperClassifierConfig:
         "B": "Data Analysis"
     })
     system_prompt: str = "You are an senior epidemiologist doing reviewing the recent literatures. You are sorting your papers into two categories: Literature Review and Data Analysis."
-
     user_prompt_template: str = """
     You are an senior academic epidemiologist. Your task is to determine the primary type of a research paper.
 
@@ -50,9 +64,11 @@ Keywords: {keywords}
 **Schema:**
 {schema}
 """
+    output_schema: Any = PaperTypeClassificationOutput
+    default_classification: Any = PaperType.DATA_ANALYSIS
 
 @dataclass
-class DataAccessibilityClassifierConfig(PaperClassifierConfig):
+class DataAccessibilityClassifierConfig(BaseClassifierConfig):
     """Configuration for classifying data accessibility."""
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "open_access": [
@@ -104,9 +120,11 @@ Keywords: {keywords}
 **Schema:**
 {schema}
 """
+    output_schema: Any = DataAccessibilityClassificationOutput
+    default_classification: Any = DataAccessibility.NOT_AVAILABLE
 
 @dataclass
-class DataNationClassifierConfig(PaperClassifierConfig):
+class DataNationClassifierConfig(BaseClassifierConfig):
     """Configuration for classifying the nation(s) of data origin."""
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "usa": ["Data was sourced from the US National Health and Nutrition Examination Survey (NHANES)."],
@@ -149,9 +167,11 @@ Keywords: {keywords}
 **Schema:**
 {schema}
 """
+    output_schema: Any = DataNationClassificationOutput
+    default_classification: Any = DataNation.NOT_SPECIFIED
 
 @dataclass
-class DataTypeClassifierConfig(PaperClassifierConfig):
+class DataTypeClassifierConfig(BaseClassifierConfig):
     """Configuration for classifying the type of data used."""
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "traditional": [
@@ -198,3 +218,5 @@ Keywords: {keywords}
 **Schema:**
 {schema}
 """
+    output_schema: Any = DataTypeClassificationOutput
+    default_classification: Any = DataType.NOT_SPECIFIED

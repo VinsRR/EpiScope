@@ -1,19 +1,16 @@
 import json
 import logging
-import re
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from episcope.db.academic_db import AcademicDB
-from episcope.config.classifier import PaperClassifierConfig
+from episcope.config.classifier import BaseClassifierConfig, PaperTypeClassifierConfig
 from episcope.pipelines.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.schemas import (
-    ClassificationOutput,
     ClassificationResult,
     PaperMetadata,
-    PaperType,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -27,16 +24,15 @@ class PaperClassifier(AbstractRAG):
                  retriever: AbstractRetriever, 
                  generator: Generator,
                  strategy_name: str = None,
-                 config: Optional[PaperClassifierConfig] = None,
+                 config: Optional[BaseClassifierConfig] = None,
                  academic_db: Optional[AcademicDB] = None
     ):
         super().__init__(retriever, generator)
-        self.config = config or PaperClassifierConfig()
+        self.config = config or PaperTypeClassifierConfig()
         self.academic_db = academic_db
         self.template_paragraphs = self.config.template_paragraphs
         self.classification_mapping = self.config.classification_mapping
         self.category_labels = self.config.category_labels
-        #
         self.strategy_name = strategy_name
 
     def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ClassificationResult:
@@ -74,7 +70,7 @@ class PaperClassifier(AbstractRAG):
                 if text and (text not in unique_chunks or score > unique_chunks[text]):
                     unique_chunks[text] = score
 
-            sorted_chunks = sorted(unique_chunks.items(), key=lambda x: x[1], reverse=True)[:top_k] # COULD USE A RERANKER HERE
+            sorted_chunks = sorted(unique_chunks.items(), key=lambda x: x[1], reverse=True)[:top_k]
             final_chunks[paper_type] = sorted_chunks
         return final_chunks
 
@@ -123,7 +119,7 @@ class PaperClassifier(AbstractRAG):
         metadata = kwargs.get("metadata")
         relevant_chunks = kwargs.get("relevant_chunks")
         chunks_info = self._format_chunks_for_prompt(relevant_chunks)
-        schema = ClassificationOutput.model_json_schema()
+        schema = self.config.output_schema.model_json_schema()
         categories = "\n".join(f"{key} – {value}" for key, value in self.category_labels.items())
 
         user_prompt = self.config.user_prompt_template.format(
@@ -141,8 +137,8 @@ class PaperClassifier(AbstractRAG):
 
     def _parse_classification_response(self, response_content: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
-        parsed = ClassificationOutput.model_validate_json(response_content)
-        paper_type = self.classification_mapping.get(parsed.classification, PaperType.DATA_ANALYSIS)
+        parsed = self.config.output_schema.model_validate_json(response_content)
+        classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
 
         class_probs = parsed.class_probabilities or {}
         if parsed.classification in self.category_labels:
@@ -156,7 +152,7 @@ class PaperClassifier(AbstractRAG):
                                                            0.9)
 
         return ClassificationResult(
-            paper_type=paper_type,
+            classification=classification,
             confidence=float(confidence),
             class_probabilities=class_probs,
             evidence={"reasoning": parsed.reasoning}
@@ -165,7 +161,7 @@ class PaperClassifier(AbstractRAG):
     def _create_fallback_result(self) -> ClassificationResult:
         """Create a fallback classification result when LLM fails."""
         return ClassificationResult(
-            paper_type=PaperType.DATA_ANALYSIS,
+            classification=self.config.default_classification,
             confidence=0.0,
             class_probabilities={label: 0.5 for label in self.category_labels.values()},
             evidence={"reasoning": "Classification failed, defaulting to data analysis"}

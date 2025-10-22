@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,19 @@ class DataType(Enum):
 
 # Pydantic schema for structured LLM output
 class ClassificationOutput(BaseModel):
-    classification: str = Field(..., description="One of: A,B")
+    classification: str = Field(..., description="A single letter representing the classification")
     reasoning: str = Field(..., description="Short 1-2 sentence explanation")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     class_probabilities: Optional[Dict[str, float]] = None
+
+class PaperTypeClassificationOutput(ClassificationOutput):
+    classification: Literal["A", "B"] = Field(..., description="One of: A, B")
+
+class DataAccessibilityClassificationOutput(ClassificationOutput):
+    classification: Literal["A", "B", "C"] = Field(..., description="One of: A, B, C")
+
+class DataNationClassificationOutput(ClassificationOutput):
+    classification: Literal["A", "B", "C", "D", "E", "F", "G"] = Field(..., description="One of: A, B, C, D, E, F, G")
+
+class DataTypeClassificationOutput(ClassificationOutput):
+    classification: Literal["A", "B", "C", "D"] = Field(..., description="One of: A, B, C, D")

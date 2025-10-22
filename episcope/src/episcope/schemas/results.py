@@ -26,7 +26,7 @@ class ExtractionResult():
 
 @dataclass
 class ClassificationResult:
-    paper_type: 'PaperType'
+    classification: Any
     confidence: float
     class_probabilities: Dict[str, float] = field(default_factory=dict)
     evidence: Dict = field(default_factory=dict)
