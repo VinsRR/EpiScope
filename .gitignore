@@ -13,3 +13,4 @@ academic_db_backup.json
 *.json
 *.faiss
 *.csv
+*.pdf
