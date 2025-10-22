@@ -12,3 +12,4 @@ episcope/.DS_Store
 academic_db_backup.json
 *.json
 *.faiss
+*.csv
