@@ -34,7 +34,7 @@ class QdrantDB(AbstractVectorDB):
     def __init__(
         self,
         collection: str,
-        dim: int,
+        dim: Optional[int] = None,
         url: str = "http://localhost:6333",
         api_key: Optional[str] = None,
         timeout: int = 60,
@@ -46,11 +46,31 @@ class QdrantDB(AbstractVectorDB):
             raise ImportError("qdrant-client is not installed. Please install it with 'pip install qdrant-client'")
         
         self.collection = collection
-        self.dim = dim
         self.distance = getattr(models.Distance, distance)
         self.batch_size = batch_size
         self.client = QdrantClient(url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc)
         self._payload_keys: Optional[set[str]] = None
+
+        try:
+            collection_info = self.client.get_collection(collection_name=self.collection)
+            collection_dim = collection_info.config.params.vectors.size
+            if dim is not None and dim != collection_dim:
+                logger.warning(
+                    f"Dimension mismatch for collection '{self.collection}'. "
+                    f"Provided: {dim}, Existing: {collection_dim}. "
+                    f"Using existing dimension: {collection_dim}."
+                )
+            self.dim = collection_dim
+        except Exception:
+            if dim is None:
+                raise ValueError(f"Dimension 'dim' must be provided to create collection '{self.collection}'.")
+            
+            logger.info(f"Collection '{self.collection}' not found. Creating a new one with dimension {dim}.")
+            self.dim = dim
+            self.client.recreate_collection(
+                collection_name=self.collection,
+                vectors_config=models.VectorParams(size=self.dim, distance=self.distance),
+            )
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
         """Upsert points into the collection in batches."""
