@@ -19,7 +19,8 @@ class BaseClassifierConfig:
     user_prompt_template: str = ""
     output_schema: Any = ClassificationOutput
     default_classification: Any = None
-    max_retries: int = 2
+    max_validation_retries: int = 1
+
 
 
 @dataclass
@@ -37,11 +38,13 @@ class PaperTypeClassifierConfig(BaseClassifierConfig):
     })
     classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: {
         "A": PaperType.LITERATURE_REVIEW,
-        "B": PaperType.DATA_ANALYSIS
+        "B": PaperType.DATA_ANALYSIS,
+        "C": PaperType.UNCLEAR
     })
     category_labels: Dict[str, str] = field(default_factory=lambda: {
         "A": "Literature Review",
-        "B": "Data Analysis"
+        "B": "Data Analysis",
+        "C": "Unclear"
     })
     system_prompt: str = """You are an senior epidemiologist doing reviewing the recent literatures. You are sorting your papers into {n_categories} categories: {category_labels}."""
     user_prompt_template: str = """
@@ -58,16 +61,16 @@ class PaperTypeClassifierConfig(BaseClassifierConfig):
     **Relevant Extracts:**
     {chunks_info}
 
+    **Schema:**
+    {schema}    
+
     **Instructions:**
     1. Analyze the evidence to determine the paper's main contribution.
     2. Select a single letter that best represents the paper's primary classification.
     3. Return a single JSON object adhering to the schema. Do not add extra text.
-
-    **Schema:**
-    {schema}
     """
     output_schema: Any = PaperTypeClassificationOutput
-    default_classification: Any = PaperType.DATA_ANALYSIS
+    default_classification: Any = PaperType.UNCLEAR
 
 
 

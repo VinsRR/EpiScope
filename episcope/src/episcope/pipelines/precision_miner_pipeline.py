@@ -66,28 +66,24 @@ class PrecisionMiner(AbstractRAG):
 
     def generate_extraction(self, relevant_chunks: List[Dict], metadata: PaperMetadata) -> ExtractionResult:
         """Generate the structured extraction using the LLM."""
-        for attempt in range(2):
-            try:
-                provenance = self.generator.generate(
-                    contexts=[],
-                    message_builder=self._build_extraction_messages,
-                    metadata=metadata,
-                    relevant_chunks=relevant_chunks,
-                    format="json"
-                )
-                response_content = provenance.answer
-                return self._parse_extraction_response(response_content)
-            except Exception as e:
-                logger.error(f"Extraction attempt {attempt + 1} failed: {e}")
-                if attempt == 1:
-                    return ExtractionResult(description="Extraction failed", items=[])
-        return ExtractionResult(description="Extraction failed", items=[])
+        try:
+            provenance = self.generator.generate(
+                contexts=relevant_chunks,
+                message_builder=self._build_initial_prompt,
+                metadata=metadata,
+                format="json"
+            )
+            response_content = provenance.answer
+            return self._parse_extraction_response(response_content)
+        except Exception as e:
+            logger.error(f"Extraction failed: {e}")
+            return ExtractionResult(description="Extraction failed", items=[])
 
-    def _build_extraction_messages(self, **kwargs) -> List[Dict[str, str]]:
+    def _build_initial_prompt(self, **kwargs) -> List[Dict[str, str]]:
         """Build the prompt for the extraction task."""
         metadata = kwargs.get("metadata")
-        relevant_chunks = kwargs.get("relevant_chunks")
-        chunks_info = self._format_chunks_for_prompt(relevant_chunks)
+        contexts = kwargs.get("contexts")
+        chunks_info = self._format_chunks_for_prompt(contexts)
         schema = ExtractionResultSchema.model_json_schema()
 
         user_prompt = self.config.user_prompt_template.format(
@@ -115,4 +111,3 @@ class PrecisionMiner(AbstractRAG):
         except Exception as e:
             logger.error(f"Extraction parsing/validation failed: {e}")
             return ExtractionResult(description=f"Parsing/validation failed: {e}", items=[])
-

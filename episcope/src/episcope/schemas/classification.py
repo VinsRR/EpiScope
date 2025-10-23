@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 class PaperType(Enum):
     LITERATURE_REVIEW = "literature_review"
-    DATA_ANALYSIS = "data_analysis" 
+    DATA_ANALYSIS = "data_analysis"
+    UNCLEAR = "unclear"
     # METHODS_TOOLS = "methods_tools"
     # CASE_STUDY = "case_study"
     # COMMENTARY = "commentary"
@@ -42,7 +43,7 @@ class ClassificationOutput(BaseModel):
     class_probabilities: Optional[Dict[str, float]] = None
 
 class PaperTypeClassificationOutput(ClassificationOutput):
-    classification: Literal["A", "B"] = Field(..., description="One of: A, B")
+    classification: Literal["A", "B","C"] = Field(..., description="One of: A, B, C")
 
 class DataAccessibilityClassificationOutput(ClassificationOutput):
     classification: Literal["A", "B", "C"] = Field(..., description="One of: A, B, C")

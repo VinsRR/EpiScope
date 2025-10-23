@@ -177,5 +177,3 @@ class LLMGenerator(AbstractGenerator):
             )
 
         return Provenance(answer=answer.strip(), evidences=evidences)
-
-

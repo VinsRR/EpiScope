@@ -84,14 +84,14 @@ class PaperClassifier(AbstractRAG):
 
     def _llm_classify(self, metadata: PaperMetadata,
                       relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> ClassificationResult:
-        """Perform LLM-based classification."""
-        for attempt in range(self.config.max_retries):
+        """Perform LLM-based classification with self-correction."""
+        messages = self._build_initial_prompt(metadata, relevant_chunks)
+        
+        for attempt in range(self.config.max_validation_retries):
             try:
                 provenance = self.generator.generate(
-                    contexts=[],
-                    message_builder=self._build_classification_messages,
-                    metadata=metadata,
-                    relevant_chunks=relevant_chunks,
+                    contexts=list(relevant_chunks.values()),
+                    message_builder=lambda **kwargs: messages,
                     format="json"
                 )
                 response_content = provenance.answer
@@ -103,8 +103,10 @@ class PaperClassifier(AbstractRAG):
                 return self._parse_classification_response(response_content)
             except Exception as e:
                 logger.warning(f"Classification parsing attempt {attempt + 1} failed: {e}")
-                logger.warning(f"LLM response: {response_content}")
-
+                error_message = f"The JSON output is invalid. Please fix it. Error: {e}"
+                messages.append({"role": "assistant", "content": response_content})
+                messages.append({"role": "user", "content": error_message})
+        print("\n\nresponse_content:", response_content,"\n\n")
         return self._create_fallback_result()
 
     def _format_chunks_for_prompt(self, relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> str:
@@ -119,10 +121,8 @@ class PaperClassifier(AbstractRAG):
                 chunks_info += f"  • {score:.3f}: {text}\n"
         return chunks_info
 
-    def _build_classification_messages(self, **kwargs) -> List[Dict[str, str]]:
-        """Create the classification prompt."""
-        metadata = kwargs.get("metadata")
-        relevant_chunks = kwargs.get("relevant_chunks")
+    def _build_initial_prompt(self, metadata: PaperMetadata, relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> List[Dict[str, str]]:
+        """Create the initial classification prompt."""
         chunks_info = self._format_chunks_for_prompt(relevant_chunks)
         schema = self.config.output_schema.model_json_schema()
         categories = "\n".join(f"{key} – {value}" for key, value in self.category_labels.items())
@@ -139,7 +139,6 @@ class PaperClassifier(AbstractRAG):
             n_categories=len(self.category_labels),
             category_labels=", ".join(list(self.category_labels.values()))
         )
-        # print(user_prompt)
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -150,16 +149,8 @@ class PaperClassifier(AbstractRAG):
         parsed = self.config.output_schema.model_validate_json(response_content)
         classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
 
+        confidence = parsed.confidence if parsed.confidence is not None else 0.0
         class_probs = parsed.class_probabilities or {}
-        if parsed.classification in self.category_labels:
-            class_probs[self.category_labels[parsed.classification]] = parsed.confidence or 0.9
-
-        for label in self.category_labels.values():
-            if label not in class_probs:
-                class_probs[label] = 0.01
-
-        confidence = parsed.confidence or class_probs.get(self.category_labels.get(parsed.classification, "Other"),
-                                                           0.9)
 
         return ClassificationResult(
             classification=classification,
@@ -173,6 +164,6 @@ class PaperClassifier(AbstractRAG):
         return ClassificationResult(
             classification=self.config.default_classification,
             confidence=0.0,
-            class_probabilities={label: 0.5 for label in self.category_labels.values()},
-            evidence={"reasoning": "Classification failed, defaulting to data analysis"}
+            class_probabilities={label: 1/len(self.category_labels) for label in self.category_labels.values() if self.category_labels},
+            evidence={"reasoning": "Classification failed, defaulting to unclear"}
         )
