@@ -19,6 +19,8 @@ class BaseClassifierConfig:
     user_prompt_template: str = ""
     output_schema: Any = ClassificationOutput
     default_classification: Any = None
+    max_retries: int = 2
+
 
 @dataclass
 class PaperTypeClassifierConfig(BaseClassifierConfig):
@@ -41,31 +43,35 @@ class PaperTypeClassifierConfig(BaseClassifierConfig):
         "A": "Literature Review",
         "B": "Data Analysis"
     })
-    system_prompt: str = "You are an senior epidemiologist doing reviewing the recent literatures. You are sorting your papers into two categories: Literature Review and Data Analysis."
+    system_prompt: str = """You are an senior epidemiologist doing reviewing the recent literatures. You are sorting your papers into {n_categories} categories: {category_labels}."""
     user_prompt_template: str = """
     You are an senior academic epidemiologist. Your task is to determine the primary type of a research paper.
 
-        **Categories:**
-{categories}
+    **Categories:**
+    {categories}
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
+    **Paper Content:**
+    Title: {title}
+    Abstract: {abstract}
+    Keywords: {keywords}
 
-**Relevant Extracts:**
-{chunks_info}
+    **Relevant Extracts:**
+    {chunks_info}
 
-**Instructions:**
-1. Analyze the evidence to determine the paper's main contribution.
-2. Select a single letter that best represents the paper's primary classification.
-3. Return a single JSON object adhering to the schema. Do not add extra text.
+    **Instructions:**
+    1. Analyze the evidence to determine the paper's main contribution.
+    2. Select a single letter that best represents the paper's primary classification.
+    3. Return a single JSON object adhering to the schema. Do not add extra text.
 
-**Schema:**
-{schema}
-"""
+    **Schema:**
+    {schema}
+    """
     output_schema: Any = PaperTypeClassificationOutput
     default_classification: Any = PaperType.DATA_ANALYSIS
+
+
+
+
 
 @dataclass
 class DataAccessibilityClassifierConfig(BaseClassifierConfig):

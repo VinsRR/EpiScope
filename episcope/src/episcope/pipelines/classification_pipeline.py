@@ -85,7 +85,7 @@ class PaperClassifier(AbstractRAG):
     def _llm_classify(self, metadata: PaperMetadata,
                       relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> ClassificationResult:
         """Perform LLM-based classification."""
-        for attempt in range(2):
+        for attempt in range(self.config.max_retries):
             try:
                 provenance = self.generator.generate(
                     contexts=[],
@@ -95,11 +95,16 @@ class PaperClassifier(AbstractRAG):
                     format="json"
                 )
                 response_content = provenance.answer
+            except Exception as e:
+                logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
+                continue
+
+            try:
                 return self._parse_classification_response(response_content)
             except Exception as e:
-                logger.warning(f"Classification attempt {attempt + 1} failed: {e}")
-                if attempt == 1:
-                    return self._create_fallback_result()
+                logger.warning(f"Classification parsing attempt {attempt + 1} failed: {e}")
+                logger.warning(f"LLM response: {response_content}")
+
         return self._create_fallback_result()
 
     def _format_chunks_for_prompt(self, relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> str:
@@ -130,8 +135,13 @@ class PaperClassifier(AbstractRAG):
             chunks_info=chunks_info,
             schema=json.dumps(schema)
         )
+        system_prompt = self.config.system_prompt.format(
+            n_categories=len(self.category_labels),
+            category_labels=", ".join(list(self.category_labels.values()))
+        )
+        # print(user_prompt)
         return [
-            {"role": "system", "content": self.config.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
