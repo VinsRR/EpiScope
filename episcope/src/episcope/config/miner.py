@@ -31,32 +31,32 @@ You are scanning a research paper to identify key data sources utilized in the s
 You are interested in understanding where the data originated, if it was collected by the authors or sourced from existing datasets and, in the case of existing datasets, what they are.
 You are particularly interested in collecting references to datasets, surveys, or repositories mentioned in the paper."""
     user_prompt_template: str = """You have been provided with extracts from the paper that may contain relevant information.
-**Relevant Extracts:**
-{chunks_info}
-**Instructions:**
-1. Analyze the evidence to identify the key data sources.
-2. For each data source, provide its name, a URL if available, a brief explanation
-3. Return a single JSON object adhering to the schema. Do not add extra text.
-**Schema:**
-{schema}
+    **Relevant Extracts:**
+    {chunks_info}
+    **Instructions:**
+    1. Analyze the evidence to identify the key data sources.
+    2. For each data source, provide its name, a URL if available, a brief explanation
+    3. Return a single JSON object adhering to the schema. Do not add extra text.
+    **Schema:**
+    {schema}
 
-**Example output:**
-{{
-"description": "Brief summary of data sources identified",
-"items": [
-{{
-"name": "Dataset/database name",
-"url": "Full URL or null",
-"explanation": "How it was used in the study",
-"raw_text": "Direct quote from paper"
-}}
-// ... more items as needed
-]
-}}
-DO NOT return the example output above. Instead,
+    **Example output:**
+    {{
+    "description": "Brief summary of data sources identified",
+    "items": [
+    {{
+    "name": "Dataset/database name",
+    "url": "Full URL or null",
+    "explanation": "How it was used in the study",
+    "raw_text": "Direct quote from paper"
+    }}
+    // ... more items as needed
+    ]
+    }}
+    DO NOT return the example output above. Instead,
 
-Output **only** a single JSON object matching the schema above. **Do not** print the schema, do not add commentary. Do not just return the example output. 
-If no data sources are found, return an empty list for items with an appropriate description.
+    Output **only** a single JSON object matching the schema above. **Do not** print the schema, do not add commentary. Do not just return the example output. 
+    If no data sources are found, return an empty list for items with an appropriate description.
 """
 
 @dataclass
