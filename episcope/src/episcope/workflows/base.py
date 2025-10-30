@@ -6,7 +6,7 @@ from episcope.rag.interfaces import AbstractRetriever
 
 
 class AbstractRAG(ABC):
-    """Abstract base class for a RAG pipeline."""
+    """Abstract base class for a RAG workflow."""
 
     def __init__(self, retriever: AbstractRetriever, generator: Generator):
         self.retriever = retriever
@@ -14,5 +14,5 @@ class AbstractRAG(ABC):
 
     @abstractmethod
     def run(self, **kwargs) -> Any:
-        """Run the RAG pipeline."""
+        """Run the RAG workflow."""
         pass

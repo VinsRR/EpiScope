@@ -3,22 +3,19 @@ import logging
 from typing import Dict, List, Optional
 
 from episcope.db.academic_db import AcademicDB
-from episcope.config.miner import PrecisionMinerConfig, FindDataSourcesConfig
-from episcope.pipelines.base import AbstractRAG
+from episcope.workflows.precision_miner.config import PrecisionMinerConfig, FindDataSourcesConfig
+from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.schemas import (
-    ExtractionResult,
-    PaperMetadata,
-    ExtractionItem,
-    ExtractionResultSchema,
-)
+from episcope.schemas import PaperMetadata
+from .results import ExtractionResult, ExtractionItem
+from episcope.workflows.precision_miner.schemas import ExtractionResultSchema
 
 logger = logging.getLogger(__name__)
 
 
 class PrecisionMiner(AbstractRAG):
-    """A configurable RAG pipeline for extracting structured information from papers."""
+    """A configurable RAG workflow for extracting structured information from papers."""
 
     def __init__(self, 
                  retriever: AbstractRetriever, 
@@ -33,7 +30,7 @@ class PrecisionMiner(AbstractRAG):
 
     def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ExtractionResult:
         """
-        Run the extraction pipeline for a single paper.
+        Run the extraction workflow for a single paper.
         """
         if self.academic_db:
             metadata = self.academic_db.get_paper_metadata(paper_id, self.strategy_name)

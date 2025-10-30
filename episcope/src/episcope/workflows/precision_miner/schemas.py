@@ -1,3 +1,16 @@
+"""
+Defines the Pydantic models for validating the external, untrusted output
+of the precision miner workflow, typically from a Large Language Model (LLM).
+
+These models act as a protective barrier, ensuring that the raw JSON output
+from the LLM conforms to a strict, expected structure before it is processed
+further. They are not meant to be the internal domain models of the application.
+
+Once an LLM's output is successfully parsed and validated by these models, the
+workflow's logic then maps this validated data into the clean, internal
+dataclasses defined in `results.py`. This separation ensures that the rest of
+the application only ever interacts with reliable, well-defined data structures.
+"""
 from typing import List, Optional
 from pydantic import BaseModel, Field
 

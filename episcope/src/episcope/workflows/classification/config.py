@@ -1,5 +1,8 @@
-from episcope.schemas import (
-    PaperType, DataAccessibility, DataNation, DataType, ClassificationOutput,
+from .results import (
+    PaperType, DataAccessibility, DataNation, DataType
+)
+from .schemas import (
+    ClassificationOutput,
     PaperTypeClassificationOutput, DataAccessibilityClassificationOutput,
     DataNationClassificationOutput, DataTypeClassificationOutput
 )
@@ -30,10 +33,14 @@ class PaperTypeClassifierConfig(BaseClassifierConfig):
         "literature_review": [
             "Several studies have examined the relationship between X and Y. Smith et al. (2020) found significant associations, while Jones et al. (2021) reported mixed results. A systematic review by Brown et al. (2019) identified 45 relevant studies.",
             "We conducted a systematic literature search across PubMed, Embase, and Web of Science databases. Studies were included if they met inclusion criteria. Two reviewers independently screened titles and abstracts.",
+            "The existing literature can be categorized into three main approaches. Meta-analyses consistently show effect sizes ranging from 0.2 to 0.6. Previous reviews have identified several gaps in the literature.",
+            "This scoping review aims to map the available evidence on X. We searched five databases and included 127 studies. The review follows PRISMA guidelines for systematic reviews."
         ],
         "data_analysis": [
             "We analyzed data from the National Health Survey (n=15,432 participants). Data collection occurred between January 2020 and December 2022. Statistical analyses were performed using R version 4.2.",
             "The dataset contained 23,891 observations across 15 variables. Missing data patterns were examined using multiple imputation. Primary outcomes were measured using validated instruments.",
+            "Participants were recruited through stratified random sampling. Data were collected through structured interviews. The final analytic sample included 8,734 individuals after exclusions.",
+            "Descriptive statistics were calculated for all variables. Logistic regression models were fitted with adjustment for confounders. Effect sizes and 95% confidence intervals are reported."
         ],
     })
     classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: {
@@ -110,74 +117,32 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
     user_prompt_template: str = """
     You are a data librarian. Your task is to determine the accessibility of the supporting data in a research paper.
 
-        **Categories:**
-{categories}
+    **Categories:**
+    {categories}
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
+    **Paper Content:**
+    Title: {title}
+    Abstract: {abstract}
+    Keywords: {keywords}
 
-**Relevant Extracts:**
-{chunks_info}
+    **Relevant Extracts:**
+    {chunks_info}
 
-**Instructions:**
-1. Analyze the evidence to determine the data accessibility statement.
-2. Select a single letter that best represents the data's accessibility.
-3. Return a single JSON object adhering to the schema. Do not add extra text.
+    **Instructions:**
+    1. Analyze the evidence to determine the data accessibility statement.
+    2. Select a single letter that best represents the data's accessibility.
+    3. Return a single JSON object adhering to the schema. Do not add extra text.
 
-**Schema:**
-{schema}
-"""
+    **Schema:**
+    {schema}
+    """
     output_schema: Any = DataAccessibilityClassificationOutput
     default_classification: Any = DataAccessibility.NOT_AVAILABLE
 
-@dataclass
-class DataNationClassifierConfig(BaseClassifierConfig):
-    """Configuration for classifying the nation(s) of data origin."""
-    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "usa": ["Data was sourced from the US National Health and Nutrition Examination Survey (NHANES)."],
-        "uk": ["We used data from the UK Biobank, a large-scale biomedical database and research resource."],
-        "china": ["This study is based on data from the China Health and Retirement Longitudinal Study (CHARLS)."],
-        "europe_multiple": ["Data from several European countries were included in this analysis."],
-        "global": ["We conducted a global survey covering participants from multiple continents."],
-        "synthetic": ["We generated a synthetic dataset to simulate patient profiles for this study."],
-        "not_specified": ["The geographic origin of the data was not specified in the paper."]
-    })
-    classification_mapping: Dict[str, DataNation] = field(default_factory=lambda: {
-        "A": DataNation.USA, "B": DataNation.UK, "C": DataNation.CHINA,
-        "D": DataNation.EUROPE_MULTIPLE, "E": DataNation.GLOBAL,
-        "F": DataNation.SYNTHETIC, "G": DataNation.NOT_SPECIFIED
-    })
-    category_labels: Dict[str, str] = field(default_factory=lambda: {
-        "A": "USA", "B": "UK", "C": "China", "D": "Europe (Multiple)",
-        "E": "Global", "F": "Synthetic", "G": "Not Specified"
-    })
-    system_prompt: str = "You are a research analyst identifying the geographic origin of data in epidemiological studies."
-    user_prompt_template: str = """
-    You are a research analyst. Your task is to identify the geographic origin of the data used in a research paper.
 
-        **Categories:**
-{categories}
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
 
-**Relevant Extracts:**
-{chunks_info}
 
-**Instructions:**
-1. Analyze the evidence to determine the nation(s) the data is from.
-2. Select a single letter that best represents the data's origin.
-3. Return a single JSON object adhering to the schema. Do not add extra text.
-
-**Schema:**
-{schema}
-"""
-    output_schema: Any = DataNationClassificationOutput
-    default_classification: Any = DataNation.NOT_SPECIFIED
 
 @dataclass
 class DataTypeClassifierConfig(BaseClassifierConfig):
@@ -192,7 +157,7 @@ class DataTypeClassifierConfig(BaseClassifierConfig):
             "Participants wore Fitbit devices to track physical activity."
         ],
         "synthetic": ["A synthetic dataset was generated to test our model."],
-        "not_specified": ["The type of data used was not explicitly described in the methods."]
+
     })
     classification_mapping: Dict[str, DataType] = field(default_factory=lambda: {
         "A": DataType.TRADITIONAL, "B": DataType.NON_TRADITIONAL,
@@ -208,24 +173,73 @@ class DataTypeClassifierConfig(BaseClassifierConfig):
     user_prompt_template: str = """
     You are a data scientist. Your task is to classify the type of data used in a research paper.
 
-        **Categories:**
-{categories}
+    **Categories:**
+    {categories}
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
+    **Paper Content:**
+    Title: {title}
+    Abstract: {abstract}
+    Keywords: {keywords}
 
-**Relevant Extracts:**
-{chunks_info}
+    **Relevant Extracts:**
+    {chunks_info}
 
-**Instructions:**
-1. Analyze the evidence to determine the type of data used.
-2. Select a single letter that best represents the data type.
-3. Return a single JSON object adhering to the schema. Do not add extra text.
+    **Instructions:**
+    1. Analyze the evidence to determine the type of data used.
+    2. Select a single letter that best represents the data type.
+    3. Return a single JSON object adhering to the schema. Do not add extra text.
 
-**Schema:**
-{schema}
-"""
+    **Schema:**
+    {schema}
+    """
     output_schema: Any = DataTypeClassificationOutput
     default_classification: Any = DataType.NOT_SPECIFIED
+
+
+
+# @dataclass
+# class DataNationClassifierConfig(BaseClassifierConfig):
+#     """Configuration for classifying the nation(s) of data origin."""
+#     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
+#         "usa": ["Data was sourced from the US National Health and Nutrition Examination Survey (NHANES)."],
+#         "uk": ["We used data from the UK Biobank, a large-scale biomedical database and research resource."],
+#         "china": ["This study is based on data from the China Health and Retirement Longitudinal Study (CHARLS)."],
+#         "europe_multiple": ["Data from several European countries were included in this analysis."],
+#         "global": ["We conducted a global survey covering participants from multiple continents."],
+#         "synthetic": ["We generated a synthetic dataset to simulate patient profiles for this study."],
+#         "not_specified": ["The geographic origin of the data was not specified in the paper."]
+#     })
+#     classification_mapping: Dict[str, DataNation] = field(default_factory=lambda: {
+#         "A": DataNation.USA, "B": DataNation.UK, "C": DataNation.CHINA,
+#         "D": DataNation.EUROPE_MULTIPLE, "E": DataNation.GLOBAL,
+#         "F": DataNation.SYNTHETIC, "G": DataNation.NOT_SPECIFIED
+#     })
+#     category_labels: Dict[str, str] = field(default_factory=lambda: {
+#         "A": "USA", "B": "UK", "C": "China", "D": "Europe (Multiple)",
+#         "E": "Global", "F": "Synthetic", "G": "Not Specified"
+#     })
+#     system_prompt: str = "You are a research analyst identifying the geographic origin of data in epidemiological studies."
+#     user_prompt_template: str = """
+#     You are a research analyst. Your task is to identify the geographic origin of the data used in a research paper.
+
+#         **Categories:**
+# {categories}
+
+# **Paper Content:**
+# Title: {title}
+# Abstract: {abstract}
+# Keywords: {keywords}
+
+# **Relevant Extracts:**
+# {chunks_info}
+
+# **Instructions:**
+# 1. Analyze the evidence to determine the nation(s) the data is from.
+# 2. Select a single letter that best represents the data's origin.
+# 3. Return a single JSON object adhering to the schema. Do not add extra text.
+
+# **Schema:**
+# {schema}
+# """
+#     output_schema: Any = DataNationClassificationOutput
+#     default_classification: Any = DataNation.NOT_SPECIFIED

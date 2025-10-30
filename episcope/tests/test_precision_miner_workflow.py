@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from episcope.db.in_memory_academic_db import InMemoryAcademicDB
 from episcope.config.miner import FindDataSourcesConfig
-from episcope.pipelines.precision_miner_pipeline import PrecisionMiner
+from episcope.workflows.precision_miner_workflow import PrecisionMiner
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.rag.provenance import Provenance

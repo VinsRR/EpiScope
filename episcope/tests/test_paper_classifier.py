@@ -7,7 +7,7 @@ These tests exercise internal helper methods of the
 import unittest
 from unittest.mock import MagicMock
 
-from episcope.pipelines.classification_pipeline import PaperClassifier
+from episcope.workflows.classification_workflow import PaperClassifier
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 

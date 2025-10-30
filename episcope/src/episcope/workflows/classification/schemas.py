@@ -1,39 +1,19 @@
-from enum import Enum
+"""
+Defines the Pydantic models for validating the external, untrusted output
+of the classification workflow, typically from a Large Language Model (LLM).
+
+These models act as a protective barrier, ensuring that the raw JSON output
+from the LLM conforms to a strict, expected structure before it is processed
+further. They are not meant to be the internal domain models of the application.
+
+Once an LLM's output is successfully parsed and validated by these models, the
+workflow's logic then maps this validated data into the clean, internal
+dataclasses defined in `results.py`. This separation ensures that the rest of
+the application only ever interacts with reliable, well-defined data structures.
+"""
 from typing import Dict, Optional, Literal
 
 from pydantic import BaseModel, Field
-
-class PaperType(Enum):
-    LITERATURE_REVIEW = "literature_review"
-    DATA_ANALYSIS = "data_analysis"
-    UNCLEAR = "unclear"
-    # METHODS_TOOLS = "methods_tools"
-    # CASE_STUDY = "case_study"
-    # COMMENTARY = "commentary"
-    # OTHER = "other"
-    # UNCLEAR = "unclear"
-
-class DataAccessibility(Enum):
-    OPEN_ACCESS = "open_access"
-    RESTRICTED_ACCESS = "restricted_access"
-    NOT_AVAILABLE = "not_available"
-
-class DataNation(Enum):
-    USA = "usa"
-    UK = "uk"
-    CHINA = "china"
-    EUROPE_MULTIPLE = "europe_multiple"
-    GLOBAL = "global"
-    SYNTHETIC = "synthetic"
-    NOT_SPECIFIED = "not_specified"
-
-class DataType(Enum):
-    TRADITIONAL = "traditional"
-    NON_TRADITIONAL = "non_traditional"
-    SYNTHETIC = "synthetic"
-    NOT_SPECIFIED = "not_specified"
-
-
 
 # Pydantic schema for structured LLM output
 class ClassificationOutput(BaseModel):

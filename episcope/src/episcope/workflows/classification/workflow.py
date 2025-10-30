@@ -4,14 +4,12 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from episcope.db.academic_db import AcademicDB
-from episcope.config.classifier import BaseClassifierConfig, PaperTypeClassifierConfig
-from episcope.pipelines.base import AbstractRAG
+from episcope.workflows.classification.config import BaseClassifierConfig, PaperTypeClassifierConfig
+from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.schemas import (
-    ClassificationResult,
-    PaperMetadata,
-)
+from episcope.schemas import PaperMetadata
+from .results import ClassificationResult
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,7 +35,7 @@ class PaperClassifier(AbstractRAG):
 
     def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ClassificationResult:
         """
-        Run the classification pipeline for a single paper.
+        Run the classification workflow for a single paper.
         """
         if self.academic_db:
             metadata = self.academic_db.get_paper_metadata(paper_id, self.strategy_name)

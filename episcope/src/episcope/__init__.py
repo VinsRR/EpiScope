@@ -9,14 +9,14 @@ settings.  See individual modules for details.
 
 # Explicitly import common configs so they are discoverable via
 # `from episcope.configs import text_only, colpali, graph`.
-from .config import *  # noqa: F401,F403
+# from .config import *  # noqa: F401,F403
 
 __version__ = "0.1.0"
 
 from episcope.db import mongo_academic_db, in_memory_academic_db
 from episcope import rag 
 from episcope.rag import generation,indexing,ingestion, retrieval
-from episcope import pipelines
+from episcope import workflows
 from episcope import utils
 
 
@@ -25,7 +25,7 @@ __all__ = [
     "mongo_academic_db",
     "in_memory_academic_db",
     "rag",
-    "pipelines",
+    "workflows",
     "utils",
     "generation",
     "indexing",
