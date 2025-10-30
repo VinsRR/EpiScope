@@ -21,6 +21,7 @@ setup(
         "layoutparser",
         "opencv-python",
         "img2table",
+        "google-generativeai",
     ],
     extras_require={
         "torch": [

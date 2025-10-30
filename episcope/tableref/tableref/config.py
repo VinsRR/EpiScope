@@ -45,3 +45,32 @@ class OllamaConfig:
         "Output only the references, one per line. "
         "Return all unique surnames you can find."
     )
+
+
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+@dataclass
+class GeminiCredentials:
+    """Credentials for Gemini."""
+    
+    api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
+
+@dataclass
+class GeminiConfig:
+    """Configuration for Gemini client interactions."""
+    model: str = "gemini-2.5-flash-lite"
+    temperature: float = 0.0
+    system_prompt: str = (
+        "You are an expert at extracting references from scientific papers. "
+        "The user will upload a PDF of a review paper. Your task is to identify and list the references that were "
+        "instrumental for the analysis done in the paper. This is NOT the full list of references, but the specific subset the review is based on. "
+        "Respond ONLY with the requested list in plain text, one item per line. "
+        "If you cannot find the references, provide a short explanation of why (e.g., they are in supplementary materials) "
+        "and if possible, provide a link or instructions on how to find them."
+    )
+    user_prompt: str = (
+        "Please analyze the attached scientific paper and extract the references "
+        "the review is based on"
+    )

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 
-from .candidates import OllamaCandidateGenerator
+from .candidates import OllamaCandidateGenerator, GeminiFullFileGenerator
 from .clients import fetch_doi_from_crossref
 from .config import CrossrefConfig, MatcherConfig, OllamaConfig, SimpleSurnameMatcherConfig
 from .extractors.base import BaseExtractor
@@ -158,6 +158,139 @@ class TableRefPipeline:
 
             dois = [r["crossref_doi"] for r in output["comparison_results"] if r.get("crossref_doi")]
             with open(output_dir / "matched_dois.txt", 'w') as f:
+                f.write("\n".join(dois))
+            logger.info(f"Results saved to {output_dir}")
+        except Exception as e:
+            logger.warning(f'Failed to save results: {e}')
+
+class FileRefPipeline:
+    """
+    Orchestrates an end-to-end process of candidate generation from a full file,
+    reference matching, and data enrichment. Skips table extraction.
+    """
+
+    def __init__(
+        self,
+        candidate_generator: GeminiFullFileGenerator,
+        matcher: ReferenceMatcher,
+        crossref_config: Optional[CrossrefConfig] = None,
+        output_root: Union[str, Path] = "output",
+    ):
+        self.candidate_generator = candidate_generator
+        self.matcher = matcher
+        self.crossref_config = crossref_config or CrossrefConfig()
+        self.output_root = Path(output_root)
+
+    def run(self, pdf_path: Union[str, Path], references: Sequence[Union[Dict, Any]]) -> Dict[str, Any]:
+        """
+        Executes the full pipeline for a single PDF.
+
+        Args:
+            pdf_path: Path to the PDF file to process.
+            references: A list of canonical reference objects to match against.
+
+        Returns:
+            A dictionary containing the final, structured results.
+        """
+        pdf_path = Path(pdf_path)
+        paper_id = pdf_path.stem
+        paper_output_dir = self.output_root / paper_id
+        paper_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Generate candidates from the full PDF
+        ref_lines = self.candidate_generator.generate(pdf_path=str(pdf_path))
+        candidates = [{'candidate': c.strip()} for c in ref_lines if c and isinstance(c, str)]
+
+        # 2. Match candidates against references
+        self.matcher.prepare(list(references))
+        raw_matches = self.matcher.match_candidates(candidates, list(references), top_n=1)
+
+        # 3. Process and enrich matches
+        ref_map = {self._safe_get_reference_field(r, "index", i): r for i, r in enumerate(references)}
+        comparison_results = [
+            self._process_match(c, m, ref_map) for c, m in zip(candidates, raw_matches)
+        ]
+
+        # 4. Format and save final output
+        output = self._format_output(paper_id, candidates, comparison_results)
+        self._save_results(output, paper_output_dir)
+
+        return output
+
+    def _process_match(self, cand_obj, matches, ref_map):
+        # This can be shared with TableRefPipeline, maybe in a utils file or a base class.
+        # For now, I'll copy it.
+        result = {"candidate_text": cand_obj.get('candidate', ''), "has_match": False, "match_score": 0.0}
+        if matches:
+            top_match = matches[0]
+            matched_index = top_match.get("matched_index")
+            if matched_index is not None:
+                result.update({"has_match": True, "match_score": top_match.get("score", 0.0), "reference_index": matched_index})
+                ref_obj = ref_map.get(matched_index)
+                if ref_obj:
+                    result.update(self._get_ref_fields(ref_obj))
+                    self._enrich_with_crossref(result)
+        return result
+
+    def _get_ref_fields(self, ref_obj):
+        # This can be shared
+        return {
+            "reference_title": self._safe_get_reference_field(ref_obj, "title"),
+            "reference_authors": self._safe_get_reference_field(ref_obj, "authors"),
+            "reference_journal": self._safe_get_reference_field(ref_obj, "journal"),
+            "reference_year": self._safe_get_reference_field(ref_obj, "year"),
+            "reference_doi": self._safe_get_reference_field(ref_obj, "doi"),
+        }
+
+    def _enrich_with_crossref(self, result):
+        # This can be shared
+        if result.get("reference_doi"):
+            result["crossref_doi"] = result["reference_doi"]
+            return
+        try:
+            cr_res = fetch_doi_from_crossref(
+                title=result["reference_title"] or result["candidate_text"],
+                config=self.crossref_config,
+                authors=result["reference_authors"],
+                journal=result["reference_journal"],
+                year=result["reference_year"],
+            )
+            result.update({"crossref_doi": cr_res.get("doi"), "crossref_error": cr_res.get("error")})
+        except Exception as e:
+            logger.warning(f"Crossref lookup failed: {e}")
+            result["crossref_error"] = str(e)
+
+    def _safe_get_reference_field(self, ref_obj: Any, field: str, default=None):
+        # This can be shared
+        if hasattr(ref_obj, field):
+            return getattr(ref_obj, field, default)
+        if isinstance(ref_obj, dict):
+            return ref_obj.get(field, default)
+        return default
+
+    def _format_output(self, paper_id, candidates, comparison_results):
+        return {
+            "paper_id": paper_id,
+            "summary": {
+                "total_candidates": len(candidates),
+                "candidates_with_matches": sum(1 for r in comparison_results if r["has_match"]),
+                "crossref_dois_found": sum(1 for r in comparison_results if r.get("crossref_doi")),
+            },
+            "comparison_results": comparison_results,
+        }
+
+    def _save_results(self, output: Dict, output_dir: Path):
+        # This can be shared
+        try:
+            summary_path = output_dir / "fileref_match_comparison.json"
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                json.dump(output, f, indent=2, default=str)
+            
+            df = pd.DataFrame(output["comparison_results"])
+            df.to_csv(output_dir / "fileref_comparison_results.csv", index=False)
+
+            dois = [r["crossref_doi"] for r in output["comparison_results"] if r.get("crossref_doi")]
+            with open(output_dir / "fileref_matched_dois.txt", 'w') as f:
                 f.write("\n".join(dois))
             logger.info(f"Results saved to {output_dir}")
         except Exception as e:
