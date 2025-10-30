@@ -93,6 +93,7 @@ class PaperClassifier(AbstractRAG):
                     format="json"
                 )
                 response_content = provenance.answer
+
             except Exception as e:
                 logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
                 continue
@@ -144,6 +145,10 @@ class PaperClassifier(AbstractRAG):
 
     def _parse_classification_response(self, response_content: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
+        # if response starts with ```json\n it means the LLM formatted it as a string codeblock
+        if response_content.startswith("```json"):
+            response_content = response_content.replace("```json", "").replace("```", "").strip()
+
         parsed = self.config.output_schema.model_validate_json(response_content)
         classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
 
