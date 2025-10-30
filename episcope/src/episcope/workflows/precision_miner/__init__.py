@@ -5,7 +5,7 @@ from .config import (
     FindSupplementaryLinksConfig,
     IdentifyKeyReferencesConfig,
 )
-from .results import ExtractionResult, ExtractionItem, DataSource
+from .schemas import ExtractionResult, ExtractionItem, DataSource
 
 __all__ = [
     "PrecisionMiner",

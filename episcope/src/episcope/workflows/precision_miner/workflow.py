@@ -8,8 +8,7 @@ from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.schemas import PaperMetadata
-from .results import ExtractionResult, ExtractionItem
-from episcope.workflows.precision_miner.schemas import ExtractionResultSchema
+from .schemas import ExtractionResult, ExtractionItem, ExtractionResultSchema
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +105,7 @@ class PrecisionMiner(AbstractRAG):
             if response.startswith("```json"):
                 response = response.replace("```json", "").replace("```", "").strip()
 
-            validated_data = ExtractionResultSchema.model_validate_json(response)
-            items = [ExtractionItem(**item.model_dump()) for item in validated_data.items]
-            return ExtractionResult(description=validated_data.description, items=items)
+            return ExtractionResult.model_validate_json(response)
         except Exception as e:
             logger.error(f"Extraction parsing/validation failed: {e}")
             return ExtractionResult(description=f"Parsing/validation failed: {e}", items=[])

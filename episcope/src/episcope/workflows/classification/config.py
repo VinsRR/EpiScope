@@ -1,10 +1,8 @@
-from .results import (
-    PaperType, DataAccessibility, DataNation, DataType
-)
 from .schemas import (
-    ClassificationOutput,
-    PaperTypeClassificationOutput, DataAccessibilityClassificationOutput,
-    DataNationClassificationOutput, DataTypeClassificationOutput
+    PaperType, DataAccessibility, DataNation, DataType,
+    ClassificationOutput, PaperTypeClassificationOutput,
+    DataAccessibilityClassificationOutput, DataNationClassificationOutput,
+    DataTypeClassificationOutput
 )
 from typing import Dict, List, Any
 from dataclasses import dataclass, field

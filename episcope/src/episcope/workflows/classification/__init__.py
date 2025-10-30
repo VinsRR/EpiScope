@@ -5,7 +5,7 @@ from .config import (
     DataAccessibilityClassifierConfig,
     DataTypeClassifierConfig,
 )
-from .results import (
+from .schemas import (
     ClassificationResult,
     PaperType,
     DataAccessibility,

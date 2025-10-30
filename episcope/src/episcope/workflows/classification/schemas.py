@@ -1,21 +1,50 @@
 """
-Defines the Pydantic models for validating the external, untrusted output
-of the classification workflow, typically from a Large Language Model (LLM).
+Defines the Pydantic models for the classification workflow.
 
-These models act as a protective barrier, ensuring that the raw JSON output
-from the LLM conforms to a strict, expected structure before it is processed
-further. They are not meant to be the internal domain models of the application.
+These models serve a dual purpose:
+1.  **Validation:** They act as a protective barrier, parsing and validating the
+    raw, untrusted JSON output from an external source like an LLM.
+2.  **Internal Data Structure:** They are the single, canonical source of truth
+    for the workflow's output. Once validated, these models are used directly
+    by the rest of the application.
 
-Once an LLM's output is successfully parsed and validated by these models, the
-workflow's logic then maps this validated data into the clean, internal
-dataclasses defined in `results.py`. This separation ensures that the rest of
-the application only ever interacts with reliable, well-defined data structures.
+This unified approach avoids the need to maintain separate dataclasses and
+Pydantic models, simplifying the codebase.
 """
-from typing import Dict, Optional, Literal
-
+from enum import Enum
+from typing import Any, Dict, Optional, Literal
 from pydantic import BaseModel, Field
+from dataclasses import dataclass, field
 
-# Pydantic schema for structured LLM output
+# --- Controlled Vocabulary ---
+
+class PaperType(Enum):
+    LITERATURE_REVIEW = "literature_review"
+    DATA_ANALYSIS = "data_analysis"
+    UNCLEAR = "unclear"
+
+class DataAccessibility(Enum):
+    OPEN_ACCESS = "open_access"
+    RESTRICTED_ACCESS = "restricted_access"
+    NOT_AVAILABLE = "not_available"
+
+class DataNation(Enum):
+    USA = "usa"
+    UK = "uk"
+    CHINA = "china"
+    EUROPE_MULTIPLE = "europe_multiple"
+    GLOBAL = "global"
+    SYNTHETIC = "synthetic"
+    NOT_SPECIFIED = "not_specified"
+
+class DataType(Enum):
+    TRADITIONAL = "traditional"
+    NON_TRADITIONAL = "non_traditional"
+    SYNTHETIC = "synthetic"
+    NOT_SPECIFIED = "not_specified"
+
+# --- Pydantic Schemas for LLM Validation ---
+
 class ClassificationOutput(BaseModel):
     classification: str = Field(..., description="A single letter representing the classification")
     reasoning: str = Field(..., description="Short 1-2 sentence explanation")
@@ -33,3 +62,12 @@ class DataNationClassificationOutput(ClassificationOutput):
 
 class DataTypeClassificationOutput(ClassificationOutput):
     classification: Literal["A", "B", "C", "D"] = Field(..., description="One of: A, B, C, D")
+
+# --- Final Workflow Output Model ---
+
+@dataclass
+class ClassificationResult:
+    classification: Any
+    confidence: float
+    class_probabilities: Dict[str, float] = field(default_factory=dict)
+    evidence: Dict = field(default_factory=dict)

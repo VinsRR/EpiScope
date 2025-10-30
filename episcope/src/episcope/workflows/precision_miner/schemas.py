@@ -1,53 +1,45 @@
 """
-Defines the Pydantic models for validating the external, untrusted output
-of the precision miner workflow, typically from a Large Language Model (LLM).
+Defines the Pydantic models for the precision miner workflow.
 
-These models act as a protective barrier, ensuring that the raw JSON output
-from the LLM conforms to a strict, expected structure before it is processed
-further. They are not meant to be the internal domain models of the application.
+These models serve a dual purpose:
+1.  **Validation:** They act as a protective barrier, parsing and validating the
+    raw, untrusted JSON output from an external source like an LLM.
+2.  **Internal Data Structure:** They are the single, canonical source of truth
+    for the workflow's output. Once validated, these models are used directly
+    by the rest of the application.
 
-Once an LLM's output is successfully parsed and validated by these models, the
-workflow's logic then maps this validated data into the clean, internal
-dataclasses defined in `results.py`. This separation ensures that the rest of
-the application only ever interacts with reliable, well-defined data structures.
+This unified approach avoids the need to maintain separate dataclasses and
+Pydantic models, simplifying the codebase.
 """
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-# https://realpython.com/python-pydantic/
-# https://www.doc.ic.ac.uk/~nuric/posts/coding/structuring-llm-responses-with-json-schema/?utm_source=chatgpt.com
-# https://www.leocon.dev/blog/2024/11/from-chaos-to-control-mastering-llm-outputs-with-langchain-and-pydantic/
+# --- Main Workflow Output Models ---
+
+class ExtractionItem(BaseModel):
+    name: str
+    url: Optional[str] = None
+    explanation: Optional[str] = None
+    raw_text: Optional[str] = None
+
+class ExtractionResult(BaseModel):
+    description: str
+    items: List[ExtractionItem] = Field(default_factory=list)
+
+class DataSource(BaseModel):
+    source_name: str
+    url: str = "N/A"
+    explanation: str = ""
+    section_found: str = ""
+
+# --- Pydantic Schemas for LLM Validation ---
 
 class ExtractionItemSchema(BaseModel):
-    # item_type: str = Field(..., description="Type of item, e.g., 'reference'")
     name: str = Field(..., description="Full source name as appears in paper")
     url: Optional[str] = Field(None, description="URL/DOI if available else null")
     explanation: str = Field(..., description="Why this item is key")
-    # section_found: Optional[str] = Field(None, description="Paper section where it is pivotal")
     raw_text: Optional[str] = Field(None, description="Exact reference snippet from the paper")
 
 class ExtractionResultSchema(BaseModel):
     description: str = Field(..., description="Short summary of why these references were selected")
     items: List[ExtractionItemSchema] = Field(default_factory=list, description="List of key references")
-
-
-class DataSourceItemSchema(BaseModel):
-    source_name: str
-    url: str
-    explanation: str
-    section_found: str
-
-class ReferenceSchema(BaseModel):
-    raw_text: str
-    is_data_source: bool = False
-    title: str = ""
-    authors: List[str] = []
-    year: Optional[int] = None
-    journal: str = ""
-    doi: str = ""
-    url: str = ""
-
-class DataSourceSchema(BaseModel):
-    data_sources_description: str
-    data_sources: List[DataSourceItemSchema]
-    references: Optional[List[ReferenceSchema]] = None

@@ -9,7 +9,7 @@ from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.schemas import PaperMetadata
-from .results import ClassificationResult
+from .schemas import ClassificationResult 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
