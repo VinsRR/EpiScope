@@ -11,7 +11,7 @@ class BaseClassifierConfig:
     """Base configuration for a paper classifier."""
     similarity_threshold: float = 0.75
     top_k: int = 10
-    embedding_model: str = "jinaai/jina-embeddings-v3"
+    # embedding_model: str = "jinaai/jina-embeddings-v3"
     template_paragraphs: Dict[str, List[str]] = field(default_factory=dict)
     classification_mapping: Dict[str, Any] = field(default_factory=dict)
     category_labels: Dict[str, str] = field(default_factory=dict)

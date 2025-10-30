@@ -57,6 +57,7 @@ You are particularly interested in collecting references to datasets, surveys, o
 
     Output **only** a single JSON object matching the schema above. **Do not** print the schema, do not add commentary. Do not just return the example output. 
     If no data sources are found, return an empty list for items with an appropriate description.
+    Output MUST be valid JSON that conforms EXACTLY to the Pydantic schema provided.
 """
 
 @dataclass

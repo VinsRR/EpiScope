@@ -105,6 +105,10 @@ class PrecisionMiner(AbstractRAG):
     def _parse_extraction_response(self, response: str) -> ExtractionResult:
         """Parse JSON response from extraction LLM."""
         try:
+            # if response starts with ```json\n it means the LLM formatted it as a string code block
+            if response.startswith("```json"):
+                response = response.replace("```json", "").replace("```", "").strip()
+
             validated_data = ExtractionResultSchema.model_validate_json(response)
             items = [ExtractionItem(**item.model_dump()) for item in validated_data.items]
             return ExtractionResult(description=validated_data.description, items=items)
