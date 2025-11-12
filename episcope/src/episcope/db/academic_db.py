@@ -16,7 +16,7 @@ class AcademicDB(ABC):
     @abstractmethod
     def insert(
         self,
-        paper_id: str,
+        doc_id: str,
         data_type: str,
         strategy_name: str,
         content: Dict[str, Any],
@@ -26,15 +26,15 @@ class AcademicDB(ABC):
 
     @abstractmethod
     def retrieve(
-        self, paper_id: str, data_type: str, strategy_name: str
+        self, doc_id: str, data_type: str, strategy_name: str
     ) -> Optional[Any]:
         """Retrieve a single extraction record."""
         pass
 
     def get_paper_metadata(
-            self, paper_id: str, strategy_name: str):
+            self, doc_id: str, strategy_name: str):
         """Retrieve metadata for a given paper ID."""
-        return self.retrieve(paper_id, "metadata", strategy_name)
+        return self.retrieve(doc_id, "metadata", strategy_name)
 
 
     @abstractmethod
@@ -43,8 +43,8 @@ class AcademicDB(ABC):
         pass
 
     @abstractmethod
-    def list_papers(self, strategy_name: str) -> List[str]:
-        """List all paper IDs for a given strategy."""
+    def list_docs(self, strategy_name: str) -> List[str]:
+        """List all document IDs for a given strategy."""
         pass
 
     def _deserialize_content(self, data_type: str, content: Any) -> Optional[Any]:

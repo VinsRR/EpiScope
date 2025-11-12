@@ -30,7 +30,7 @@ class HuggingFaceEmbedder(Embedder):
     def __init__(self, model: str = "sentence-transformers/all-MiniLM-L6-v2", batch_size: int = 8) -> None:
         self._model = model
         self._batch_size = batch_size
-        self._embedder = HuggingFaceEmbedding(model_name=model, trust_remote_code=True)
+        self._embedder = HuggingFaceEmbedding(model=model, trust_remote_code=True)
         cfg = AutoConfig.from_pretrained(model, trust_remote_code=True)
         # self._dim = cfg.hidden_size
         self._dim = len(self.embed_text("test"))

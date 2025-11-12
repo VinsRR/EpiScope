@@ -61,7 +61,12 @@ class LateInteractionMatcher:
         self.ref_texts = []
         for r in self.refs:
             authors = getattr(r, "authors", []) or []
-            first_author = self.normalize(authors[0] if authors else "")
+            first_author_raw = authors[0] if authors else ""
+            if not isinstance(first_author_raw, str):
+                logger.warning(f"First author is not a string, but {type(first_author_raw)}. Value: {first_author_raw}. Skipping.")
+                first_author_raw = ""
+            first_author = self.normalize(first_author_raw)
+            
             parts = [
                 self.normalize(r.title) if hasattr(r, "title") else "",
                 first_author,
@@ -297,6 +302,9 @@ class SimpleSurnameMatcher:
         for i, r in enumerate(self.refs):
             authors = getattr(r, "authors", []) or []
             first_author = authors[0] if authors else ""
+            if not isinstance(first_author, str):
+                logger.warning(f"First author is not a string, but {type(first_author)}. Value: {first_author}. Skipping.")
+                first_author = ""
             surname = _extract_surname(first_author)
             surname_norm = simple_normalize(surname, self.normalize)
             entry = {

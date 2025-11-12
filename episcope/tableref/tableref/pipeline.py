@@ -198,21 +198,42 @@ class FileRefPipeline:
         paper_output_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Generate candidates from the full PDF
-        ref_lines = self.candidate_generator.generate(pdf_path=str(pdf_path))
+        logger.info(f"Generating candidates from full file {pdf_path}...")
+        extraction_payload = self.candidate_generator.generate(pdf_path=str(pdf_path))
+        
+        if not extraction_payload:
+            logger.error(f"Failed to generate candidates for {pdf_path}, pipeline terminating.")
+            output = self._format_output(paper_id, [], [], extraction_payload=None)
+            self._save_results(output, paper_output_dir)
+            return output
+
+        ref_lines = extraction_payload.studies or []
+        if not ref_lines and extraction_payload.supplements:
+            logger.warning(
+                f"No studies found in the main text for {pdf_path}, but supplements were detected. "
+                "The included studies may be in the supplementary materials. "
+                "Manual review is recommended."
+            )
+            # for supplement in extraction_payload.supplements:
+            #     logger.warning(f"  - Supplement: {supplement.label or 'No label'}, URL: {supplement.href or 'No URL'}, Note: {supplement.content_note or 'No note'}")
+
         candidates = [{'candidate': c.strip()} for c in ref_lines if c and isinstance(c, str)]
 
         # 2. Match candidates against references
+        logger.info(f"Matching {len(candidates)} candidates against {len(references)} references...")
         self.matcher.prepare(list(references))
         raw_matches = self.matcher.match_candidates(candidates, list(references), top_n=1)
 
         # 3. Process and enrich matches
+        logger.info(f"Processing matches...")
         ref_map = {self._safe_get_reference_field(r, "index", i): r for i, r in enumerate(references)}
         comparison_results = [
             self._process_match(c, m, ref_map) for c, m in zip(candidates, raw_matches)
         ]
 
         # 4. Format and save final output
-        output = self._format_output(paper_id, candidates, comparison_results)
+        logger.info(f"Formatting output for {pdf_path}...")
+        output = self._format_output(paper_id, candidates, comparison_results, extraction_payload.model_dump())
         self._save_results(output, paper_output_dir)
 
         return output
@@ -268,15 +289,30 @@ class FileRefPipeline:
             return ref_obj.get(field, default)
         return default
 
-    def _format_output(self, paper_id, candidates, comparison_results):
+    def _format_output(self, paper_id, candidates, comparison_results, extraction_payload: Optional[Dict] = None):
+        summary = {
+            "total_candidates": len(candidates),
+            "candidates_with_matches": sum(1 for r in comparison_results if r["has_match"]),
+            "crossref_dois_found": sum(1 for r in comparison_results if r.get("crossref_doi")),
+        }
+        if extraction_payload:
+            if extraction_payload.get('declared_included_count'):
+                summary['declared_included_count'] = extraction_payload['declared_included_count'].get('value')
+            if extraction_payload.get('review_type'):
+                summary['review_type'] = extraction_payload['review_type']
+            if extraction_payload.get('supplements'):
+                summary['supplements_found'] = len(extraction_payload['supplements'])
+            # if extraction_payload.get('evidence_tables_figures'):
+            #     summary['evidence_tables_figures_found'] = len(extraction_payload['evidence_tables_figures'])
+
         return {
             "paper_id": paper_id,
-            "summary": {
-                "total_candidates": len(candidates),
-                "candidates_with_matches": sum(1 for r in comparison_results if r["has_match"]),
-                "crossref_dois_found": sum(1 for r in comparison_results if r.get("crossref_doi")),
-            },
+            "summary": summary,
             "comparison_results": comparison_results,
+            "supplements": extraction_payload.get("supplements") if extraction_payload else [],
+            # "evidence_tables_figures": extraction_payload.get("evidence_tables_figures") if extraction_payload else [],
+            "notes": extraction_payload.get("notes") if extraction_payload else [],
+            "extraction_payload": extraction_payload, # keep for full raw data
         }
 
     def _save_results(self, output: Dict, output_dir: Path):
