@@ -46,14 +46,38 @@ class QdrantDB(AbstractVectorDB):
             raise ImportError("qdrant-client is not installed. Please install it with 'pip install qdrant-client'")
         
         self.collection = collection
-        self.distance = getattr(models.Distance, distance)
+        self.default_distance = distance.upper()
         self.batch_size = batch_size
         self.client = QdrantClient(url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc)
         self._payload_keys: Optional[set[str]] = None
+        
+        self.vector_names = {
+            "COSINE": "vector_cosine",
+            "EUCLID": "vector_euclid",
+            "DOT": "vector_dot",
+            "MANHATTAN": "vector_manhattan",
+        }
+        self._single_vector_mode = False
+        self._single_vector_distance: Optional[models.Distance] = None
 
         try:
             collection_info = self.client.get_collection(collection_name=self.collection)
-            collection_dim = collection_info.config.params.vectors.size
+            vectors_config = collection_info.config.params.vectors
+            
+            if isinstance(vectors_config, models.VectorParams):
+                self._single_vector_mode = True
+                self._single_vector_distance = vectors_config.distance
+                collection_dim = vectors_config.size
+                logger.warning(
+                    f"Collection '{self.collection}' uses a single vector configuration. "
+                    f"Only {self._single_vector_distance.name} distance is supported for searching."
+                )
+            else:
+                existing_vector_name = next((name for name in self.vector_names.values() if name in vectors_config), None)
+                if not existing_vector_name:
+                    raise ValueError(f"Collection '{self.collection}' has no recognized named vectors.")
+                collection_dim = vectors_config[existing_vector_name].size
+
             if dim is not None and dim != collection_dim:
                 logger.warning(
                     f"Dimension mismatch for collection '{self.collection}'. "
@@ -65,11 +89,16 @@ class QdrantDB(AbstractVectorDB):
             if dim is None:
                 raise ValueError(f"Dimension 'dim' must be provided to create collection '{self.collection}'.")
             
-            logger.info(f"Collection '{self.collection}' not found. Creating a new one with dimension {dim}.")
+            logger.info(f"Collection '{self.collection}' not found. Creating a new one with dimension {dim} and multiple distance metrics.")
             self.dim = dim
             self.client.recreate_collection(
                 collection_name=self.collection,
-                vectors_config=models.VectorParams(size=self.dim, distance=self.distance),
+                vectors_config={
+                    self.vector_names["COSINE"]: models.VectorParams(size=self.dim, distance=models.Distance.COSINE),
+                    self.vector_names["EUCLID"]: models.VectorParams(size=self.dim, distance=models.Distance.EUCLID),
+                    self.vector_names["DOT"]: models.VectorParams(size=self.dim, distance=models.Distance.DOT),
+                    self.vector_names["MANHATTAN"]: models.VectorParams(size=self.dim, distance=models.Distance.MANHATTAN),
+                },
             )
 
     def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
@@ -92,10 +121,17 @@ class QdrantDB(AbstractVectorDB):
             if self._payload_keys is not None:
                 self._payload_keys.update(payload.keys())
 
+            vector_data = point["vector"]
+            vector_to_upsert = (
+                vector_data
+                if self._single_vector_mode
+                else {name: vector_data for name in self.vector_names.values()}
+            )
+
             qdrant_points.append(
                 models.PointStruct(
                     id=point["id"],
-                    vector=point["vector"],
+                    vector=vector_to_upsert,
                     payload=payload
                 )
             )
@@ -113,6 +149,7 @@ class QdrantDB(AbstractVectorDB):
         top_k: int = 5,
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
+        distance: Optional[str] = None,
     ) -> Sequence[Dict[str, Any]]:
         """Perform a similarity search on the collection."""
         must_conditions = []
@@ -125,9 +162,24 @@ class QdrantDB(AbstractVectorDB):
         
         query_filter = models.Filter(must=must_conditions) if must_conditions else None
         
+        search_distance = (distance or self.default_distance).upper()
+
+        if self._single_vector_mode:
+            if self._single_vector_distance and search_distance != self._single_vector_distance.name:
+                logger.warning(
+                    f"Searching with distance {search_distance} but collection only supports {self._single_vector_distance.name}. "
+                    f"Using {self._single_vector_distance.name} for search."
+                )
+            query_vector_to_search = query_vector
+        else:
+            if search_distance not in self.vector_names:
+                raise ValueError(f"Unsupported distance metric: {search_distance}. Supported are: {list(self.vector_names.keys())}")
+            vector_name = self.vector_names[search_distance]
+            query_vector_to_search = models.NamedVector(name=vector_name, vector=query_vector)
+
         results = self.client.search(
             collection_name=self.collection,
-            query_vector=query_vector,
+            query_vector=query_vector_to_search,
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
