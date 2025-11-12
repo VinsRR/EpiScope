@@ -1,28 +1,11 @@
 from __future__ import annotations
 from typing import Iterable, List
 from tqdm import tqdm
+
 from .base import Embedder
 
-try:
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-except ImportError:
-    class HuggingFaceEmbedding:
-        """Stubbed HuggingFaceEmbedding used when llama_index is unavailable."""
-        def __init__(self, model: str, trust_remote_code: bool = True) -> None:
-            self.model = model
-        def _get_query_embedding(self, text: str):
-            return [float(len(text))]
-        def get_text_embedding_batch(self, texts):
-            return [[float(len(t))] for t in texts]
-
-try:
-    from transformers import AutoConfig
-except ImportError:
-    class AutoConfig:
-        """Stubbed AutoConfig used when transformers is unavailable."""
-        @staticmethod
-        def from_pretrained(model: str, trust_remote_code: bool = True):
-            return type("DummyCfg", (), {"hidden_size": 1})()
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from transformers import AutoConfig
 
 class HuggingFaceEmbedder(Embedder):
     """Wrapper around a HuggingFace embedding model."""
@@ -30,9 +13,12 @@ class HuggingFaceEmbedder(Embedder):
     def __init__(self, model: str = "sentence-transformers/all-MiniLM-L6-v2", batch_size: int = 8) -> None:
         self._model = model
         self._batch_size = batch_size
-        self._embedder = HuggingFaceEmbedding(model=model, trust_remote_code=True)
+        # pass model_name to the underlying class
+        self._embedder = HuggingFaceEmbedding(model_name=model)
         cfg = AutoConfig.from_pretrained(model, trust_remote_code=True)
+        # if you want a true hidden size: uncomment next line
         # self._dim = cfg.hidden_size
+        # but as fallback, we embed a dummy text
         self._dim = len(self.embed_text("test"))
 
     @property
@@ -45,7 +31,7 @@ class HuggingFaceEmbedder(Embedder):
 
     def embed_text(self, text: str) -> List[float]:
         """Embed a single text string and return the dense vector."""
-        return self._embedder._get_query_embedding(text)
+        return self._embedder.get_text_embedding(text)  # or _get_query_embedding if your version uses that
 
     def embed_texts(self, texts: Iterable[str]) -> List[List[float]]:
         """Embed an iterable of text strings in batches."""
