@@ -56,7 +56,7 @@ class MongoAcademicDB(AcademicDB):
         if strategy_name not in self._db.list_collection_names():
             collection.create_index(
                 [
-                    ("paper_id", pymongo.ASCENDING),
+                    ("doc_id", pymongo.ASCENDING),
                     ("data_type", pymongo.ASCENDING),
                 ],
                 unique=True,
@@ -65,33 +65,33 @@ class MongoAcademicDB(AcademicDB):
 
     def insert(
         self,
-        paper_id: str,
+        doc_id: str,
         data_type: str,
         strategy_name: str,
         content: Dict[str, Any],
     ) -> None:
         collection = self._get_collection(strategy_name)
         doc = {
-            "paper_id": paper_id,
+            "doc_id": doc_id,
             "data_type": data_type,
             "content": content,
         }
         try:
             collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError:
-            logger.debug(
-                f"Duplicate insertion ignored for {(paper_id, data_type, strategy_name)}"
+            logger.info(
+                f"Duplicate insertion ignored for {(doc_id, data_type, strategy_name)}"
             )
 
     def retrieve(
-        self, paper_id: str, data_type: str, strategy_name: str
+        self, doc_id: str, data_type: str, strategy_name: str
     ) -> Optional[Any]:
-        key = (paper_id, data_type, strategy_name)
+        key = (doc_id, data_type, strategy_name)
         logger.debug(f"Attempting to retrieve document for key: {key}")
 
         collection = self._get_collection(strategy_name)
         query = {
-            "paper_id": paper_id,
+            "doc_id": doc_id,
             "data_type": data_type,
         }
         logger.debug(
@@ -117,10 +117,10 @@ class MongoAcademicDB(AcademicDB):
         collection.drop()
         return count
 
-    def list_papers(self, strategy_name: str) -> List[str]:
-        """List all paper IDs for a given strategy."""
+    def list_docs(self, strategy_name: str) -> List[str]:
+        """List all document IDs for a given strategy."""
         if strategy_name not in self._db.list_collection_names():
             return []
         
         collection = self._db[strategy_name]
-        return collection.distinct("paper_id")
+        return collection.distinct("doc_id")

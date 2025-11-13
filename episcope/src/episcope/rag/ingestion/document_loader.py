@@ -32,12 +32,136 @@ import abc
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Sequence
+
+import difflib
+import requests
+from dataclasses import dataclass
 
 from episcope.schemas import StructuredSection, PaperMetadata, Reference
 from episcope.db.academic_db import AcademicDB
 
 logger = logging.getLogger(__name__)
+
+# try fast fuzzy engine, fallback to difflib
+try:
+    from rapidfuzz import fuzz
+    HAS_RAPIDFUZZ = True
+except ImportError:
+    fuzz = None
+    HAS_RAPIDFUZZ = False
+
+@dataclass
+class CrossrefConfig:
+    rows: int = 5
+    min_title_score: float = 0.9
+    user_agent_email: str = "user@example.com"
+    timeout: int = 10
+
+def fetch_doi_from_crossref(
+    title: str,
+    config: "CrossrefConfig",
+    authors: Optional[Union[str, Sequence[str]]] = None,
+    journal: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
+) -> Dict[str, Any]:
+    """
+    Query Crossref REST API to find DOI for a paper given bibliographic hints.
+    Returns dict: {
+        "doi": str | None,
+        "score": float (0..1) measuring title similarity,
+        "item": minimal crossref item dict (title, author, publisher, issued, DOI),
+        "error": str | None
+    }
+    """
+    out = {"doi": None, "score": 0.0, "item": None, "error": None}
+    if not title or not isinstance(title, str):
+        out["error"] = "no_title"
+        return out
+
+    # Build query string
+    q_parts = []
+    q_parts.append(title)
+    if authors:
+        if isinstance(authors, (list, tuple)):
+            q_parts.append(" ".join(authors[:2]))
+        else:
+            q_parts.append(str(authors))
+    if journal:
+        q_parts.append(str(journal))
+    q = " ".join([p for p in q_parts if p]).strip()
+    params = {
+        "query.bibliographic": q,
+        "rows": config.rows,
+    }
+    # Prefer to filter by year if present (Crossref supports filter on from-pub-date/until-pub-date)
+    if year:
+        try:
+            y = int(year)
+            params["filter"] = f"from-pub-date:{y}-01-01,until-pub-date:{y}-12-31"
+        except Exception:
+            pass
+
+    headers = {
+        "User-Agent": f"ReferenceMatcher/1.0 (mailto:{config.user_agent_email})"
+    }
+
+    try:
+        resp = requests.get("https://api.crossref.org/works", params=params, headers=headers, timeout=config.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("message", {}).get("items", []) or []
+        if not items:
+            return out
+
+        # score candidates by title similarity (prefer exact or close title matches)
+        best = None
+        best_score = -1.0
+        for it in items:
+            it_titles = it.get("title") or []
+            it_title = it_titles[0] if it_titles else ""
+            # choose similarity measure
+            if HAS_RAPIDFUZZ and fuzz is not None:
+                score = fuzz.token_set_ratio(title, it_title) / 100.0
+            else:
+                score = difflib.SequenceMatcher(None, title.lower(), it_title.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best = it
+
+        if best and best_score >= config.min_title_score:
+            out["doi"] = best.get("DOI")
+            out["score"] = float(best_score)
+            # minimal item info
+            out["item"] = {
+                "title": best.get("title", []),
+                "author": best.get("author", []),
+                "container-title": best.get("container-title", []),
+                "issued": best.get("issued"),
+                "DOI": best.get("DOI"),
+                "type": best.get("type"),
+            }
+            return out
+        else:
+            # best exists but below threshold: return with score
+            if best:
+                out["score"] = float(best_score)
+                out["item"] = {
+                    "title": best.get("title", []),
+                    "author": best.get("author", []),
+                    "container-title": best.get("container-title", []),
+                    "issued": best.get("issued"),
+                    "DOI": best.get("DOI"),
+                    "type": best.get("type"),
+                }
+            return out
+
+    except requests.HTTPError as he:
+        out["error"] = f"http_error: {he}"
+        return out
+    except Exception as e:
+        out["error"] = str(e)
+        return out
 
 
 class AbstractDocumentLoader(abc.ABC):
@@ -92,6 +216,44 @@ class AbstractDocumentLoader(abc.ABC):
         """Return True if this loader can process the given file extension."""
         return file_path.suffix.lower() in {'.pdf', '.txt', '.md', '.text'}
 
+    def _get_unique_doc_id(self, paper_id: str, metadata: PaperMetadata) -> str:
+        """Generate a unique document ID."""
+        if hasattr(metadata, 'doi') and metadata.doi:
+            return metadata.doi
+
+        title = getattr(metadata, 'title', None)
+        if title:
+            authors = getattr(metadata, 'authors', [])
+            author_names = []
+            for author in authors:
+                if hasattr(author, 'full_name'):
+                    author_names.append(author.full_name)
+                elif isinstance(author, str):
+                    author_names.append(author)
+
+            journal = getattr(metadata, 'journal', None)
+            year = getattr(metadata, 'year', None)
+            
+            config = CrossrefConfig()
+            try:
+                crossref_result = fetch_doi_from_crossref(
+                    title=title,
+                    config=config,
+                    authors=author_names,
+                    journal=journal,
+                    year=year
+                )
+                if crossref_result.get("doi"):
+                    return crossref_result["doi"]
+            except Exception as e:
+                logger.warning(f"Crossref DOI fetch failed for title '{title}': {e}")
+
+        if title:
+            sanitized_title = "".join(c for c in title if c.isalnum()).lower()[:50]
+            return f"{paper_id}_{sanitized_title}"
+
+        return paper_id
+
     def extract_paper(
         self,
         file_path: str | Path,
@@ -122,15 +284,18 @@ class AbstractDocumentLoader(abc.ABC):
         sections, metadata, references = self.load(path)
         metadata.file_path = str(path)
 
+        doc_id = self._get_unique_doc_id(paper_id, metadata)
+
         sections_dicts: List[Dict] = [s.to_dict() for s in sections]
         metadata_dict: Dict = metadata.to_dict()
+        metadata_dict["original_paper_id"] = paper_id
         references_dicts: List[Dict] = [r.to_dict() for r in references]
 
-        db.insert(paper_id, "sections", strategy_name, sections_dicts)
-        db.insert(paper_id, "metadata", strategy_name, metadata_dict)
-        db.insert(paper_id, "references", strategy_name, references_dicts)
+        db.insert(doc_id, "sections", strategy_name, sections_dicts)
+        db.insert(doc_id, "metadata", strategy_name, metadata_dict)
+        db.insert(doc_id, "references", strategy_name, references_dicts)
         logger.info(
-            f"Persisted extraction for {paper_id} under strategy {strategy_name}."
+            f"Persisted extraction for {doc_id} (original paper_id: {paper_id}) under strategy {strategy_name}."
         )
 
     def extract_directory(
