@@ -1,7 +1,7 @@
 import json
 import logging
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from episcope.db.academic_db import AcademicDB
 from episcope.workflows.classification.config import BaseClassifierConfig, PaperTypeClassifierConfig
@@ -143,24 +143,88 @@ class PaperClassifier(AbstractRAG):
             {"role": "user", "content": user_prompt},
         ]
 
+    # def _parse_classification_response(self, response_content: str) -> ClassificationResult:
+    #     """Parse LLM response into ClassificationResult."""
+    #     # if response starts with ```json\n it means the LLM formatted it as a string codeblock
+    #     if response_content.startswith("```json"):
+    #         response_content = response_content.replace("```json", "").replace("```", "").strip()
+
+    #     parsed = self.config.output_schema.model_validate_json(response_content)
+    #     classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
+
+    #     confidence = parsed.confidence if parsed.confidence is not None else 0.0
+    #     class_probs = parsed.class_probabilities or {}
+
+    #     return ClassificationResult(
+    #         classification=classification,
+    #         confidence=float(confidence),
+    #         class_probabilities=class_probs,
+    #         evidence={"reasoning": parsed.reasoning}
+    #     )
+
+
     def _parse_classification_response(self, response_content: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
         # if response starts with ```json\n it means the LLM formatted it as a string codeblock
         if response_content.startswith("```json"):
-            response_content = response_content.replace("```json", "").replace("```", "").strip()
+            response_content = (
+                response_content
+                .replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
 
         parsed = self.config.output_schema.model_validate_json(response_content)
-        classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
 
-        confidence = parsed.confidence if parsed.confidence is not None else 0.0
+        raw_cls = parsed.classification
+
+        # Normalise default_classification into a list of DataType (or whatever you store)
+        default_cls = self.config.default_classification
+        if not isinstance(default_cls, list):
+            default_cls = [default_cls]
+
+        # Handle both old (single-letter) and new (list-of-letters) cases
+        if isinstance(raw_cls, list):
+            # New multi-label case: classification is a list of letter codes
+            mapped: list = []
+            for code in raw_cls:
+                mapped_value = self.classification_mapping.get(code)
+                if mapped_value is not None:
+                    mapped.append(mapped_value)
+
+            if not mapped:
+                # If nothing could be mapped, fall back to default
+                mapped = default_cls
+
+            classification = mapped
+
+        else:
+            # Backward compatibility: classification is a single letter
+            mapped_value = self.classification_mapping.get(raw_cls)
+            if mapped_value is not None:
+                classification = [mapped_value]
+            else:
+                classification = default_cls
+
+        confidence = float(parsed.confidence) if parsed.confidence is not None else 0.0
         class_probs = parsed.class_probabilities or {}
+
+        extras = {}
+        if hasattr(parsed, "extras") and parsed.extras:
+            if hasattr(parsed.extras, "model_dump"):
+                extras = parsed.extras.model_dump()
+            else:
+                extras = parsed.extras
+
 
         return ClassificationResult(
             classification=classification,
-            confidence=float(confidence),
+            confidence=confidence,
             class_probabilities=class_probs,
-            evidence={"reasoning": parsed.reasoning}
+            evidence={"reasoning": parsed.reasoning},
+            extras=extras
         )
+
 
     def _create_fallback_result(self) -> ClassificationResult:
         """Create a fallback classification result when LLM fails."""
@@ -168,5 +232,6 @@ class PaperClassifier(AbstractRAG):
             classification=self.config.default_classification,
             confidence=0.0,
             class_probabilities={label: 1/len(self.category_labels) for label in self.category_labels.values() if self.category_labels},
-            evidence={"reasoning": "Classification failed, defaulting to unclear"}
+            evidence={"reasoning": "Classification failed, defaulting to unclear"},
+            extras={}
         )

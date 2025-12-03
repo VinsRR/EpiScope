@@ -51,12 +51,12 @@ class OllamaClient(LLMClient):
     """
     Lightweight client for a local Ollama server.
 
-    Assumes Ollama is running (default: http://localhost:11434).
+    Reads `OLLAMA_HOST` environment variable, defaulting to http://localhost:11434.
     Uses the /api/chat endpoint; most recent Ollama supports chat roles.
 
     Example models: 'llama3.1', 'qwen2.5:14b', 'mistral:instruct'
     """
-    base_url: str = "http://localhost:11434"
+    base_url: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
     timeout_s: int = 600
     # If you prefer non-streaming responses; we stitch streamed chunks anyway.
     stream: bool = True

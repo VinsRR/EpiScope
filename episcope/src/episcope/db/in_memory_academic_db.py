@@ -40,8 +40,8 @@ class InMemoryAcademicDB(AcademicDB):
                 data = json.load(fh)
             # Keys are stored as joined strings; restore as tuples
             for key, value in data.items():
-                paper_id, data_type, strategy = key.split("||")
-                self._store[(paper_id, data_type, strategy)] = value
+                doc_id, data_type, strategy = key.split("||")
+                self._store[(doc_id, data_type, strategy)] = value
         except Exception as exc:
             logger.warning(f"Failed to load backup file {self._backup_file}: {exc}")
 
@@ -59,12 +59,12 @@ class InMemoryAcademicDB(AcademicDB):
 
     def insert(
         self,
-        paper_id: str,
+        doc_id: str,
         data_type: str,
         strategy_name: str,
         content: Dict[str, Any],
     ) -> None:
-        key = (paper_id, data_type, strategy_name)
+        key = (doc_id, data_type, strategy_name)
         if key in self._store:
             logger.debug(f"Duplicate insertion ignored for {key}")
             return
@@ -73,9 +73,9 @@ class InMemoryAcademicDB(AcademicDB):
             self._flush_backup()
 
     def retrieve(
-        self, paper_id: str, data_type: str, strategy_name: str
+        self, doc_id: str, data_type: str, strategy_name: str
     ) -> Optional[Any]:
-        key = (paper_id, data_type, strategy_name)
+        key = (doc_id, data_type, strategy_name)
         logger.debug(f"Attempting to retrieve document for key: {key}")
         content = self._store.get(key)
         if content:
@@ -98,6 +98,6 @@ class InMemoryAcademicDB(AcademicDB):
             self._flush_backup()
         return removed_count
 
-    def list_papers(self, strategy_name: str) -> List[str]:
-        """List all paper IDs for a given strategy."""
+    def list_docs(self, strategy_name: str) -> List[str]:
+        """List all document IDs for a given strategy."""
         return sorted(list(set(k[0] for k in self._store if k[2] == strategy_name)))

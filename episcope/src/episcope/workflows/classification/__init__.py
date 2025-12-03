@@ -4,13 +4,14 @@ from .config import (
     PaperTypeClassifierConfig,
     DataAccessibilityClassifierConfig,
     DataTypeClassifierConfig,
+    GeoClassifierConfig,
 )
 from .schemas import (
     ClassificationResult,
     PaperType,
     DataAccessibility,
     DataType,
-    DataNation,
+    GeoRegion,
 )
 
 __all__ = [
@@ -19,9 +20,10 @@ __all__ = [
     "PaperTypeClassifierConfig",
     "DataAccessibilityClassifierConfig",
     "DataTypeClassifierConfig",
+    "GeoClassifierConfig",
     "ClassificationResult",
     "PaperType",
     "DataAccessibility",
     "DataType",
-    "DataNation",
+    "GeoRegion",
 ]
