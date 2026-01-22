@@ -138,10 +138,75 @@ class OllamaClient(LLMClient):
         return embeddings
 
 
+@dataclass
+class OpenRouterClient(LLMClient):
+    """
+    Client for the OpenRouter API (OpenAI-compatible).
+
+    - Reads `OPENROUTER_API_KEY` from environment.
+    - `api_key` can be passed explicitly to override env var.
+    - `site_url` and `app_title` can be passed for analytics headers.
+    """
+    api_key: Optional[str] = field(default=None, repr=False)
+    site_url: str = "http://localhost:8501"  # Default for local Streamlit
+    app_title: str = "EpiScope"
+    _client: Any = field(init=False, repr=False)
+
+    def __post_init__(self):
+        key = self.api_key or os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise ValueError("`api_key` not provided and `OPENROUTER_API_KEY` env var not set.")
+        
+        self._client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=key,
+            default_headers={
+                "HTTP-Referer": self.site_url,
+                "X-Title": self.app_title,
+            }
+        )
+
+    def chat(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        *,
+        model: str,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Call the OpenRouter Chat Completions endpoint."""
+        sig = inspect.signature(self._client.chat.completions.create)
+        supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        response = self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **supported_kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str,
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        response = self._client.embeddings.create(
+            input=texts,
+            model=model,
+            **kwargs,
+        )
+        return [item.embedding for item in response.data]
+
+
 # Proprietary 
 
 
 @dataclass
+# OpenRouter could even just be called from OpenAIClient since it's compatible. Keeping separate for clarity.
 class OpenAIClient(LLMClient):
     """
     Client for OpenAI API compatible endpoints (including Azure).
