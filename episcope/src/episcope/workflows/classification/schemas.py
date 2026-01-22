@@ -1,170 +1,171 @@
 """
-Defines the Pydantic models for the classification workflow.
+Defines Pydantic models and supporting enums for the paper-classification workflow.
 
-These models serve a dual purpose:
-1.  **Validation:** They act as a protective barrier, parsing and validating the
-    raw, untrusted JSON output from an external source like an LLM.
-2.  **Internal Data Structure:** They are the single, canonical source of truth
-    for the workflow's output. Once validated, these models are used directly
-    by the rest of the application.
+Design goals
+------------
+1) Validation barrier for untrusted LLM JSON output (strict, reproducible).
+2) Canonical internal representation of classifier outputs.
 
-This unified approach avoids the need to maintain separate dataclasses and
-Pydantic models, simplifying the codebase.
+Notes
+-----
+- This code targets Pydantic v2.x.
+- Letter codes (A, B, …) are kept for prompt compatibility, while enums provide
+  stable semantic labels for downstream use.
 """
-from enum import Enum
-from typing import Any, Dict, Optional, Literal, List
-from pydantic import BaseModel, Field
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Sequence
+
+from pydantic import BaseModel, Field, model_validator
 
 
-
-# --- Pydantic Schemas for LLM Validation ---
+# -----------------------------------------------------------------------------
+# Base output schema (shared by all classifiers)
+# -----------------------------------------------------------------------------
 
 class ClassificationOutput(BaseModel):
-    """Base output schema (kept if you reuse this for other classifiers)."""
-    reasoning: str = Field(..., description="Short 1–3 sentence explanation")
+    """Base output schema returned by an LLM classifier."""
+    reasoning: str = Field(..., description="Short 1–3 sentence explanation grounded in the provided text.")
     confidence: Optional[float] = Field(
-        None,
+        default=None,
         ge=0.0,
         le=1.0,
-        description="Overall confidence that the label set is correct."
+        description="Overall confidence that the label set is correct.",
     )
     class_probabilities: Optional[Dict[str, float]] = Field(
-        None,
-        description="Optional mapping from class code to probability in [0,1]. Since these are probabilities, their sum should be 1."
+        default=None,
+        description=(
+            "Optional mapping from class code (e.g., 'A') to probability in [0,1]. "
+            "If provided, values should sum to ~1."
+        ),
     )
 
 
-##########################################################################################
-############################## PAPER TYPE ################################################
-##########################################################################################
+# -----------------------------------------------------------------------------
+# PAPER TYPE (extra axis in the application; not part of GEO/DAVAIL/DTYPE protocol)
+# -----------------------------------------------------------------------------
 
-class PaperType(Enum):
+class PaperType(str, Enum):
     LITERATURE_REVIEW = "literature_review"
     DATA_ANALYSIS = "data_analysis"
     UNCLEAR = "unclear"
 
 
+PaperTypeCode = Literal["A", "B", "C"]
+
+PAPER_TYPE_CODE_TO_ENUM: Dict[PaperTypeCode, PaperType] = {
+    "A": PaperType.LITERATURE_REVIEW,
+    "B": PaperType.DATA_ANALYSIS,
+    "C": PaperType.UNCLEAR,
+}
+
+PAPER_TYPE_CODE_LABELS: Dict[PaperTypeCode, str] = {
+    "A": "Literature Review",
+    "B": "Data Analysis",
+    "C": "Unclear / Not Specified",
+}
+
+
 class PaperTypeClassificationOutput(ClassificationOutput):
-    classification: Literal["A", "B","C"] = Field(..., description="A single letter classification, one of: A, B, C")
+    classification: PaperTypeCode = Field(..., description="A single letter: A, B, or C.")
 
 
-##########################################################################################
-############################# DATA ACCESSIBILITY #########################################
-##########################################################################################
-
-
-
-# class DataAccessibility(str, Enum):
-#     OPEN_ACCESS = "open_access"
-#     RESTRICTED_ACCESS = "restricted_access"
-#     NOT_AVAILABLE = "not_available"
-#     UNCLEAR = "unclear"
-
-
-# DATA_ACCESS_CODE = Literal["A", "B", "C", "D"]
-
-# DATA_ACCESS_CODE_TO_ENUM: Dict[DATA_ACCESS_CODE, DataAccessibility] = {
-#     "A": DataAccessibility.OPEN_ACCESS,
-#     "B": DataAccessibility.RESTRICTED_ACCESS,
-#     "C": DataAccessibility.NOT_AVAILABLE,
-#     "D": DataAccessibility.UNCLEAR,
-# }
-
-# DATA_ACCESS_CODE_LABELS = {
-#     "A": "Open Access (public repository, no permission required)",
-#     "B": "Restricted Access (DUA / approval / request required)",
-#     "C": "Not Available (explicitly not sharable, proprietary, OR no dataset used)",
-#     "D": "Unclear (insufficient evidence about data sharing)",
-# }
-
-
-# class DataAccessibilityClassificationOutput(ClassificationOutput):
-#     classification: DATA_ACCESS_CODE = Field(
-#         ...,
-#         description="A single letter: A (Open), B (Restricted), C (Not Available), D (Unclear)"
-#     )
-
-
-from enum import Enum
-from typing import Dict, Literal
-from pydantic import BaseModel, Field
-
+# -----------------------------------------------------------------------------
+# DAVAIL (Data Availability) – protocol-aligned taxonomy
+# -----------------------------------------------------------------------------
 
 class DataAccessibility(str, Enum):
-    OPEN_ACCESS = "open_access"       # public repo/URL, no permission
-    UPON_REQUEST = "upon_request"     # available, but only via request/DUA/approval
-    NOT_AVAILABLE = "not_available"   # cannot be shared or no dataset exists
-    NOT_STATED = "not_stated"         # paper does not say how/if data are shared
-    UNCLEAR = "unclear"               # internal fallback (pipeline), not for LLM
+    """
+    Protocol-aligned data availability labels (DAVAIL).
+
+    IMPORTANT:
+    - These labels are assigned strictly from what is stated in the paper.
+    - `UNCLEAR` is reserved as an internal fallback and should not be emitted by the LLM.
+    """
+    OPEN = "open"
+    AVAILABLE_UPON_REQUEST = "available_upon_request"
+    REFERENCED = "referenced"
+    CLOSED = "closed"
+    NOT_STATED = "not_stated"
+    DATA_SOURCE = "data_source"
+
+    # Internal fallback (pipeline), not for LLM output
+    UNCLEAR = "unclear"
 
 
-DataAccessibilityCode = Literal["A", "B", "C", "D"]
+DataAccessibilityCode = Literal["A", "B", "C", "D", "E", "F"]
 
 DATA_ACCESS_CODE_TO_ENUM: Dict[DataAccessibilityCode, DataAccessibility] = {
-    "A": DataAccessibility.OPEN_ACCESS,
-    "B": DataAccessibility.UPON_REQUEST,
-    "C": DataAccessibility.NOT_AVAILABLE,
-    "D": DataAccessibility.NOT_STATED,
+    "A": DataAccessibility.OPEN,
+    "B": DataAccessibility.AVAILABLE_UPON_REQUEST,
+    "C": DataAccessibility.REFERENCED,
+    "D": DataAccessibility.CLOSED,
+    "E": DataAccessibility.NOT_STATED,
+    "F": DataAccessibility.DATA_SOURCE,
 }
 
 DATA_ACCESS_CODE_LABELS: Dict[DataAccessibilityCode, str] = {
-    "A": "OPEN_ACCESS – data are in a public repository/URL, no permission required.",
-    "B": "UPON_REQUEST – data are available but only via request, approval, or data use agreement.",
-    "C": "NOT_AVAILABLE – data cannot be shared (proprietary, legal/ethical limits) or no dataset exists.",
-    "D": "NOT_STATED – the text does not explain whether/how the data are available.",
+    "A": "OPEN – data are claimed to be available via a public repository/stable link and/or reusable supplementary files.",
+    "B": "AVAILABLE_UPON_REQUEST – data are available via request / approval / institutional process (e.g., contact author, DUA).",
+    "C": "REFERENCED – data are attributed to third-party sources, but no actionable access path is provided.",
+    "D": "CLOSED – paper explicitly states data cannot be shared or are restricted with no actionable access mechanism.",
+    "E": "NOT_STATED – paper provides insufficient information about data availability.",
+    "F": "DATA_SOURCE – the paper itself is the primary data release (e.g., outbreak report / line list / transmission chain).",
 }
 
 
 class DataAccessibilityClassificationOutput(ClassificationOutput):
-    classification: DataAccessibilityCode = Field(
+    """
+    Multi-label output for DAVAIL.
+
+    Use multiple labels when the paper uses multiple datasets with different
+    availability mechanisms. If the paper is itself the primary data release,
+    emit only `F` (DATA_SOURCE).
+    """
+    classification: List[DataAccessibilityCode] = Field(
         ...,
-        description="A single letter: A (OPEN_ACCESS), B (UPON_REQUEST), "
-                    "C (NOT_AVAILABLE), or D (NOT_STATED).",
+        min_length=1,
+        description=(
+            "List of one or more letters among: A (OPEN), B (AVAILABLE_UPON_REQUEST), "
+            "C (REFERENCED), D (CLOSED), E (NOT_STATED), F (DATA_SOURCE)."
+        ),
+    )
+    primary_label: Optional[DataAccessibilityCode] = Field(
+        default=None,
+        description="Optional dominant label if one clearly dominates; otherwise null.",
     )
 
-##########################################################################################
-################################## GEO PROVENANCE ########################################
-##########################################################################################
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> "DataAccessibilityClassificationOutput":
+        # Deduplicate while preserving first-seen order, then sort into canonical order A–F.
+        seen = []
+        for c in self.classification:
+            if c not in seen:
+                seen.append(c)
+
+        canonical = [c for c in ["A", "B", "C", "D", "E", "F"] if c in seen]
+
+        # DATA_SOURCE is treated as mutually exclusive (protocol intent).
+        if "F" in canonical:
+            canonical = ["F"]
+
+        # If primary_label is present but not in classification, drop it.
+        if self.primary_label is not None and self.primary_label not in canonical:
+            self.primary_label = None
+
+        # If only one label remains, set primary_label if missing.
+        if len(canonical) == 1 and self.primary_label is None:
+            self.primary_label = canonical[0]
+
+        self.classification = canonical
+        return self
 
 
-
-# class GeoRegion(str, Enum):
-#     AFRICA = "africa"
-#     ASIA = "asia"
-#     EUROPE = "europe"
-#     NORTH_AMERICA = "north_america"
-#     SOUTH_AMERICA = "south_america"
-#     OCEANIA = "oceania"
-#     SYNTHETIC = "synthetic"
-#     UNCLEAR = "unclear"
-
-
-# GEO_CODE = Literal[
-#     "A", "B", "C", "D", "E", "F", "G", "H"
-# ]
-
-# GEO_CODE_TO_ENUM = {
-#     "A": GeoRegion.AFRICA,
-#     "B": GeoRegion.ASIA,
-#     "C": GeoRegion.EUROPE,
-#     "D": GeoRegion.NORTH_AMERICA,
-#     "E": GeoRegion.SOUTH_AMERICA,
-#     "F": GeoRegion.OCEANIA,
-#     "G": GeoRegion.SYNTHETIC,
-#     "H": GeoRegion.UNCLEAR,
-# }
-
-# GEO_CODE_LABELS = {
-#     "A": "Africa",
-#     "B": "Asia",
-#     "C": "Europe",
-#     "D": "North America",
-#     "E": "South America",
-#     "F": "Oceania",
-#     "G": "Synthetic",
-#     "H": "Unclear / Not specified",
-# }
+# -----------------------------------------------------------------------------
+# GEO (Geography) – protocol-aligned taxonomy (continent-level + IRRELEVANT/UNCLEAR)
+# -----------------------------------------------------------------------------
 
 class GeoRegion(str, Enum):
     AFRICA = "africa"
@@ -173,8 +174,9 @@ class GeoRegion(str, Enum):
     NORTH_AMERICA = "north_america"
     SOUTH_AMERICA = "south_america"
     OCEANIA = "oceania"
-    SYNTHETIC = "synthetic"   # data are purely synthetic, no real geo origin
-    UNCLEAR = "unclear"       # not enough info
+
+    IRRELEVANT = "irrelevant"  # e.g., strictly controlled laboratory setting, or purely synthetic/no-geo data
+    UNCLEAR = "unclear"        # not enough stated information
 
 
 GeoCode = Literal["A", "B", "C", "D", "E", "F", "G", "H"]
@@ -186,7 +188,7 @@ GEO_CODE_TO_ENUM: Dict[GeoCode, GeoRegion] = {
     "D": GeoRegion.NORTH_AMERICA,
     "E": GeoRegion.SOUTH_AMERICA,
     "F": GeoRegion.OCEANIA,
-    "G": GeoRegion.SYNTHETIC,
+    "G": GeoRegion.IRRELEVANT,
     "H": GeoRegion.UNCLEAR,
 }
 
@@ -197,141 +199,179 @@ GEO_CODE_LABELS: Dict[GeoCode, str] = {
     "D": "North America",
     "E": "South America",
     "F": "Oceania",
-    "G": "Synthetic (no real geographic origin)",
-    "H": "Unclear / Not specified",
+    "G": "IRRELEVANT (e.g., strictly controlled lab setting, or no meaningful geographic origin stated)",
+    "H": "UNCLEAR / Not specified",
 }
 
 
-
-# class GeoClassificationOutput(ClassificationOutput):
-#     classification: GEO_CODE = Field(
-#         ...,
-#         description=(
-#             "A single letter: "
-#             "A Africa, B Asia, C Europe, D North America, E South America, "
-#             "F Oceania, G Synthetic, H Unclear"
-#         )
-#     )
-#     locations: Dict[str, List[str]] = Field(
-#         default_factory=lambda: {"countries": [], "cities": []},
-#         description="Extracted country and city/region names."
-#     )
-
-
 class GeoExtras(BaseModel):
-    countries: List[str] = Field(default_factory=list, description = "A flat list of country names that are sources of the analyzed data.")
-    cities: List[str] = Field(default_factory=list, description = "A flat list of cities or region names that are sources of the analyzed data.")
+    countries: List[str] = Field(
+        default_factory=list,
+        description="Country names explicitly tied to the epidemiological evidence/data used in the paper."
+    )
+    cities: List[str] = Field(
+        default_factory=list,
+        description="City/region/state/province names explicitly tied to the epidemiological evidence/data used in the paper."
+    )
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "GeoExtras":
+        def _clean(xs: Sequence[str]) -> List[str]:
+            out: List[str] = []
+            for x in xs:
+                if not isinstance(x, str):
+                    continue
+                s = " ".join(x.split()).strip()
+                if not s:
+                    continue
+                if s not in out:
+                    out.append(s)
+            return out
+
+        self.countries = _clean(self.countries)
+        self.cities = _clean(self.cities)
+        return self
 
 
 class GeoClassificationOutput(ClassificationOutput):
     classification: List[GeoCode] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description=(
-            "List of letters among: "
-            "A Africa, B Asia, C Europe, D North America, E South America, "
-            "F Oceania, G Synthetic, H Unclear."
+            "List of letters among: A Africa, B Asia, C Europe, D North America, "
+            "E South America, F Oceania, G IRRELEVANT, H UNCLEAR."
         ),
     )
-
-    primary_label: GeoCode | None = Field(
-        None,
-        description="Dominant region if one clearly dominates; otherwise null."
+    primary_label: Optional[GeoCode] = Field(
+        default=None,
+        description="Dominant continent if one clearly dominates; otherwise null."
     )
+    extras: GeoExtras = Field(default_factory=GeoExtras, description="Extracted geographic locations.")
 
-    extras: GeoExtras = Field(..., description="Extracted geographic locations (countries and cities/regions).")
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> "GeoClassificationOutput":
+        # Deduplicate, then sort into canonical order.
+        seen = []
+        for c in self.classification:
+            if c not in seen:
+                seen.append(c)
+        canonical = [c for c in ["A", "B", "C", "D", "E", "F", "G", "H"] if c in seen]
+
+        # IRRELEVANT dominates; UNCLEAR is only used when no other labels remain.
+        if "G" in canonical:
+            canonical = ["G"]
+        elif "H" in canonical and len(canonical) > 1:
+            canonical = [c for c in canonical if c != "H"]
+
+        if not canonical:
+            canonical = ["H"]
+
+        if self.primary_label is not None and self.primary_label not in canonical:
+            self.primary_label = None
+
+        if len(canonical) == 1 and self.primary_label is None:
+            self.primary_label = canonical[0]
+
+        self.classification = canonical
+        return self
 
 
-
-
-##########################################################################################
-##########################################################################################
-##########################################################################################
-
-
-
+# -----------------------------------------------------------------------------
+# DTYPE (Data Type) – protocol-aligned taxonomy (#Data4COVID19 families + synthetic/no data)
+# -----------------------------------------------------------------------------
 
 class DataType(str, Enum):
-    """Granular data type categories for epidemiological studies."""
-    # Traditional data
-    TRADITIONAL = "traditional"  # e.g. surveys, EHR, routine surveillance
+    """Protocol-aligned data type categories (DTYPE)."""
+    TRADITIONAL = "traditional"
+    NON_TRADITIONAL_HEALTH = "non_traditional_health"
+    NON_TRADITIONAL_MOBILITY = "non_traditional_mobility"
+    NON_TRADITIONAL_SENTIMENT = "non_traditional_sentiment"
+    NON_TRADITIONAL_ECONOMIC = "non_traditional_economic"
+    SYNTHETIC = "synthetic"
+    NO_EMPIRICAL_DATA = "no_empirical_data"
 
-    # Non-traditional data (taxonomy adapted from #Data4COVID19 review)
-    NON_TRADITIONAL_HEALTH = "non_traditional_health"      # e.g. symptom apps, wearables, wastewater
-    NON_TRADITIONAL_MOBILITY = "non_traditional_mobility"  # e.g. telecoms CDRs, GPS traces, app-based mobility
-    NON_TRADITIONAL_ECONOMIC = "non_traditional_economic"  # e.g. card transactions, supply chain data
-    NON_TRADITIONAL_SENTIMENT = "non_traditional_sentiment"  # e.g. social media, crowdsourced opinions
-
-    # Other categories
-    SYNTHETIC = "synthetic"  # fully simulated or synthetic datasets
-    NO_EMPIRICAL_DATA = "no_empirical_data"  # conceptual/commentary; no data actually analyzed
-    UNCLEAR = "unclear"  # not enough information to classify
+    # Internal fallback
+    UNCLEAR = "unclear"
 
 
-# Letter codes (kept for backward-compatibility with A/B/… style labels)
-DataTypeCode = Literal["A", "B", "C", "D", "E", "F", "G", "H"]
+DataTypeCode = Literal["A", "B", "C", "D", "E", "F", "G"]
 
 DATA_TYPE_CODE_TO_ENUM: Dict[DataTypeCode, DataType] = {
     "A": DataType.TRADITIONAL,
     "B": DataType.NON_TRADITIONAL_HEALTH,
     "C": DataType.NON_TRADITIONAL_MOBILITY,
-    "D": DataType.NON_TRADITIONAL_ECONOMIC,
-    "E": DataType.NON_TRADITIONAL_SENTIMENT,
+    "D": DataType.NON_TRADITIONAL_SENTIMENT,
+    "E": DataType.NON_TRADITIONAL_ECONOMIC,
     "F": DataType.SYNTHETIC,
     "G": DataType.NO_EMPIRICAL_DATA,
     "H": DataType.UNCLEAR,
 }
 
 DATA_TYPE_CODE_LABELS: Dict[DataTypeCode, str] = {
-    "A": "Traditional (e.g., epidemiological surveys, EHR, registries)",
-    "B": "Non-Traditional Health Data (e.g., symptom apps, wearables, wastewater, digital patient data)",
-    "C": "Non-Traditional Mobility Data (e.g., telecom CDRs, GPS, SDK-derived mobility, Bluetooth proximity)",
-    "D": "Non-Traditional Economic Data (e.g., card transactions, supply-chain, open contracting)",
-    "E": "Non-Traditional Sentiment Data (e.g., social media, crowdsourced attitudes/opinions)",
-    "F": "Synthetic Data (e.g., simulated populations, synthetic trajectories, agent-based simulation outputs)",
-    "G": "No Empirical Data (e.g., conceptual, methodological, or narrative work with no analyzed dataset)",
-    "H": "Unclear / Not Specified",
+    "A": "Traditional – established epidemiological/public-health surveillance & clinical/administrative data used in analysis.",
+    "B": "Non-Traditional Health – novel/non-standard health proxies or platforms (symptom apps, wearables, wastewater, large-scale digital patient platforms).",
+    "C": "Non-Traditional Mobility – mobility/proximity signals (CDRs, GPS/SDK mobility, Bluetooth proximity) used as epidemiological proxies.",
+    "D": "Non-Traditional Sentiment – social listening/surveys/crowdsourced perception & behavior proxies used as data.",
+    "E": "Non-Traditional Economic – economic/financial data (transaction data, supply-chain/shipment data).",
+    "F": "Synthetic – simulated data used as evidence supporting claims (e.g., scenario projections, counterfactuals).",
+    "G": "No Empirical Data – conceptual/theoretical/methodological work with no empirical dataset analyzed.",
+    "H": "Unclear / Not specified",
 }
 
 
-
 class DataTypeClassificationOutput(ClassificationOutput):
-    """Multi-label output: one or more letter codes."""
+    """Multi-label output for DTYPE."""
     classification: List[DataTypeCode] = Field(
         ...,
+        min_length=1,
         description=(
-            "List of one or more labels among: A, B, C, D, E, F, G, H. "
-            "Use multiple labels if the paper uses multiple data types."
+            "List of one or more labels among: A–H. "
+            "Use multiple labels if multiple data types are used. "
+            "G (No Empirical Data) is mutually exclusive with all others."
         ),
-        min_items=1,
     )
     primary_label: Optional[DataTypeCode] = Field(
-        None,
-        description=(
-            "Optional single best label (A–H), if one type clearly dominates; "
-            "otherwise leave null."
-        ),
+        default=None,
+        description="Optional dominant label if one clearly dominates; otherwise null."
     )
 
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> "DataTypeClassificationOutput":
+        # Deduplicate then canonical order.
+        seen = []
+        for c in self.classification:
+            if c not in seen:
+                seen.append(c)
+        canonical = [c for c in ["A", "B", "C", "D", "E", "F", "G", "H"] if c in seen]
+
+        # NO_EMPIRICAL_DATA dominates.
+        if "G" in canonical:
+            canonical = ["G"]
+        # UNCLEAR only when no other label remains.
+        elif "H" in canonical and len(canonical) > 1:
+            canonical = [c for c in canonical if c != "H"]
+
+        if not canonical:
+            canonical = ["G"]
+
+        if self.primary_label is not None and self.primary_label not in canonical:
+            self.primary_label = None
+
+        if len(canonical) == 1 and self.primary_label is None:
+            self.primary_label = canonical[0]
+
+        self.classification = canonical
+        return self
 
 
-
-
-
-
-
-
-class DataNationClassificationOutput(ClassificationOutput):
-    classification: Literal["A", "B", "C", "D", "E", "F", "G"] = Field(..., description="A single letter classification, one of: A, B, C, D, E, F, G")
-
-
-# --- Final Workflow Output Model ---
+# -----------------------------------------------------------------------------
+# Final workflow internal result object (used outside Pydantic boundary)
+# -----------------------------------------------------------------------------
 
 @dataclass
 class ClassificationResult:
-    # classification: Any
-    classification: List[Any]  
+    classification: List[Any]
     confidence: float
     class_probabilities: Dict[str, float] = field(default_factory=dict)
-    evidence: Dict = field(default_factory=dict)
+    evidence: Dict[str, Any] = field(default_factory=dict)
     extras: Dict[str, Any] = field(default_factory=dict)

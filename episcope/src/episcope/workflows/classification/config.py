@@ -1,116 +1,159 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
+
 from .schemas import (
+    # Enums
     PaperType, DataAccessibility, GeoRegion, DataType,
+    # Output schemas
     ClassificationOutput, PaperTypeClassificationOutput,
     DataAccessibilityClassificationOutput, GeoClassificationOutput,
-    DataTypeClassificationOutput
+    DataTypeClassificationOutput,
 )
-from typing import Dict, List, Any
-from dataclasses import dataclass, field
+
+"""
+Classifier configuration objects.
+
+These configs are intended to be:
+- Prompt-canonical: each prompt definition should reflect the formal labeling protocol.
+- Schema-canonical: each config must point to the Pydantic schema that validates the LLM output.
+- Retrieval-friendly: template_paragraphs should contain short, realistic snippets that maximize recall.
+
+IMPORTANT:
+- The labeling protocol (GEO/DAVAIL/DTYPE) is enforced primarily via prompts and via schema validators
+  in schemas.py. Keep the two in sync.
+"""
+
 
 @dataclass
 class BaseClassifierConfig:
     """Base configuration for a paper classifier."""
     similarity_threshold: float = 0.75
     top_k: int = 10
-    # embedding_model: str = "jinaai/jina-embeddings-v3"
+
     template_paragraphs: Dict[str, List[str]] = field(default_factory=dict)
     classification_mapping: Dict[str, Any] = field(default_factory=dict)
     category_labels: Dict[str, str] = field(default_factory=dict)
+
     system_prompt: str = ""
     user_prompt_template: str = ""
+
     output_schema: Any = ClassificationOutput
     default_classification: Any = None
+
+    # How many times to re-ask the LLM if JSON does not validate.
     max_validation_retries: int = 1
+
+    # Extra output fields (legacy; prefer Pydantic schema fields).
     extra_output_fields: Dict[str, Any] = field(default_factory=dict)
 
 
-
+# -----------------------------------------------------------------------------
+# PAPER TYPE (extra axis; not part of GEO/DAVAIL/DTYPE protocol)
+# -----------------------------------------------------------------------------
 
 @dataclass
 class PaperTypeClassifierConfig(BaseClassifierConfig):
     """Configuration for the paper type classifier."""
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
         "literature_review": [
-            "Several studies have examined the relationship between X and Y. Smith et al. (2020) found significant associations, while Jones et al. (2021) reported mixed results. A systematic review by Brown et al. (2019) identified 45 relevant studies.",
-            "We conducted a systematic literature search across PubMed, Embase, and Web of Science databases. Studies were included if they met inclusion criteria. Two reviewers independently screened titles and abstracts.",
-            "The existing literature can be categorized into three main approaches. Meta-analyses consistently show effect sizes ranging from 0.2 to 0.6. Previous reviews have identified several gaps in the literature.",
-            "This scoping review aims to map the available evidence on X. We searched five databases and included 127 studies. The review follows PRISMA guidelines for systematic reviews."
+            "We conducted a systematic literature search across PubMed, Embase, and Web of Science.",
+            "This scoping review maps the available evidence and follows PRISMA guidelines.",
+            "A meta-analysis of 45 studies estimated pooled effect sizes with random-effects models.",
         ],
         "data_analysis": [
-            "We analyzed data from the National Health Survey (n=15,432 participants). Data collection occurred between January 2020 and December 2022. Statistical analyses were performed using R version 4.2.",
-            "The dataset contained 23,891 observations across 15 variables. Missing data patterns were examined using multiple imputation. Primary outcomes were measured using validated instruments.",
-            "Participants were recruited through stratified random sampling. Data were collected through structured interviews. The final analytic sample included 8,734 individuals after exclusions.",
-            "Descriptive statistics were calculated for all variables. Logistic regression models were fitted with adjustment for confounders. Effect sizes and 95% confidence intervals are reported."
+            "We analyzed routinely collected case notifications from the national surveillance system.",
+            "The dataset contained 23,891 observations; we fit logistic regression models adjusting for confounders.",
+            "Participants were recruited through stratified random sampling and completed structured interviews.",
         ],
     })
     classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: {
         "A": PaperType.LITERATURE_REVIEW,
         "B": PaperType.DATA_ANALYSIS,
-        "C": PaperType.UNCLEAR
+        "C": PaperType.UNCLEAR,
     })
     category_labels: Dict[str, str] = field(default_factory=lambda: {
         "A": "Literature Review",
         "B": "Data Analysis",
-        "C": "Unclear"
+        "C": "Unclear / Not specified",
     })
-    system_prompt: str = """You are an senior epidemiologist doing reviewing the recent literatures. You are sorting your papers into {n_categories} categories: {category_labels}."""
+    system_prompt: str = (
+        "You are a senior epidemiologist reviewing academic papers. "
+        "Classify each paper into exactly one of the provided paper-type categories."
+    )
     user_prompt_template: str = """
-    You are an senior academic epidemiologist. Your task is to determine the primary type of a research paper.
+You are a senior academic epidemiologist. Determine the primary *paper type*.
 
-    **Categories:**
-    {categories}
+**Categories (A–C):**
+{categories}
 
-    **Paper Content:**
-    Title: {title}
-    Abstract: {abstract}
-    Keywords: {keywords}
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
 
-    **Relevant Extracts:**
-    {chunks_info}
+**Relevant Extracts:**
+{chunks_info}
 
-    **Schema:**
-    {schema}    
+**Instructions:**
+1. Decide the paper's primary type (main contribution), not minor components.
+2. Choose exactly one letter (A, B, or C).
+3. Return a single JSON object that matches the schema below. Do not include extra text.
 
-    **Instructions:**
-    1. Analyze the evidence to determine the paper's main contribution.
-    2. Select a single letter that best represents the paper's primary classification.
-    3. Return a single JSON object adhering to the schema. Do not add extra text.
-    """
+**Schema:**
+{schema}
+"""
     output_schema: Any = PaperTypeClassificationOutput
     default_classification: Any = PaperType.UNCLEAR
 
 
-
-
-
-
+# -----------------------------------------------------------------------------
+# DAVAIL (Data Availability) – protocol-aligned
+# -----------------------------------------------------------------------------
 
 from .schemas import DATA_ACCESS_CODE_TO_ENUM, DATA_ACCESS_CODE_LABELS
 
+
 @dataclass
 class DataAccessibilityClassifierConfig(BaseClassifierConfig):
-    """Configuration for classifying data accessibility."""
+    """Configuration for classifying data availability (DAVAIL)."""
 
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "open_access": [
-            "All data and code used in this study are publicly available at [URL].",
-            "The dataset can be downloaded from the public GitHub repository.",
-            "Data are openly available in a public repository without restrictions.",
+        # OPEN
+        "open": [
+            "All data used in this study are available in a public repository (DOI/URL provided).",
+            "The dataset is deposited on Zenodo under DOI: 10.xxxx/zenodo.xxxxx.",
+            "De-identified data and analysis code are provided as supplementary CSV files.",
         ],
+        # AVAILABLE_UPON_REQUEST
         "upon_request": [
             "Data are available from the corresponding author upon reasonable request.",
-            "Access to the data requires a data use agreement and approval from the data custodian.",
-            "Due to privacy regulations, data access is restricted to qualified researchers who apply.",
+            "Access requires signing a data use agreement and approval by the data custodian.",
+            "Researchers may apply to the institutional data access committee for permission.",
         ],
-        "not_available": [
-            "The data that support the findings of this study are not publicly available "
-            "due to legal or ethical restrictions.",
-            "The data are proprietary and cannot be shared.",
-            "Data sharing is not applicable as no dataset was created or analyzed.",
+        # REFERENCED
+        "referenced": [
+            "We used daily case counts published by the Ministry of Health.",
+            "Data were obtained from the Johns Hopkins COVID-19 dashboard.",
+            "We analyzed surveillance data reported by the national public health institute.",
         ],
+        # CLOSED
+        "closed": [
+            "The data cannot be shared due to legal and ethical restrictions.",
+            "Patient-level data are confidential and not available for public release.",
+            "The dataset is proprietary and cannot be made available.",
+        ],
+        # NOT_STATED
         "not_stated": [
-            "No explicit data availability statement was provided.",
-            "The manuscript does not specify whether the data can be accessed.",
+            "No data availability statement is provided in the manuscript.",
+            "The paper does not describe whether or how the data can be accessed.",
+        ],
+        # DATA_SOURCE
+        "data_source": [
+            "We report a line list of confirmed cases and provide a detailed transmission chain.",
+            "This outbreak report provides case counts, timelines, and exposure histories.",
+            "We describe an epidemiological situation and present the primary surveillance summary.",
         ],
     })
 
@@ -123,32 +166,44 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
     )
 
     system_prompt: str = (
-        "You are a data librarian classifying research papers based on the accessibility of the "
-        "dataset(s) actually used in the study. You must distinguish between: "
-        "OPEN_ACCESS (public repository, no permission), UPON_REQUEST (available but restricted), "
-        "NOT_AVAILABLE (cannot be shared or no dataset), and NOT_STATED (nothing is said). "
-        "Do NOT guess accessibility when it is not described."
+        "You are a research data librarian classifying epidemiological papers by *data availability* (DAVAIL). "
+        "Follow the formal definitions strictly and base labels ONLY on explicit statements in the paper. "
+        "Do not verify links or use external knowledge. "
+        "If the paper is itself the primary data release (outbreak report / line list / transmission chain), "
+        "use DATA_SOURCE."
     )
 
-    user_prompt_template: str = """
-You are a data librarian. Your task is to classify **how the dataset(s) USED in the study are made available**, if at all.
+    user_prompt_template: str = r"""
+You are a research data librarian. Classify the *data availability* of the dataset(s) USED in the paper.
 
-**Categories (A–D):**
+Key principle:
+- Assign labels strictly from statements in the paper. Do not verify links or rely on outside knowledge.
+
+**Categories (multi-label, A–F):**
 {categories}
 
 Definitions:
-- **A – OPEN_ACCESS**: The dataset used in the analysis is available in a public repository or URL,
-  and can be accessed without individual permission (no request, no approval, no DUA).
-- **B – UPON_REQUEST**: The dataset can be accessed, but **only** if the reader contacts the authors
-  or applies to a data custodian (e.g. "available upon reasonable request", "requires data use agreement").
-- **C – NOT_AVAILABLE**: The dataset cannot be shared (proprietary, legal/ethical limits) or there is
-  explicitly no sharable dataset (e.g. purely synthetic example data are not shared, or no data were used).
-- **D – NOT_STATED**: The text does not explain whether or how the dataset is available.
+- **A – OPEN**: The paper claims data are available in a public repository with a stable link/identifier,
+  and/or provides reusable supplementary files (e.g., CSV tables) sufficient for reuse.
+- **B – AVAILABLE_UPON_REQUEST**: The paper explicitly states data are available upon request, approval,
+  or via an institutional process (contact author, data custodian, DUA).
+- **C – REFERENCED**: The paper attributes data to third-party sources (dashboards, public health authorities,
+  institutional databases), but does NOT provide a retrieval mechanism sufficient for a reader to obtain the data
+  in the same manner.
+- **D – CLOSED**: The paper explicitly states data cannot be shared or are restricted (legal/ethical/confidentiality/licensing),
+  and provides no actionable access mechanism.
+- **E – NOT_STATED**: The paper does not provide enough information to determine data availability.
+- **F – DATA_SOURCE**: The paper itself is the primary data release (e.g., outbreak/situation report, line list, contact tracing network).
+  If you choose **F**, choose ONLY **F**.
 
-IMPORTANT:
-- Focus only on the **dataset(s) actually analyzed** in the study.
-- If there is **no statement at all** about data availability, choose **D (NOT_STATED)**, not C.
-- Use **C (NOT_AVAILABLE)** only when the text clearly says the data cannot be shared or there is no dataset.
+Multi-dataset papers:
+- If the paper clearly uses multiple datasets with different availability mechanisms, you may include multiple letters.
+- Do NOT add a label for a dataset mentioned only as background, comparison, or citation (not used in the methodology).
+
+Ambiguity handling:
+- If the paper merely says "data are in the public domain" without a clear retrieval mechanism, prefer **C (REFERENCED)**
+  or **E (NOT_STATED)** depending on whether a specific third-party source is named.
+- If there is no availability statement at all, choose **E (NOT_STATED)**.
 
 **Paper Content:**
 Title: {title}
@@ -159,9 +214,9 @@ Keywords: {keywords}
 {chunks_info}
 
 **Instructions:**
-1. Look for explicit statements about data availability, repositories, URLs, or conditions for access.
-2. If you find multiple statements, base your decision on the main dataset used in the analysis.
-3. Choose exactly one letter (A, B, C, or D) according to the definitions above.
+1. Identify datasets actually used in the study (methods/results), and what the paper says about accessing each.
+2. Choose one or more letters (A–F) based on the definitions above.
+3. Set `primary_label` only if one label clearly dominates; otherwise leave it null.
 4. Return a single JSON object that exactly matches the schema below. Do NOT include any extra text.
 
 **Schema:**
@@ -169,285 +224,127 @@ Keywords: {keywords}
 """
 
     output_schema: Any = DataAccessibilityClassificationOutput
-
-    # UNCLEAR is reserved as an internal fallback if parsing fails etc.
-    default_classification: Any = DataAccessibility.UNCLEAR
+    default_classification: Any = field(default_factory=lambda: [DataAccessibility.UNCLEAR])
 
 
-
-# @dataclass
-# class DataAccessibilityClassifierConfig(BaseClassifierConfig):
-#     """Classify data accessibility of the dataset(s) used in the study."""
-
-#     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-#         "open_access": [
-#             "All data and code used in this study are publicly available at [URL].",
-#             "The dataset can be downloaded from the public GitHub repository.",
-#         ],
-#         "restricted_access": [
-#             "Data are available from the authors upon reasonable request.",
-#             "Access to the data requires a data use agreement.",
-#         ],
-#         "not_available": [
-#             "The data that support the findings of this study are not publicly available.",
-#             "The data are proprietary and cannot be shared.",
-#         ],
-#         "unclear": [
-#             "Data availability was not explicitly discussed.",
-#             "No data accessibility statement was provided.",
-#         ],
-#     })
-
-#     classification_mapping : Dict[str, DataType] = field(default_factory=lambda: DATA_ACCESS_CODE_TO_ENUM.copy())
-#     category_labels : Dict[str, str] = field(default_factory=lambda: DATA_ACCESS_CODE_LABELS.copy())
-
-#     system_prompt: str = (
-#         "You are a data librarian classifying papers based on the accessibility of the data "
-#         "actually used in the study. Your task is to decide whether the data are open, "
-#         "restricted, not available, or unclear."
-#     )
-
-#     user_prompt_template: str = """
-# You are a data librarian. Determine the **accessibility** of the dataset(s) used in the study.
-
-# **Categories (A–D):**
-# {categories}
-
-# Guidance:
-# - **A: Open Access** — data are publicly available at a URL or repository with no approval needed.
-# - **B: Restricted Access** — data are only available via request, approval, DUA, or secure access.
-# - **C: Not Available** — data explicitly cannot be shared OR no dataset exists.
-# - **D: Unclear** — no information is provided about data sharing.
-
-# Focus ONLY on the accessibility of the dataset(s) USED in the analysis.
-
-# **Paper Content**
-# Title: {title}
-# Abstract: {abstract}
-# Keywords: {keywords}
-
-# **Relevant Extracts:**
-# {chunks_info}
-
-# **Instructions**
-# 1. Identify statements about sharing of the data used.
-# 2. Choose one letter (A–D).
-# 3. Return JSON exactly matching the schema below.
-
-# **Schema**
-# {schema}
-# """
-
-#     output_schema: Any = DataAccessibilityClassificationOutput
-#     default_classification: Any = DataAccessibility.UNCLEAR
-
-
-
-
-
+# -----------------------------------------------------------------------------
+# DTYPE (Data Type) – protocol-aligned
+# -----------------------------------------------------------------------------
 
 from .schemas import DATA_TYPE_CODE_TO_ENUM, DATA_TYPE_CODE_LABELS
+
 
 @dataclass
 class DataTypeClassifierConfig(BaseClassifierConfig):
     """
-    Configuration for classifying the type(s) of data used in an
-    epidemiological research paper (traditional, non-traditional subtypes,
-    synthetic, no data, unclear).
+    Configuration for classifying the type(s) of data used (DTYPE), aligned with the protocol:
+    - TRADITIONAL
+    - NON_TRADITIONAL_HEALTH
+    - NON_TRADITIONAL_MOBILITY
+    - NON_TRADITIONAL_SENTIMENT
+    - NON_TRADITIONAL_ECONOMIC
+    - SYNTHETIC
+    - NO_EMPIRICAL_DATA
     """
 
-    # Template paragraphs for retrieval: examples of each data type
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        # --- Traditional data ---
         "traditional": [
-            # classic surveillance + survey examples
             "We analyzed routinely collected case notifications from the national surveillance system.",
-            "We used individual-level electronic health records from a network of hospitals.",
-            "Survey data on health behaviours were collected using a standardized questionnaire "
-            "administered to a representative sample of the population.",
-            "We linked administrative hospital discharge data with vital statistics to estimate mortality.",
+            "Hospital admissions and deaths were extracted from administrative health records.",
+            "We used PCR-confirmed test line lists reported by regional health authorities.",
         ],
-
-        # --- Non-traditional health data ---
-        # (Digital patient data, symptom apps, wastewater, wearables, etc.)
         "non_traditional_health": [
-            "Self-reported COVID-19 symptoms were collected using a mobile application deployed "
-            "at national scale.",
-            "We used aggregated data from an online symptom checker platform to detect emerging hotspots.",
-            "Wastewater samples from treatment plants were analyzed to quantify SARS-CoV-2 viral load.",
-            "Continuous heart rate and activity data from wearable devices were used to identify "
-            "abnormal physiological patterns consistent with infection.",
-            "Digital patient data from multiple hospital EHR systems were harmonized to build a large "
-            "COVID-19 cohort for risk factor analysis.",
+            "Self-reported symptoms were collected using a mobile application deployed at national scale.",
+            "Wastewater samples were analyzed to quantify viral load as a proxy for community spread.",
+            "Wearable-device heart rate data were used to detect anomalous physiological patterns.",
+            "Digital patient data from a large-scale EHR-based research network were harmonized for analysis.",
         ],
-
-        # --- Non-traditional mobility & geolocation data ---
-        # (Telecom CDRs, GPS, SDK data, Bluetooth, etc.)
         "non_traditional_mobility": [
-            "Anonymized mobile phone call detail records were used to estimate population movements "
-            "between regions.",
-            "We used GPS traces from a location-based smartphone application to reconstruct mobility networks.",
-            "Aggregated mobility indicators provided by a telecom operator were used to evaluate "
-            "compliance with lockdown measures.",
-            "Bluetooth-based digital contact tracing data were used to identify close contacts and "
-            "estimate the effective reproduction number.",
+            "Anonymized mobile phone call detail records were used to estimate population movements.",
+            "GPS traces from a smartphone application were used to reconstruct mobility networks.",
+            "Bluetooth-based proximity signals from digital contact tracing were used to infer contact patterns.",
         ],
-
-        # --- Non-traditional economic data ---
-        # (Card transactions, supply chain, open contracting, etc.)
+        "non_traditional_sentiment": [
+            "We collected tweets and analyzed content to assess public risk perception.",
+            "Survey panel data tracked attitudes and behaviors in response to interventions.",
+            "Crowdsourced reports of symptoms and perceptions were used to monitor behavioral changes.",
+        ],
         "non_traditional_economic": [
             "Aggregated credit and debit card transaction data were used as a proxy for local economic activity.",
             "Supply-chain shipment data were analyzed to assess the impact of COVID-19 on the distribution "
             "of essential goods.",
             "Open contracting data on emergency procurement were used to analyze government spending patterns.",
         ],
-
-        # --- Non-traditional sentiment data ---
-        # (Social media, crowdsourced sentiments, etc.)
-        "non_traditional_sentiment": [
-            "We collected tweets mentioning COVID-19-related keywords and analyzed their content to assess "
-            "public sentiment towards non-pharmaceutical interventions.",
-            "We downloaded Facebook posts and comments from public pages and used them to quantify sentiment "
-            "towards vaccination campaigns.",
-        ],
-
-        # --- Synthetic data ---
         "synthetic": [
-            "We generated a synthetic population using an agent-based model to simulate disease transmission.",
-            "A fully synthetic dataset was created to mimic the distribution of real patient records "
-            "while preserving privacy.",
-            "Synthetic mobility trajectories were simulated based on a metapopulation model to evaluate "
-            "alternative intervention scenarios.",
+            "We simulated epidemic trajectories to evaluate policy scenarios and support the main conclusions.",
+            "An agent-based model generated simulated outcomes used as evidence for intervention effects.",
         ],
-
-        # --- No empirical data ---
         "no_empirical_data": [
-            "This work is a narrative review of existing literature and does not include new data analysis.",
-            "We present a conceptual framework for pandemic preparedness without analyzing empirical data.",
-            "The paper discusses ethical considerations and policy implications of data use in pandemics, "
-            "but no dataset was collected or analyzed.",
+            "We present a conceptual framework without analyzing empirical data.",
+            "This paper provides a theoretical derivation and does not fit to data.",
         ],
-
-        # # --- Unclear / not specified ---
-        # "unclear": [
-        #     "The authors describe using data from public sources, but the exact type of data is not specified.",
-        #     "The methods section refers to 'available datasets' without sufficient detail to determine "
-        #     "whether the data are traditional or non-traditional.",
-        # ],
     })
 
-    # Mapping from letter codes to enum values
-    classification_mapping: Dict[str, DataType] = field(
-        default_factory=lambda: DATA_TYPE_CODE_TO_ENUM.copy()
-    )
-
-    # Human-readable labels
-    category_labels: Dict[str, str] = field(
-        default_factory=lambda: DATA_TYPE_CODE_LABELS.copy()
-    )
+    classification_mapping: Dict[str, DataType] = field(default_factory=lambda: DATA_TYPE_CODE_TO_ENUM.copy())
+    category_labels: Dict[str, str] = field(default_factory=lambda: DATA_TYPE_CODE_LABELS.copy())
 
     system_prompt: str = (
-        "You are an epidemiologist and data scientist classifying research papers by the "
-        "type(s) of data used as INPUT to the study’s analysis. "
-        "You ONLY care about datasets that are actually collected, analyzed, or modeled in the study. "
-        "You must IGNORE: (a) data sources mentioned only as background or motivation, "
-        "(b) topics or themes discussed in the text, and (c) auxiliary processes such as "
-        "laboratory confirmation of cases or standard clinical diagnostics that merely define outcomes. "
-        "Prefer fewer labels over more: only assign a data type if there is clear evidence that "
-        "this type of data was used in the main analysis or in a core secondary analysis."
+        "You are an epidemiologist classifying papers by the type(s) of data used as evidence (DTYPE). "
+        "Only label data that are actually used as inputs to the paper's analysis. "
+        "Prefer under-labeling to over-labeling: if evidence is weak, do not assign the label."
     )
 
+    user_prompt_template: str = r"""
+You are an epidemiologist. Classify the *type(s) of data used* (DTYPE) in the paper.
 
-    user_prompt_template: str = """
-    You are an epidemiologist and data scientist. Your task is to classify the type(s) of data
-    USED in an academic paper, with a focus on epidemiological and public health research.
+Key principles:
+- Label only data that are actually used as inputs to the study's analysis (collected/assembled/modeled then analyzed).
+- Ignore data sources mentioned only as background, motivation, or related work.
 
-    **Key Principle**
+**Categories (multi-label, A–G):**
+{categories}
 
-    Only label **data that are actually used as input to the study’s analysis**.
-    This means data that are collected, assembled, or modeled and then analyzed in the paper.
+Definitions (protocol-aligned):
+- **A – Traditional**: Established epidemiological/public-health data (routine surveillance case counts, admissions, deaths,
+  PCR/antigen-confirmed line lists, structured surveys) used in analysis.
+- **B – Non-Traditional Health**: Novel/non-standard health proxies outside traditional surveillance (symptom apps/platforms,
+  wearables/biometrics, wastewater surveillance, large-scale digital patient platforms) used in analysis.
+- **C – Non-Traditional Mobility**: Mobility/proximity signals (telecom CDRs, GPS/SDK mobility traces, Bluetooth proximity/contact tracing)
+  used as epidemiological proxies.
+- **D – Non-Traditional Sentiment**: Data capturing perceptions/behaviors/attitudes (social media, crowdsourced perception platforms,
+  survey panels aimed at perceptions/behaviors rather than clinical infection) used as data.
+- **E – Non-Traditional Economic**: Economic/financial data (transaction data, supply-chain/shipment data)
+- **F – Synthetic**: Simulated data are presented as *evidence supporting claims* (e.g., scenario projections/counterfactual outcomes/sensitivity analyses
+  that support conclusions). Do NOT use E if simulations are only used to illustrate model fit or calibration.
+- **G – No Empirical Data**: No empirical dataset is analyzed (conceptual/theoretical/commentary/methodological without empirical inputs). F is exclusive.
+- **H – Unclear**: Insufficient information to determine what data were used.
 
-    Do NOT assign a label based on:
-    - Data sources that are mentioned only as examples, motivation, or related work.
-    - Topics or themes that are discussed (e.g. “social media misinformation”) without actually
-    collecting or analyzing that data.
-    - Auxiliary processes that define or verify the outcome, such as:
-    - “laboratory-confirmed cases”
-    - “PCR confirmation”
-    - “serological confirmation”
-    These count as HOW the outcome is measured, not as a separate data type.
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
 
-    **Categories (multi-label, A–H):**
-    {categories}
+**Relevant Extracts:**
+{chunks_info}
 
-    - A: Traditional data – classical epidemiological data such as surveillance case notifications,
-        electronic health records, clinical registries, administrative health data, and structured surveys
-        that are used in the analysis.
-    - B: Non-Traditional Health Data – digitally captured health-related data such as digital patient data,
-        symptom apps, online symptom checkers, wearable and biometric data, or wastewater surveillance
-        that are used in the analysis.
-    - C: Non-Traditional Mobility Data – data capturing movements or physical proximity, such as telecom
-        CDRs, GPS traces, SDK-derived mobility indicators, and Bluetooth-based contact tracing, used
-        as inputs to the analysis.
-    - D: Non-Traditional Economic Data – data reflecting economic activity, such as card transactions,
-        supply-chain and shipping data, or open contracting data, used as inputs to the analysis.
-    - E: Non-Traditional Sentiment Data – social media data or other crowdsourced data that capture
-        attitudes, perceptions, or emotions, and are actually collected/processed in the study.
-    - F: Synthetic Data – fully or largely simulated data (e.g. synthetic patients, synthetic mobility
-        traces, agent-based simulations) that form a dataset used in the analysis (even if they are
-        used only for model testing or scenario analysis).
-    - G: No Empirical Data – conceptual, theoretical, policy, or methodological work where no empirical
-        dataset is collected or analyzed.
-    - H: Unclear / Not Specified – insufficient information to determine the data type(s) used.
+**Instructions:**
+1. Start from the assumption that no label applies; add a label only with clear evidence.
+2. Use multiple labels only when multiple distinct data types are clearly used.
+3. If you choose **G**, return only **G**.
+4. If the paper is too vague, choose **H**.
+5. Return a single JSON object matching the schema below. Do NOT add extra text.
 
-    **Paper Content:**
-    Title: {title}
-    Abstract: {abstract}
-    Keywords: {keywords}
-
-    **Relevant Extracts (candidate evidence):**
-    {chunks_info}
-
-    **Instructions:**
-
-    1. Carefully read the title, abstract, keywords, and the extracted snippets.
-
-    2. For each category A–F, only assign the label if there is **explicit or very strong implicit evidence**
-    that this type of data is actually used in the analysis. Look for verbs such as:
-    - "we collected", "we assembled", "we used", "we analyzed", "we obtained", "we retrieved",
-        "we constructed a dataset of", "data were extracted from".
-    Mentions like "Twitter is an important data source" or "lab-confirmed cases" WITHOUT an indication
-    that Twitter data (or lab data) were collected and analyzed as a dataset should NOT trigger a label.
-
-    3. Distinguish between:
-    - A paper discussing a data source in general (NO label).
-    - A paper actually using that data source in an analysis (label).
-
-    4. Prefer **fewer labels over more**:
-    - Start from the assumption of NO label.
-    - Add a label only when you see concrete evidence that the data type is used.
-    - If in doubt between “included” vs “not included”, choose “not included”.
-    - Use label G only when you are confident that no empirical data are analyzed.
-    - Use label H if the description is too vague to decide what was actually used.
-
-    5. Return a JSON object that strictly follows the schema below. Do NOT include any extra text.
-
-    **Schema:**
-    {schema}
-    """
+**Schema:**
+{schema}
+"""
 
     output_schema: Any = DataTypeClassificationOutput
-    # if we give a simple list dataclass stops up since it leads all instances to the same (mutable) object
-    default_classification: List[DataType] = field(
-        default_factory=lambda: [DataType.UNCLEAR]  
-    )
+    default_classification: Any = field(default_factory=lambda: [DataType.UNCLEAR])
 
 
-
-
-
-
-
+# -----------------------------------------------------------------------------
+# GEO (Geography) – protocol-aligned
+# -----------------------------------------------------------------------------
 
 from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS
 
@@ -455,213 +352,98 @@ from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS
 @dataclass
 class GeoClassifierConfig(BaseClassifierConfig):
     """
-    Configuration for classifying the geographic origin of the data used.
+    Configuration for classifying the geographic scope (GEO) of the epidemiological evidence used.
 
-    Multi-label at continent level (A–F), plus G=synthetic, H=unclear,
-    with fine-grained 'locations' (countries and cities/regions).
+    Output is multi-label at continent level (A–F), plus:
+    - G = IRRELEVANT (e.g., strictly controlled laboratory setting, or no meaningful geographic origin stated)
+    - H = UNCLEAR
+
+    Additional extracted fields:
+    - extras.countries
+    - extras.cities
     """
 
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "geo_origin": [
-            "We analyzed COVID-19 case data from hospitals in Italy.",
-            "Data were obtained from national surveillance systems in Brazil.",
-            "We used electronic health records from a large hospital network in the United States.",
-            "Participants were recruited from multiple regions in China.",
-            "Data came from primary care practices in the United Kingdom.",
-            "The dataset includes observations from several European countries.",
-            "We generated a fully synthetic dataset to simulate the spread of infection.",
+        "geo_evidence": [
+            "Cases were detected in Germany among travelers infected in Turkey.",
+            "We analyzed an outbreak in hospitals in Italy and cases reported in Spain.",
+            "The study used surveillance data from Brazil, Argentina, and Chile.",
+            "Samples were collected in a controlled laboratory setting using laboratory-bred animals.",
+            "This study provides a global overview using data from multiple continents.",
+            "We analyzed data from Moscow and Saint Petersburg.",
+            "Participants were recruited from Cairo and Alexandria.",
         ],
     })
 
-    classification_mapping: Dict[str, GeoRegion] = field(
-        default_factory=lambda: GEO_CODE_TO_ENUM.copy()
-    )
-
-    category_labels: Dict[str, str] = field(
-        default_factory=lambda: GEO_CODE_LABELS.copy()
-    )
+    classification_mapping: Dict[str, GeoRegion] = field(default_factory=lambda: GEO_CODE_TO_ENUM.copy())
+    category_labels: Dict[str, str] = field(default_factory=lambda: GEO_CODE_LABELS.copy())
 
     system_prompt: str = (
-        "You are a research analyst determining the geographic origin of the data used in "
-        "epidemiological studies. Your goal is to identify where the **analyzed dataset(s)** "
-        "come from, not where the authors work or which places are mentioned in general.\n\n"
-        "You MUST distinguish between:\n"
-        "- Locations that are the source of the data analyzed (e.g. 'we used case data from Italy'), and\n"
-        "- Locations mentioned only in background, examples, comparisons, citations, affiliations, or discussion.\n\n"
-        "Only locations that clearly refer to the origin of the data used in the analysis should be extracted. "
-        "Prefer missing a location over including one that is only mentioned in passing and not actually used."
+        "You are a research analyst assigning continent-level geographic labels (GEO) to epidemiological papers. "
+        "The GEO label set is intended as a high-recall filter: include all locations explicitly tied to the "
+        "epidemiological evidence used in the paper, even when multiple geographic perspectives coexist "
+        "(e.g., location of exposure vs location of detection). "
+        "Do not use external knowledge except to map a stated location (e.g., a country) to a continent."
     )
 
-    user_prompt_template: str = """
-You are a research analyst. Your task is to identify the **geographic origin of the data USED** in the study.
+    user_prompt_template: str = r"""
+You are a research analyst. Determine the *continent-level geography* (GEO) associated with the epidemiological evidence used in the paper.
 
-You must do two things:
+What to include:
+- Include every location that is **explicitly tied** to the epidemiological evidence/data used in the paper.
+- If infections are acquired in one location but detected/reported in another, include **both** locations if both are tied to the evidence.
 
-1. **Extract locations (data origin only)**:
-   - Collect country names that clearly refer to where the **analyzed dataset(s)** come from and place them in `extras.countries`.
-   - Collect cities/regions/states/provinces for the analyzed data and place them in `extras.cities`.
-   - Ignore locations from author affiliations, institutional addresses, background context, examples, or citations.
-   - Only include a location if data were **collected from**, **obtained from**, or **analyzed for** that place.
+What to ignore:
+- Ignore locations mentioned only as background, comparison, related work, author affiliations, or incidental discussion.
+- Do NOT infer locations from strain identifiers, sample naming conventions, or external knowledge unless the paper explicitly states the location.
 
-2. **Classify by region (multi-label)**:
-   - Use one or more of the continent/region letters (A–F) if data are from those continents.
-   - Use **G (Synthetic)** if the data are purely synthetic.
-   - Use **H (Unclear)** if you cannot infer any geographic origin.
-   - If data originate from multiple continents, include **all relevant letters**.
+When GEO is IRRELEVANT:
+- If the analysis is entirely in a strictly controlled laboratory setting (no meaningful geographic/ecological variation),
+  use **G (IRRELEVANT)**.
+- If the paper uses purely synthetic/no-geo data and does not meaningfully tie evidence to real-world locations, use **G (IRRELEVANT)**.
 
-**Categories (A–H):**
+Global scope:
+- If the paper explicitly states a global scope (e.g., “global”, “worldwide”), include **all continents** (A–F).
+
+Transcontinental mapping (UN M49 convention for reproducibility):
+- Russia → Europe (C)
+- Turkey → Asia (B)
+- Egypt → Africa (A)
+- Kazakhstan → Asia (B)
+- Azerbaijan → Asia (B)
+- Georgia → Asia (B)
+- Cyprus → Asia (B)
+- Armenia → Asia (B)
+
+**Categories (multi-label, A–H):**
 {categories}
 
-Examples (what to include vs ignore):
-- "We analyzed COVID-19 case data from hospitals in Italy and Spain." →
-    - `classification` = ["C"]
-    - `extras` = {{"countries": ["Italy", "Spain"], "cities": []}}
-- "Data were obtained from national surveillance in Brazil and Argentina." →
-    - `classification` = ["E"]
-    - `extras` = {{"countries": ["Brazil", "Argentina"], "cities": []}}
-- "Data were from the US, Italy, and Brazil." →
-    - `classification` = ["D", "C", "E"]
-    - `extras` = {{"countries": ["United States", "Italy", "Brazil"], "cities": []}}
-- "We simulated a synthetic population of 1 million individuals." →
-    - `classification` = ["G"]
-    - `extras` = {{"countries": [], "cities": []}}
+Output requirements:
+1) Extract location names tied to evidence:
+   - Put country names in `extras.countries`
+   - Put cities/regions/states/provinces in `extras.cities`
 
-**Important rules:**
-- The **`classification` field is a list of letters**. Include **all continents** represented.
-- Do **NOT** collapse multi-continent data into "unclear".
-- `extras.countries` and `extras.cities` must contain **only locations that are sources of the analyzed data**.
-  If none are described, return empty lists.
+2) Continent labels:
+   - `classification` is a list of letters. Include all applicable continents (A–F), or G, or H.
 
 **Paper Content:**
 Title: {title}
 Abstract: {abstract}
 Keywords: {keywords}
 
-**Relevant Extracts (candidate evidence):**
+**Relevant Extracts:**
 {chunks_info}
 
 **Instructions:**
-1. Read the title, abstract, and extracts, focusing only on where the **data used in the analysis** come from.
-2. Fill the `extras.countries` field with all country names that are clearly data origins.
-3. Fill the `extras.cities` field with city/region/state names that are clearly data origins.
-4. Build `classification` as a list of letters (A–H) using the rules above.
-5. Optionally set `primary_label` if one continent clearly dominates; otherwise, leave it null.
-6. Return a single JSON object that strictly follows the schema below. Do NOT include any extra text.
+1. Identify locations explicitly tied to the evidence/data used in the paper.
+2. Map those locations to continents and build `classification` as a list of letters.
+3. If no meaningful geo is stated or geo is irrelevant, use G or H as appropriate.
+4. Optionally set `primary_label` if one continent clearly dominates; otherwise leave it null.
+5. Return a single JSON object matching the schema below. Do NOT include extra text.
 
 **Schema:**
 {schema}
 """
 
     output_schema: Any = GeoClassificationOutput
-
-    default_classification: Any = field(
-        default_factory=lambda: [GeoRegion.UNCLEAR]
-    )
-
-
-# @dataclass
-# class GeoClassifierConfig(BaseClassifierConfig):
-#     """
-#     Configuration for classifying the geographic origin of the data used.
-
-#     Multi-label at continent level (A–F), plus G=synthetic, H=unclear,
-#     with fine-grained 'locations' (countries and cities/regions).
-#     """
-
-#     # Single bin of templates that fish for geo-origin sentences
-#     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-#         "geo_origin": [
-#             "We analyzed COVID-19 case data from hospitals in Italy.",
-#             "Data were obtained from national surveillance systems in Brazil.",
-#             "We used electronic health records from a large hospital network in the United States.",
-#             "Participants were recruited from multiple regions in China.",
-#             "Data came from primary care practices in the United Kingdom.",
-#             "The dataset includes observations from several European countries.",
-#             "We generated a fully synthetic dataset to simulate the spread of infection.",
-#         ],
-#     })
-
-#     classification_mapping: Dict[str, GeoRegion] = field(
-#         default_factory=lambda: GEO_CODE_TO_ENUM.copy()
-#     )
-
-#     category_labels: Dict[str, str] = field(
-#         default_factory=lambda: GEO_CODE_LABELS.copy()
-#     )
-
-#     system_prompt: str = (
-#         "You are a research analyst determining the geographic origin of the data used in epidemiological "
-#         "studies. You must (1) extract concrete geographic names (countries, cities, regions), and "
-#         "(2) classify the data origin at the continent level. The classification can contain multiple "
-#         "continents when data come from more than one region. Synthetic data and unclear cases are "
-#         "handled with explicit labels."
-#     )
-
-#     user_prompt_template: str = """
-# You are a research analyst. Your task is to identify the **geographic origin of the data USED** in the study.
-
-# You must do two things:
-
-# 1. **Extract locations**:
-#    - Collect all country names that clearly refer to where the analyzed dataset comes from.
-#    - Collect all cities/regions/states/provinces that are clearly locations of the analyzed data.
-#    - Ignore author affiliations and places mentioned only in background or examples.
-
-# 2. **Classify by region (multi-label)**:
-#    - Use one or more of the continent/region letters (A–F) if data are from those continents.
-#    - Use **G (Synthetic)** if the data are purely synthetic (no real geographic origin).
-#    - Use **H (Unclear)** only if you truly cannot infer any geographic origin.
-
-# **Categories (A–H):**
-# {categories}
-
-# Examples:
-# - Data from Italy and Spain → classification includes **C (Europe)**; locations.countries include ["Italy", "Spain"].
-# - Data from the US and Canada → classification includes **D (North America)**; locations.countries include ["United States", "Canada"].
-# - Data from China and India → classification includes **B (Asia)**; locations.countries include ["China", "India"].
-# - Data from Brazil and Argentina → classification includes **E (South America)**.
-# - Data from multiple continents (e.g. USA, Italy, Brazil) → classification includes **all relevant letters**:
-#   D (North America), C (Europe), E (South America).
-# - Purely simulated population with no real-country data → classification = ["G"] and locations lists are empty.
-
-# **Important rules:**
-# - The **classification field is a list of letters**. Include **all continents** represented in the data used.
-# - Do **NOT** collapse multi-continent data into "unclear". Return all applicable continent letters instead.
-# - Only use **H (Unclear)** if you cannot identify any geographic origin from the text.
-# - Always set `locations["countries"]` and `locations["cities"]`. If none are mentioned, return empty lists.
-
-# **Paper Content:**
-# Title: {title}
-# Abstract: {abstract}
-# Keywords: {keywords}
-
-# **Relevant Extracts (candidate evidence):**
-# {chunks_info}
-
-# **Instructions:**
-# 1. Read title, abstract, and extracts, focusing on where the data used in the analysis come from.
-# 2. Fill `extra_output_fields["countries"]` with all country names in the data origin description.
-# 3. Fill `extra_output_fields["cities"]` with city/region/state names when present.
-# 4. Build `classification` as a list of letters (A–H) using the rules above.
-# 5. Optionally set `primary_label` if one region clearly dominates; otherwise, leave it null.
-# 6. Return a single JSON object that strictly follows the schema below. Do NOT include extra text.
-
-# **Schema:**
-# {schema}
-# """
-
-#     extra_output_fields: Dict[str, Any] = field(
-#         default_factory=lambda: {
-#             "countries": "list of countries the data come from",
-#             "cities": "list of cities/regions/states the data come from",
-#         }
-#     )
-
-#     output_schema: Any = GeoClassificationOutput
-
-#     # Default internal fallback (e.g. if parsing fails):
-#     default_classification: Any = field(
-#         default_factory=lambda: [GeoRegion.UNCLEAR]
-#     )
-
-
+    default_classification: Any = field(default_factory=lambda: [GeoRegion.UNCLEAR])

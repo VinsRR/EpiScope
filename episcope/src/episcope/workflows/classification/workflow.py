@@ -45,6 +45,7 @@ class PaperClassifier(AbstractRAG):
         relevant_chunks = self.get_relevant_chunks(metadata, paper_id, top_k=self.config.top_k)
         return self.classify_based_on_relevant_chunks(relevant_chunks, metadata)
 
+    # HOW IS THIS APPROACH RELATED TO "Reciprocal Rank Fusion" (RRF)?
     def get_relevant_chunks(self, metadata: PaperMetadata, paper_id: str, top_k: int = 10) -> Dict[
         str, List[Tuple[str, float]]]:
         """Main method to retrieve relevant chunks for each paper type."""
