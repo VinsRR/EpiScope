@@ -127,14 +127,16 @@ class PaperClassifier(AbstractRAG):
         schema = self.config.output_schema.model_json_schema()
         categories = "\n".join(f"{key} – {value}" for key, value in self.category_labels.items())
 
-        user_prompt = self.config.user_prompt_template.format(
-            categories=categories,
-            title=metadata.title,
-            abstract=metadata.abstract or 'N/A',
-            keywords=', '.join(metadata.keywords or []),
-            chunks_info=chunks_info,
-            schema=json.dumps(schema)
-        )
+        prompt_args = {
+            'categories': categories,
+            'title': metadata.title,
+            'abstract': metadata.abstract or 'N/A',
+            'keywords': ', '.join(metadata.keywords or []),
+            'chunks_info': chunks_info,
+            'schema': json.dumps(schema),
+            **self.config.extra_output_fields
+        }
+        user_prompt = self.config.user_prompt_template.format(**prompt_args)
         system_prompt = self.config.system_prompt.format(
             n_categories=len(self.category_labels),
             category_labels=", ".join(list(self.category_labels.values()))

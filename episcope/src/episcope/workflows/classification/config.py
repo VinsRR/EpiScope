@@ -49,70 +49,91 @@ class BaseClassifierConfig:
     extra_output_fields: Dict[str, Any] = field(default_factory=dict)
 
 
+
 # -----------------------------------------------------------------------------
-# PAPER TYPE (extra axis; not part of GEO/DAVAIL/DTYPE protocol)
+#  PAPER TYPE (parameter-estimation focused taxonomy)
 # -----------------------------------------------------------------------------
+
+from .schemas import _CODE_TO_ENUM, _CODE_LABELS, _CODE_DEFINITIONS
+
 
 @dataclass
 class PaperTypeClassifierConfig(BaseClassifierConfig):
-    """Configuration for the paper type classifier."""
+    """Configuration for the parameter-estimation focused paper-type classifier ()."""
+
     template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "literature_review": [
-            "We conducted a systematic literature search across PubMed, Embase, and Web of Science.",
-            "This scoping review maps the available evidence and follows PRISMA guidelines.",
-            "A meta-analysis of 45 studies estimated pooled effect sizes with random-effects models.",
+        "primary_empirical": [
+            "We analyzed patient-level line-list data from the first 250 confirmed cases to estimate the incubation period.",
+            "Using contact tracing records from the outbreak investigation, we estimated the secondary attack rate and generation time.",
+            "We followed a cohort of exposed individuals and computed incidence and case fatality risk over 30 days.",
         ],
-        "data_analysis": [
-            "We analyzed routinely collected case notifications from the national surveillance system.",
-            "The dataset contained 23,891 observations; we fit logistic regression models adjusting for confounders.",
-            "Participants were recruited through stratified random sampling and completed structured interviews.",
+        "modeling_inference": [
+            "We fit a renewal model to incidence data to infer time-varying R_t under different reporting assumptions.",
+            "An SEIR model was calibrated to hospitalization and death time series to back-calculate R_0 via maximum likelihood.",
+            "We used Bayesian MCMC to infer latent infection dynamics and estimate the infection fatality ratio (IFR).",
+        ],
+        "meta_analysis": [
+            "We conducted a systematic review and random-effects meta-analysis to obtain a pooled estimate of the serial interval.",
+            "A PRISMA-guided meta-analysis aggregated incubation period estimates across 32 studies.",
+            "We pooled vaccine effectiveness estimates across observational studies using inverse-variance weighting.",
+        ],
+        "methodological": [
+            "We propose a new estimator for R_t from wastewater measurements and validate it on historical outbreaks.",
+            "We introduce an open-source software package to estimate transmission parameters from incidence data.",
+            "We compare two competing methods for estimating the incubation period and quantify bias under censoring.",
+        ],
+        "review_commentary": [
+            "We review published estimates of R_0 and discuss why early estimates may be biased upward.",
+            "This narrative review summarizes evidence on incubation periods and implications for quarantine policy.",
+            "We provide a perspective on interpreting case fatality rates during ongoing outbreaks.",
         ],
     })
-    classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: {
-        "A": PaperType.LITERATURE_REVIEW,
-        "B": PaperType.DATA_ANALYSIS,
-        "C": PaperType.UNCLEAR,
-    })
-    category_labels: Dict[str, str] = field(default_factory=lambda: {
-        "A": "Literature Review",
-        "B": "Data Analysis",
-        "C": "Unclear / Not specified",
-    })
+
+    classification_mapping: Dict[str, PaperType] = field(default_factory=lambda: dict(_CODE_TO_ENUM))
+    category_labels: Dict[str, str] = field(default_factory=lambda: dict(_CODE_LABELS))
+
     system_prompt: str = (
-        "You are a senior epidemiologist reviewing academic papers. "
-        "Classify each paper into exactly one of the provided paper-type categories."
+        "You are a precise epidemiological methods expert. "
+        "Classify the paper into exactly one  category based only on the provided text."
     )
-    user_prompt_template: str = """
-You are a senior academic epidemiologist. Determine the primary *paper type*.
 
-**Categories (A–C):**
-{categories}
+    user_prompt_template: str = r"""
+You are a senior academic epidemiologist. Determine the primary * paper type* for an epidemiological
+parameter-estimation corpus (e.g., R0/Rt, incubation period, CFR/IFR, vaccine efficacy/effectiveness).
 
-**Paper Content:**
-Title: {title}
-Abstract: {abstract}
-Keywords: {keywords}
+**Categories (choose ONE):**
+A. Primary_Empirical - original patient/field/surveillance/outbreak data used to estimate a parameter.
+B. Modeling_Inference - parameters inferred from existing data via mathematical/statistical models.
+C. Meta_Analysis - systematic review with quantitative pooling of parameter estimates.
+D. Methodological - new/validated estimation methods and/or software/tools for parameter estimation.
+E. Review_Commentary - narrative reviews, perspectives, editorials without new data or pooled estimates.
+F. Unclear - not enough information in the excerpt to decide (use sparingly).
 
-**Relevant Extracts:**
-{chunks_info}
+**Definitions:**
+{definitions}
 
 **Instructions:**
-1. Decide the paper's primary type (main contribution), not minor components.
-2. Choose exactly one letter (A, B, or C).
-3. Return a single JSON object that matches the schema below. Do not include extra text.
+1. Focus on *how the parameter estimate is produced* (new raw data vs inference vs synthesis vs method/tool vs commentary).
+2. Select exactly one letter (A-F).
+3. Return a single JSON object matching the schema below. Do NOT include extra text.
 
 **Schema:**
 {schema}
 """
+
+    # Prompt-time helper: definitions are injected by the caller when formatting user_prompt_template.
+    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
+        "definitions": "\n".join([f"{k}. {v}" for k, v in _CODE_DEFINITIONS.items() if k != "F"])
+    })
+
     output_schema: Any = PaperTypeClassificationOutput
     default_classification: Any = PaperType.UNCLEAR
 
-
 # -----------------------------------------------------------------------------
-# DAVAIL (Data Availability) – protocol-aligned
+# Data Availability
 # -----------------------------------------------------------------------------
 
-from .schemas import DATA_ACCESS_CODE_TO_ENUM, DATA_ACCESS_CODE_LABELS
+from .schemas import DATA_ACCESS_CODE_TO_ENUM, DATA_ACCESS_CODE_LABELS, DATA_ACCESS_CODE_DEFINITIONS
 
 
 @dataclass
@@ -125,6 +146,10 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
             "All data used in this study are available in a public repository (DOI/URL provided).",
             "The dataset is deposited on Zenodo under DOI: 10.xxxx/zenodo.xxxxx.",
             "De-identified data and analysis code are provided as supplementary CSV files.",
+            # Paper-as-release (protocol: still OPEN)
+            "We report a line list of confirmed cases and provide the full dataset in Table S1.",
+            "This outbreak report provides daily case counts and timelines sufficient to reconstruct the time series from the manuscript.",
+            "The appendix contains patient-level rows allowing reuse for additional analyses.",
         ],
         # AVAILABLE_UPON_REQUEST
         "upon_request": [
@@ -134,9 +159,11 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
         ],
         # REFERENCED
         "referenced": [
-            "We used daily case counts published by the Ministry of Health.",
+            "Data were obtained from publicly reported case counts, but no download link is provided.",
+            "We used data from the national surveillance system as reported by the Ministry of Health.",
             "Data were obtained from the Johns Hopkins COVID-19 dashboard.",
             "We analyzed surveillance data reported by the national public health institute.",
+            "We extracted hospital records, but the underlying dataset is not shared and no access mechanism is stated.",
         ],
         # CLOSED
         "closed": [
@@ -149,12 +176,6 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
             "No data availability statement is provided in the manuscript.",
             "The paper does not describe whether or how the data can be accessed.",
         ],
-        # DATA_SOURCE
-        "data_source": [
-            "We report a line list of confirmed cases and provide a detailed transmission chain.",
-            "This outbreak report provides case counts, timelines, and exposure histories.",
-            "We describe an epidemiological situation and present the primary surveillance summary.",
-        ],
     })
 
     classification_mapping: Dict[str, DataAccessibility] = field(
@@ -166,11 +187,11 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
     )
 
     system_prompt: str = (
-        "You are a research data librarian classifying epidemiological papers by *data availability* (DAVAIL). "
+        "You are a research data librarian classifying epidemiological papers by *data availability*. "
         "Follow the formal definitions strictly and base labels ONLY on explicit statements in the paper. "
         "Do not verify links or use external knowledge. "
         "If the paper is itself the primary data release (outbreak report / line list / transmission chain), "
-        "use DATA_SOURCE."
+        "use OPEN."
     )
 
     user_prompt_template: str = r"""
@@ -179,22 +200,11 @@ You are a research data librarian. Classify the *data availability* of the datas
 Key principle:
 - Assign labels strictly from statements in the paper. Do not verify links or rely on outside knowledge.
 
-**Categories (multi-label, A–F):**
+**Categories (multi-label, A–E):**
 {categories}
 
-Definitions:
-- **A – OPEN**: The paper claims data are available in a public repository with a stable link/identifier,
-  and/or provides reusable supplementary files (e.g., CSV tables) sufficient for reuse.
-- **B – AVAILABLE_UPON_REQUEST**: The paper explicitly states data are available upon request, approval,
-  or via an institutional process (contact author, data custodian, DUA).
-- **C – REFERENCED**: The paper attributes data to third-party sources (dashboards, public health authorities,
-  institutional databases), but does NOT provide a retrieval mechanism sufficient for a reader to obtain the data
-  in the same manner.
-- **D – CLOSED**: The paper explicitly states data cannot be shared or are restricted (legal/ethical/confidentiality/licensing),
-  and provides no actionable access mechanism.
-- **E – NOT_STATED**: The paper does not provide enough information to determine data availability.
-- **F – DATA_SOURCE**: The paper itself is the primary data release (e.g., outbreak/situation report, line list, contact tracing network).
-  If you choose **F**, choose ONLY **F**.
+**Definitions:**
+{definitions}
 
 Multi-dataset papers:
 - If the paper clearly uses multiple datasets with different availability mechanisms, you may include multiple letters.
@@ -215,7 +225,7 @@ Keywords: {keywords}
 
 **Instructions:**
 1. Identify datasets actually used in the study (methods/results), and what the paper says about accessing each.
-2. Choose one or more letters (A–F) based on the definitions above.
+2. Choose one or more letters (A–E) based on the definitions above.
 3. Set `primary_label` only if one label clearly dominates; otherwise leave it null.
 4. Return a single JSON object that exactly matches the schema below. Do NOT include any extra text.
 
@@ -223,15 +233,20 @@ Keywords: {keywords}
 {schema}
 """
 
+    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
+        "definitions": "\n".join([f"- **{k} – {v}**" for k, v in DATA_ACCESS_CODE_DEFINITIONS.items()])
+    })
+
     output_schema: Any = DataAccessibilityClassificationOutput
     default_classification: Any = field(default_factory=lambda: [DataAccessibility.UNCLEAR])
+
 
 
 # -----------------------------------------------------------------------------
 # DTYPE (Data Type) – protocol-aligned
 # -----------------------------------------------------------------------------
 
-from .schemas import DATA_TYPE_CODE_TO_ENUM, DATA_TYPE_CODE_LABELS
+from .schemas import DATA_TYPE_CODE_TO_ENUM, DATA_TYPE_CODE_LABELS, DATA_TYPE_CODE_DEFINITIONS
 
 
 @dataclass
@@ -304,20 +319,8 @@ Key principles:
 **Categories (multi-label, A–G):**
 {categories}
 
-Definitions (protocol-aligned):
-- **A – Traditional**: Established epidemiological/public-health data (routine surveillance case counts, admissions, deaths,
-  PCR/antigen-confirmed line lists, structured surveys) used in analysis.
-- **B – Non-Traditional Health**: Novel/non-standard health proxies outside traditional surveillance (symptom apps/platforms,
-  wearables/biometrics, wastewater surveillance, large-scale digital patient platforms) used in analysis.
-- **C – Non-Traditional Mobility**: Mobility/proximity signals (telecom CDRs, GPS/SDK mobility traces, Bluetooth proximity/contact tracing)
-  used as epidemiological proxies.
-- **D – Non-Traditional Sentiment**: Data capturing perceptions/behaviors/attitudes (social media, crowdsourced perception platforms,
-  survey panels aimed at perceptions/behaviors rather than clinical infection) used as data.
-- **E – Non-Traditional Economic**: Economic/financial data (transaction data, supply-chain/shipment data)
-- **F – Synthetic**: Simulated data are presented as *evidence supporting claims* (e.g., scenario projections/counterfactual outcomes/sensitivity analyses
-  that support conclusions). Do NOT use E if simulations are only used to illustrate model fit or calibration.
-- **G – No Empirical Data**: No empirical dataset is analyzed (conceptual/theoretical/commentary/methodological without empirical inputs). F is exclusive.
-- **H – Unclear**: Insufficient information to determine what data were used.
+**Definitions (protocol-aligned):**
+{definitions}
 
 **Paper Content:**
 Title: {title}
@@ -338,6 +341,10 @@ Keywords: {keywords}
 {schema}
 """
 
+    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
+        "definitions": "\n".join([f'- **{k} – {v}**' for k, v in DATA_TYPE_CODE_DEFINITIONS.items()])
+    })
+
     output_schema: Any = DataTypeClassificationOutput
     default_classification: Any = field(default_factory=lambda: [DataType.UNCLEAR])
 
@@ -346,7 +353,7 @@ Keywords: {keywords}
 # GEO (Geography) – protocol-aligned
 # -----------------------------------------------------------------------------
 
-from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS
+from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS, GEO_CODE_DEFINITIONS
 
 
 @dataclass
@@ -405,15 +412,8 @@ When GEO is IRRELEVANT:
 Global scope:
 - If the paper explicitly states a global scope (e.g., “global”, “worldwide”), include **all continents** (A–F).
 
-Transcontinental mapping (UN M49 convention for reproducibility):
-- Russia → Europe (C)
-- Turkey → Asia (B)
-- Egypt → Africa (A)
-- Kazakhstan → Asia (B)
-- Azerbaijan → Asia (B)
-- Georgia → Asia (B)
-- Cyprus → Asia (B)
-- Armenia → Asia (B)
+**Transcontinental mapping (UN M49 convention for reproducibility):**
+{definitions}
 
 **Categories (multi-label, A–H):**
 {categories}
@@ -444,6 +444,19 @@ Keywords: {keywords}
 **Schema:**
 {schema}
 """
+
+    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
+        "definitions": "\n".join([
+            "- Russia → Europe (C)",
+            "- Turkey → Asia (B)",
+            "- Egypt → Africa (A)",
+            "- Kazakhstan → Asia (B)",
+            "- Azerbaijan → Asia (B)",
+            "- Georgia → Asia (B)",
+            "- Cyprus → Asia (B)",
+            "- Armenia → Asia (B)",
+        ])
+    })
 
     output_schema: Any = GeoClassificationOutput
     default_classification: Any = field(default_factory=lambda: [GeoRegion.UNCLEAR])
