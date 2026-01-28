@@ -379,6 +379,8 @@ DATA_TYPE_CODE_DEFINITIONS: Dict[DataTypeCode, str] = {
     "F": "Synthetic – simulated data used as evidence supporting claims (e.g., scenario projections, counterfactuals).",
     "G": "No Empirical Data – conceptual/theoretical/methodological work with no empirical dataset analyzed.",
     "H": "Unclear / Not specified",
+
+    
 }
 
 

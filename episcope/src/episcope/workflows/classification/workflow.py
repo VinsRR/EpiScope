@@ -9,7 +9,7 @@ from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.schemas import PaperMetadata
-from .schemas import ClassificationResult 
+from .schemas import ClassificationResult
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,19 +18,16 @@ logger = logging.getLogger(__name__)
 class PaperClassifier(AbstractRAG):
     """Multi-modal paper classification using RAG and semantic similarity."""
 
-    def __init__(self, 
-                 retriever: AbstractRetriever, 
+    def __init__(self,
+                 retriever: AbstractRetriever,
                  generator: Generator,
                  strategy_name: str = None,
                  config: Optional[BaseClassifierConfig] = None,
                  academic_db: Optional[AcademicDB] = None
-    ):
+                 ):
         super().__init__(retriever, generator)
         self.config = config or PaperTypeClassifierConfig()
         self.academic_db = academic_db
-        self.template_paragraphs = self.config.template_paragraphs
-        self.classification_mapping = self.config.classification_mapping
-        self.category_labels = self.config.category_labels
         self.strategy_name = strategy_name
 
     def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ClassificationResult:
@@ -45,12 +42,11 @@ class PaperClassifier(AbstractRAG):
         relevant_chunks = self.get_relevant_chunks(metadata, paper_id, top_k=self.config.top_k)
         return self.classify_based_on_relevant_chunks(relevant_chunks, metadata)
 
-    # HOW IS THIS APPROACH RELATED TO "Reciprocal Rank Fusion" (RRF)?
     def get_relevant_chunks(self, metadata: PaperMetadata, paper_id: str, top_k: int = 10) -> Dict[
         str, List[Tuple[str, float]]]:
         """Main method to retrieve relevant chunks for each paper type."""
         aggregated_chunks = defaultdict(list)
-        for paper_type, templates in self.template_paragraphs.items():
+        for paper_type, templates in self.config.template_paragraphs.items():
             for template_query in templates:
                 retrieved_chunks = self.retriever.retrieve_by_paper(template_query, paper_id, top_k=top_k)
                 for chunk in retrieved_chunks:
@@ -59,7 +55,7 @@ class PaperClassifier(AbstractRAG):
         return self._deduplicate_and_rank_chunks(aggregated_chunks, top_k)
 
     def _deduplicate_and_rank_chunks(self, aggregated_chunks: Dict[str, List[Tuple[str, float]]],
-                                    top_k: int) -> Dict[str, List[Tuple[str, float]]]:
+                                     top_k: int) -> Dict[str, List[Tuple[str, float]]]:
         """Remove duplicates and keep top-k chunks for each paper type."""
         final_chunks = {}
         for paper_type, chunks in aggregated_chunks.items():
@@ -74,7 +70,7 @@ class PaperClassifier(AbstractRAG):
         return final_chunks
 
     def classify_based_on_relevant_chunks(self, relevant_chunks: Dict[str, List[Tuple[str, float]]],
-                                         metadata: PaperMetadata) -> ClassificationResult:
+                                          metadata: PaperMetadata) -> ClassificationResult:
         """Classify paper based on relevant chunks using LLM."""
         if not any(relevant_chunks.values()):
             logger.warning("No relevant chunks found for classification.")
@@ -85,7 +81,8 @@ class PaperClassifier(AbstractRAG):
                       relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> ClassificationResult:
         """Perform LLM-based classification with self-correction."""
         messages = self._build_initial_prompt(metadata, relevant_chunks)
-        
+
+
         for attempt in range(self.config.max_validation_retries):
             try:
                 provenance = self.generator.generate(
@@ -94,6 +91,9 @@ class PaperClassifier(AbstractRAG):
                     format="json"
                 )
                 response_content = provenance.answer
+
+                print("\n\nmessages:", messages)
+                print("\n\nresponse_content:", response_content, "\n\n")
 
             except Exception as e:
                 logger.warning(f"LLM generation attempt {attempt + 1} failed: {e}")
@@ -106,7 +106,7 @@ class PaperClassifier(AbstractRAG):
                 error_message = f"The JSON output is invalid. Please fix it. Error: {e}"
                 messages.append({"role": "assistant", "content": response_content})
                 messages.append({"role": "user", "content": error_message})
-        print("\n\nresponse_content:", response_content,"\n\n")
+        print("\n\nresponse_content:", response_content, "\n\n")
         return self._create_fallback_result()
 
     def _format_chunks_for_prompt(self, relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> str:
@@ -121,11 +121,12 @@ class PaperClassifier(AbstractRAG):
                 chunks_info += f"  • {score:.3f}: {text}\n"
         return chunks_info
 
-    def _build_initial_prompt(self, metadata: PaperMetadata, relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> List[Dict[str, str]]:
+    def _build_initial_prompt(self, metadata: PaperMetadata,
+                              relevant_chunks: Dict[str, List[Tuple[str, float]]]) -> List[Dict[str, str]]:
         """Create the initial classification prompt."""
         chunks_info = self._format_chunks_for_prompt(relevant_chunks)
         schema = self.config.output_schema.model_json_schema()
-        categories = "\n".join(f"{key} – {value}" for key, value in self.category_labels.items())
+        categories = "\n".join(f"{key} – {value}" for key, value in self.config.category_labels.items())
 
         prompt_args = {
             'categories': categories,
@@ -138,37 +139,16 @@ class PaperClassifier(AbstractRAG):
         }
         user_prompt = self.config.user_prompt_template.format(**prompt_args)
         system_prompt = self.config.system_prompt.format(
-            n_categories=len(self.category_labels),
-            category_labels=", ".join(list(self.category_labels.values()))
+            n_categories=len(self.config.category_labels),
+            category_labels=", ".join(list(self.config.category_labels.values()))
         )
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
-    # def _parse_classification_response(self, response_content: str) -> ClassificationResult:
-    #     """Parse LLM response into ClassificationResult."""
-    #     # if response starts with ```json\n it means the LLM formatted it as a string codeblock
-    #     if response_content.startswith("```json"):
-    #         response_content = response_content.replace("```json", "").replace("```", "").strip()
-
-    #     parsed = self.config.output_schema.model_validate_json(response_content)
-    #     classification = self.classification_mapping.get(parsed.classification, self.config.default_classification)
-
-    #     confidence = parsed.confidence if parsed.confidence is not None else 0.0
-    #     class_probs = parsed.class_probabilities or {}
-
-    #     return ClassificationResult(
-    #         classification=classification,
-    #         confidence=float(confidence),
-    #         class_probabilities=class_probs,
-    #         evidence={"reasoning": parsed.reasoning}
-    #     )
-
-
     def _parse_classification_response(self, response_content: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
-        # if response starts with ```json\n it means the LLM formatted it as a string codeblock
         if response_content.startswith("```json"):
             response_content = (
                 response_content
@@ -181,29 +161,23 @@ class PaperClassifier(AbstractRAG):
 
         raw_cls = parsed.classification
 
-        # Normalise default_classification into a list of DataType (or whatever you store)
         default_cls = self.config.default_classification
-        if not isinstance(default_cls, list):
-            default_cls = [default_cls]
 
-        # Handle both old (single-letter) and new (list-of-letters) cases
         if isinstance(raw_cls, list):
-            # New multi-label case: classification is a list of letter codes
             mapped: list = []
             for code in raw_cls:
-                mapped_value = self.classification_mapping.get(code)
+                mapped_value = self.config.classification_mapping.get(code)
                 if mapped_value is not None:
                     mapped.append(mapped_value)
 
             if not mapped:
-                # If nothing could be mapped, fall back to default
                 mapped = default_cls
 
             classification = mapped
 
         else:
             # Backward compatibility: classification is a single letter
-            mapped_value = self.classification_mapping.get(raw_cls)
+            mapped_value = self.config.classification_mapping.get(raw_cls)
             if mapped_value is not None:
                 classification = [mapped_value]
             else:
@@ -219,7 +193,6 @@ class PaperClassifier(AbstractRAG):
             else:
                 extras = parsed.extras
 
-
         return ClassificationResult(
             classification=classification,
             confidence=confidence,
@@ -228,13 +201,13 @@ class PaperClassifier(AbstractRAG):
             extras=extras
         )
 
-
     def _create_fallback_result(self) -> ClassificationResult:
         """Create a fallback classification result when LLM fails."""
         return ClassificationResult(
             classification=self.config.default_classification,
             confidence=0.0,
-            class_probabilities={label: 1/len(self.category_labels) for label in self.category_labels.values() if self.category_labels},
+            class_probabilities={label: 1 / len(self.config.category_labels) for label in
+                                 self.config.category_labels.values() if self.config.category_labels},
             evidence={"reasoning": "Classification failed, defaulting to unclear"},
             extras={}
         )

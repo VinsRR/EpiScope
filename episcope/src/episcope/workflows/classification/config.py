@@ -98,8 +98,7 @@ class PaperTypeClassifierConfig(BaseClassifierConfig):
     )
 
     user_prompt_template: str = r"""
-You are a senior academic epidemiologist. Determine the primary * paper type* for an epidemiological
-parameter-estimation corpus (e.g., R0/Rt, incubation period, CFR/IFR, vaccine efficacy/effectiveness).
+You are a senior academic epidemiologist. Determine the primary * paper type*.
 
 **Categories (choose ONE):**
 A. Primary_Empirical - original patient/field/surveillance/outbreak data used to estimate a parameter.
@@ -111,6 +110,14 @@ F. Unclear - not enough information in the excerpt to decide (use sparingly).
 
 **Definitions:**
 {definitions}
+
+**Paper Content:**
+Title: {title}
+Abstract: {abstract}
+Keywords: {keywords}
+
+**Relevant Extracts (candidate evidence):**
+{chunks_info}
 
 **Instructions:**
 1. Focus on *how the parameter estimate is produced* (new raw data vs inference vs synthesis vs method/tool vs commentary).
@@ -127,7 +134,7 @@ F. Unclear - not enough information in the excerpt to decide (use sparingly).
     })
 
     output_schema: Any = PaperTypeClassificationOutput
-    default_classification: Any = PaperType.UNCLEAR
+    default_classification: Any = field(default_factory=lambda: [PaperType.UNCLEAR])
 
 # -----------------------------------------------------------------------------
 # Data Availability
@@ -322,6 +329,12 @@ Key principles:
 **Definitions (protocol-aligned):**
 {definitions}
 
+**What counts as Non-Traditional Data (NTD):**
+Non-traditional data are datasets that are not purpose-collected through classical epidemiological instruments (e.g., surveys, clinical exams, laboratory assays), but instead originate from digital systems, platforms, sensors, or operational processes and are repurposed as proxies for health, behavior, mobility, or economic activity.  
+They are typically passively generated, high-volume, or platform-mediated, and were not originally designed for epidemiological research.  
+Thematic content alone (e.g., “economic”, “behavioral”, “social”) does NOT make data non-traditional; the data-generation mechanism does.
+
+
 **Paper Content:**
 Title: {title}
 Abstract: {abstract}
@@ -332,11 +345,11 @@ Keywords: {keywords}
 
 **Instructions:**
 1. Start from the assumption that no label applies; add a label only with clear evidence.
-2. Use multiple labels only when multiple distinct data types are clearly used.
-3. If you choose **G**, return only **G**.
-4. If the paper is too vague, choose **H**.
-5. Return a single JSON object matching the schema below. Do NOT add extra text.
-
+2. Label only based on data actually used as inputs to the analysis.
+3. Use multiple labels only when multiple distinct data types are clearly used.
+4. If you choose **G**, return only **G**.
+5. If the paper is too vague, choose **H**.
+6. Return a single JSON object matching the schema below. Do NOT add extra text.
 **Schema:**
 {schema}
 """
@@ -403,6 +416,8 @@ What to include:
 What to ignore:
 - Ignore locations mentioned only as background, comparison, related work, author affiliations, or incidental discussion.
 - Do NOT infer locations from strain identifiers, sample naming conventions, or external knowledge unless the paper explicitly states the location.
+- Ignore the location where ONLY sequencing, PCR confirmation, or computational analysis happened. E.g., if samples were collected in country 1 but sequenced in country 2, consider **only country 1**. 
+- Ignore the location where materials were produced if not tied to epidemiological evidence (e.g., lab-grown samples or materials). 
 
 When GEO is IRRELEVANT:
 - If the analysis is entirely in a strictly controlled laboratory setting (no meaningful geographic/ecological variation),

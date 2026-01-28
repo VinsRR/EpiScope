@@ -2,6 +2,10 @@ from abc import ABC, abstractmethod
 from typing import List
 from episcope.schemas import SearchResult
 
+# JinaAI Rerankers can be useful for this: 
+# - https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual 
+# - https://jina.ai/reranker/
+
 class Reranker(ABC):
     """Abstract base class for rerankers."""
 

@@ -311,13 +311,15 @@ class GeminiClient(LLMClient):
         self,
         texts: List[str],
         *,
-        model: str = "models/embedding-001",
+        model: str = "models/gemini-embedding-001",
+        output_dimensionality: Optional[int] = None,
         **kwargs: Any,
     ) -> List[List[float]]:
         result = genai.embed_content(
             model=model,
             content=texts,
             task_type="retrieval_document",
+            output_dimensionality=output_dimensionality,
             **kwargs,
         )
         return result["embedding"]

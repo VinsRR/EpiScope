@@ -32,6 +32,8 @@ class SemanticRetriever(AbstractRetriever):
             self.hyde = None
 
         model_name = self.vectordb.get_embedding_model()
+        if "embedding-001" in model_name: #model_name == "models/embedding-001" or "gemini" in model_name:
+            model_name = "gemini-embedding-001" #"embedding-001" # fix for gemini model name change
         if not model_name:
             raise ValueError("VectorDB does not have an embedding model configured. Cannot perform semantic search.")
 

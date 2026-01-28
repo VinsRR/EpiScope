@@ -41,7 +41,7 @@ class EmbedderFactory:
         elif model_name in OPENAI_EMBEDDING_MODELS:
             logger.info(f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder.")
             return OpenAIEmbedder(model=model_name, **kwargs)
-        elif model_name.startswith("models/"):
+        elif "embedding-001" in model_name: # not anymore like this....
             logger.info(f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder.")
             return GeminiEmbedder(model=model_name, **kwargs)
         else:
