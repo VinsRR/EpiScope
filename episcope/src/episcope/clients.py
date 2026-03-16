@@ -283,7 +283,7 @@ class GeminiClient(LLMClient):
         messages: Sequence[Mapping[str, str]],
         *,
         model: str = "gemini-1.5-pro",
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> str:

@@ -47,60 +47,176 @@ class ClassificationOutput(BaseModel):
 #  (Epidemiological parameter-estimation paper taxonomy)
 # -----------------------------------------------------------------------------
 
+# class PaperType(str, Enum):
+#     """Parameter-estimation focused paper-type taxonomy.
+
+#     Notes
+#     -----
+#     - These labels capture *how the estimate is produced*: original data, inferred via models,
+#       synthesized across studies, or focused on method/tool development.
+#     - `UNCLEAR` is an internal fallback and should not be emitted by the LLM unless truly unavoidable.
+#     """
+#     PRIMARY_EMPIRICAL = "primary_empirical"
+#     MODELING_INFERENCE = "modeling_inference"
+#     META_ANALYSIS = "meta_analysis"
+#     METHODOLOGICAL = "methodological"
+#     REVIEW_COMMENTARY = "review_commentary"
+
+#     # Internal fallback (pipeline), not for LLM output
+#     UNCLEAR = "unclear"
+
+
+# PaperTypeCode = Literal["A", "B", "C", "D", "E", "F"]
+
+# _CODE_TO_ENUM: Dict[PaperTypeCode, PaperType] = {
+#     "A": PaperType.PRIMARY_EMPIRICAL,
+#     "B": PaperType.MODELING_INFERENCE,
+#     "C": PaperType.META_ANALYSIS,
+#     "D": PaperType.METHODOLOGICAL,
+#     "E": PaperType.REVIEW_COMMENTARY,
+#     "F": PaperType.UNCLEAR,
+# }
+
+# _CODE_LABELS: Dict[PaperTypeCode, str] = {
+#     "A": "Primary_Empirical",
+#     "B": "Modeling_Inference",
+#     "C": "Meta_Analysis",
+#     "D": "Methodological",
+#     "E": "Review_Commentary",
+#     "F": "Unclear / Not Specified",
+# }
+
+# _CODE_DEFINITIONS: Dict[PaperTypeCode, str] = {
+#     "A": "Uses original patient/field/surveillance data to estimate one or more epidemiological parameters.",
+#     "B": "Infers parameters from existing data using mathematical/statistical models (e.g., renewal, SEIR fitting, Bayesian inference).",
+#     "C": "Systematic review with quantitative pooling of parameter estimates across studies (meta-analysis).",
+#     "D": "Introduces, validates, or compares estimation methods and/or releases software/tools for parameter estimation.",
+#     "E": "Narrative review, commentary, or perspective discussing parameter values/interpretation without new data or pooling.",
+#     "F": "Cannot be confidently categorized from the available text.",
+# }
+
+
+# class PaperTypeClassificationOutput(ClassificationOutput):
+#     classification: PaperTypeCode = Field(
+#         ...,
+#         description="A single letter code (A–F) for the  taxonomy.",
+#     )
+
+
+# -----------------------------------------------------------------------------
+# PAPER_TYPE (Epidemiological parameter-estimation paper taxonomy)
+# -----------------------------------------------------------------------------
+
 class PaperType(str, Enum):
-    """Parameter-estimation focused paper-type taxonomy.
+    """Epidemiological parameter-estimation paper taxonomy (PAPER_TYPE).
+
+    PAPER_TYPE classifies each document by the kind of scientific contribution it makes
+    to epidemiological parameter estimation.
 
     Notes
     -----
-    - These labels capture *how the estimate is produced*: original data, inferred via models,
-      synthesized across studies, or focused on method/tool development.
+    - Assigned at the *paper level* (not dataset level).
+    - Primary + secondary: assign exactly one primary_label and optional secondary_labels using this label set.
     - `UNCLEAR` is an internal fallback and should not be emitted by the LLM unless truly unavoidable.
     """
-    PRIMARY_EMPIRICAL = "primary_empirical"
-    MODELING_INFERENCE = "modeling_inference"
-    META_ANALYSIS = "meta_analysis"
-    METHODOLOGICAL = "methodological"
-    REVIEW_COMMENTARY = "review_commentary"
+
+    EMPIRICAL = "EMPIRICAL"
+    INFERENCE = "INFERENCE"
+    FORECAST = "FORECAST"
+    SYNTHESIS = "SYNTHESIS"
+    METHODOLOGICAL = "METHODOLOGICAL"
+    COMMENTARY = "COMMENTARY"
+
+    # Use when none of the above apply
+    OTHER = "OTHER"
 
     # Internal fallback (pipeline), not for LLM output
-    UNCLEAR = "unclear"
+    UNCLEAR = "UNCLEAR"
 
 
-PaperTypeCode = Literal["A", "B", "C", "D", "E", "F"]
-
-_CODE_TO_ENUM: Dict[PaperTypeCode, PaperType] = {
-    "A": PaperType.PRIMARY_EMPIRICAL,
-    "B": PaperType.MODELING_INFERENCE,
-    "C": PaperType.META_ANALYSIS,
-    "D": PaperType.METHODOLOGICAL,
-    "E": PaperType.REVIEW_COMMENTARY,
-    "F": PaperType.UNCLEAR,
+PAPER_TYPE_DEFINITIONS: Dict[str, str] = {
+    "EMPIRICAL": (
+        "Primary contribution is based on **original** empirical data collection, where claims rely on "
+        "direct measurement from a clearly defined study population or sample (e.g., cohort/case–control/cross-sectional "
+        "studies, randomized trials, surveillance/outbreak reports, or data papers describing new datasets)."
+    ),
+    "INFERENCE": (
+        "Primary contribution is estimating epidemiological parameters or reconstructing unobserved epidemic processes "
+        "by fitting explicit statistical or mechanistic models to observed data; results depend on model structure and assumptions "
+        "(e.g., estimating R0 or generation time from case data, reconstructing transmission chains, phylodynamic inference, "
+        "or estimating seroconversion rates from serological surveys)."
+    ),
+    "FORECAST": (
+        "Primary contribution is prediction or scenario analysis: forward projections of epidemic trajectories, comparisons of "
+        "intervention scenarios, or counterfactual simulations; outputs are projected future outcomes or policy comparisons under stated assumptions "
+        "(e.g., policy-planning projections, intervention scenario comparisons, or real-time forecasting submissions)."
+    ),
+    "SYNTHESIS": (
+        "Primary contribution is a systematic synthesis of existing evidence using predefined search, selection, and appraisal criteria "
+        "(e.g., quantitative meta-analyses pooling estimates across studies or PRISMA-compliant systematic reviews)."
+    ),
+    "METHODOLOGICAL": (
+        "Primary contribution is development, evaluation, or comparison of methods (e.g., new estimators, inference frameworks, "
+        "identifiability/bias analyses, software tools, or theoretical results about epidemic processes such as epidemic thresholds)."
+    ),
+    "COMMENTARY": (
+        "Primary contribution is discussion or interpretation without presenting new empirical estimates, model-based inference, or systematic evidence synthesis "
+        "(e.g., narrative literature reviews, perspective pieces, editorials, or policy commentaries)."
+    ),
+    "OTHER": "Does not fit any of the categories above.",
+    "UNCLEAR": "Internal fallback when the provided excerpt is insufficient to classify.",
 }
 
-_CODE_LABELS: Dict[PaperTypeCode, str] = {
-    "A": "Primary_Empirical",
-    "B": "Modeling_Inference",
-    "C": "Meta_Analysis",
-    "D": "Methodological",
-    "E": "Review_Commentary",
-    "F": "Unclear / Not Specified",
-}
-
-_CODE_DEFINITIONS: Dict[PaperTypeCode, str] = {
-    "A": "Uses original patient/field/surveillance data to estimate one or more epidemiological parameters.",
-    "B": "Infers parameters from existing data using mathematical/statistical models (e.g., renewal, SEIR fitting, Bayesian inference).",
-    "C": "Systematic review with quantitative pooling of parameter estimates across studies (meta-analysis).",
-    "D": "Introduces, validates, or compares estimation methods and/or releases software/tools for parameter estimation.",
-    "E": "Narrative review, commentary, or perspective discussing parameter values/interpretation without new data or pooling.",
-    "F": "Cannot be confidently categorized from the available text.",
-}
 
 
 class PaperTypeClassificationOutput(ClassificationOutput):
-    classification: PaperTypeCode = Field(
+    """Primary + secondary output for PAPER_TYPE.
+
+    Papers often combine multiple tasks (data collection, parameter inference, forecasting).
+    This schema distinguishes the paper's *primary contribution* (main deliverable) from any
+    *secondary contributions* (supporting tasks that enable or accompany the primary).
+
+    Use OTHER when none of the substantive categories apply.
+    UNCLEAR is an internal fallback and should be avoided unless the excerpt is genuinely insufficient.
+    """
+
+    primary_label: PaperType = Field(
         ...,
-        description="A single letter code (A–F) for the  taxonomy.",
+        description=(
+            "Exactly one PAPER_TYPE label capturing the paper's primary scientific contribution."
+        ),
     )
+    secondary_labels: List[PaperType] = Field(
+        default_factory=list,
+        description=(
+            "Optional secondary PAPER_TYPE labels for additional substantial contributions. "
+            "Do not include the primary_label here. Avoid OTHER/UNCLEAR unless necessary."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> "PaperTypeClassificationOutput":
+        # Normalize secondary labels: deduplicate (preserve order), drop primary/UNCLEAR, and enforce OTHER exclusivity.
+        if self.primary_label in {PaperType.UNCLEAR, PaperType.OTHER}:
+            self.secondary_labels = []
+            return self
+
+        seen: List[PaperType] = []
+        for lbl in self.secondary_labels or []:
+            if lbl not in seen:
+                seen.append(lbl)
+
+        # Drop primary and UNCLEAR from secondary list
+        canonical = [lbl for lbl in seen if lbl not in {self.primary_label, PaperType.UNCLEAR}]
+
+        # OTHER should be exclusive: if any substantive label exists, drop OTHER from secondary
+        canonical = [lbl for lbl in canonical if lbl != PaperType.OTHER]
+
+        self.secondary_labels = canonical
+        return self
+
+
+
 
 
 # -----------------------------------------------------------------------------
@@ -117,6 +233,7 @@ class DataAccessibility(str, Enum):
     - `UNCLEAR` is reserved as an internal fallback and should not be emitted by the LLM.
     """
     OPEN = "open"
+    REPORTED = "reported"
     AVAILABLE_UPON_REQUEST = "available_upon_request"
     REFERENCED = "referenced"
     CLOSED = "closed"
@@ -126,45 +243,65 @@ class DataAccessibility(str, Enum):
     UNCLEAR = "unclear"
 
 
-DataAccessibilityCode = Literal["A", "B", "C", "D", "E"]
+DataAccessibilityCode = Literal["A", "B", "C", "D", "E", "F"]
 
 DATA_ACCESS_CODE_TO_ENUM: Dict[DataAccessibilityCode, DataAccessibility] = {
     "A": DataAccessibility.OPEN,
-    "B": DataAccessibility.AVAILABLE_UPON_REQUEST,
+    "B": DataAccessibility.REPORTED,
     "C": DataAccessibility.REFERENCED,
-    "D": DataAccessibility.CLOSED,
-    "E": DataAccessibility.NOT_STATED,
+    "D": DataAccessibility.AVAILABLE_UPON_REQUEST,
+    "E": DataAccessibility.CLOSED,
+    "F": DataAccessibility.NOT_STATED,
 }
 
 DATA_ACCESS_CODE_LABELS: Dict[DataAccessibilityCode, str] = {
     "A": "OPEN",
-    "B": "AVAILABLE_UPON_REQUEST",
+    "B": "REPORTED",
     "C": "REFERENCED",
-    "D": "CLOSED",
-    "E": "NOT_STATED",
+    "D": "AVAILABLE_UPON_REQUEST",
+    "E": "CLOSED",
+    "F": "NOT_STATED",
 }
 
 DATA_ACCESS_CODE_DEFINITIONS: Dict[DataAccessibilityCode, str] = {
     "A": (
-        "The paper claims data are available in a public repository with a stable link/identifier "
-        "and/or provides reusable supplementary files (e.g., CSV tables) sufficient for reuse. This includes cases "
-        "where the paper itself is the primary data release (e.g., descriptive studies) and a third party can "
-        "reconstruct the raw dataset (e.g., line-list rows or time-series points) directly from the text/tables."
+        "The data underlying the results are publicly available via a persistent identifier (e.g., DOI, accession number), "
+        "a stable repository link, and/or by being fully released within the paper package (e.g., full line-lists or complete contingency tables) "
+        "in a form sufficient for a third party to reconstruct the dataset for new analyses. Mentions of supplementary material only qualify if they "
+        "contain the specific, extractable data used for the work (the link/identifier must point to the underlying data supporting the results, not merely "
+        "state that supplementary information exists)."
     ),
-    "B": "The paper explicitly states data are available upon request, approval, or via an institutional process (contact author, data custodian, DUA).",
+    "B": (
+        "The dataset is not fully released, but the paper provides granular, extractable data values that allow a third party to independently re-aggregate "
+        "and recompute at least one key quantity (e.g., a rate or proportion) from the reported values alone, without relying on narrative summaries or derived "
+        "model outputs. This label depends on the richness of the in-paper reporting, regardless of whether the source data are internal or third-party."
+    ),
     "C": (
-        "The paper attributes data to third-party sources (dashboards, public health authorities, institutional databases), "
-        "but does NOT provide an access path or retrieval mechanism sufficient for a reader to obtain the data in the same manner. "
-        "This also includes primary data collected by the authors where raw observations are not reported and no external access mechanism is provided."
+        "The data are attributed to a specifically identifiable third-party source (e.g., public health authority, institutional database, emergency dashboard, "
+        "named public source, or other paper), but the paper provides neither a stable retrieval path for the source data nor sufficient detail to re-aggregate "
+        "the data (i.e., it fails the REPORTED re-aggregation criterion). Reporting is data-thin—typically limited to derived outputs such as effect sizes, "
+        "coefficients, or fitted model curves—preventing independent verification of the underlying counts. Vague attributions (e.g., \"government data\") "
+        "do not qualify."
     ),
-    "D": "The paper explicitly states data cannot be shared or are restricted (legal/ethical/confidentiality/licensing), without an actionable access mechanism.",
-    "E": "The paper does not provide enough information to determine data availability.",
+    "D": (
+        "The paper explicitly provides a request-based mechanism to access the data (e.g., contact the author, apply to a data access committee, or follow a "
+        "specific institutional process)."
+    ),
+    "E": (
+        "The paper explicitly states that the data cannot be shared or are restricted due to legal, ethical, confidentiality, or licensing constraints, without "
+        "providing an actionable access mechanism."
+    ),
+    "F": (
+        "The paper provides no data access statement, no repository link, no request mechanism, and no identifiable third-party attribution, while also failing "
+        "to provide extractable values sufficient for REPORTED. Statements that data were collected/generated, without an access mechanism and without "
+        "re-aggregatable values, should be labeled NOT_STATED."
+    ),
 }
 
 
 class DataAccessibilityClassificationOutput(ClassificationOutput):
     """
-    Multi-label output for DAVAIL.
+    Multi-label output for Data Availability
 
     Use multiple labels when the paper uses multiple datasets with different
     availability mechanisms. If the paper is itself the primary data release,
@@ -174,7 +311,7 @@ class DataAccessibilityClassificationOutput(ClassificationOutput):
         ...,
         min_length=1,
         description=(
-            "List of one or more letters among: A (OPEN), B (AVAILABLE_UPON_REQUEST), C (REFERENCED), D (CLOSED), E (NOT_STATED)."
+            "List of one or more letters among: A (OPEN), B (REPORTED), C (REFERENCED), D (AVAILABLE_UPON_REQUEST), E (CLOSED), F (NOT_STATED)."
         ),
     )
     primary_label: Optional[DataAccessibilityCode] = Field(
@@ -190,7 +327,7 @@ class DataAccessibilityClassificationOutput(ClassificationOutput):
             if c not in seen:
                 seen.append(c)
 
-        canonical = [c for c in ["A", "B", "C", "D", "E"] if c in seen]
+        canonical = [c for c in ["A", "B", "C", "D", "E", "F"] if c in seen]
 
         # If primary_label is present but not in classification, drop it.
         if self.primary_label is not None and self.primary_label not in canonical:
@@ -202,6 +339,7 @@ class DataAccessibilityClassificationOutput(ClassificationOutput):
 
         self.classification = canonical
         return self
+
 
 
 # -----------------------------------------------------------------------------
