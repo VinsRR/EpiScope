@@ -16,7 +16,7 @@ class KeywordRetriever(AbstractRetriever):
 
     def retrieve(
         self,
-        query: str,
+        query: str, # space-separated keywords
         *,
         top_k: int = 5,
         filter: Optional[Dict[str, Any]] = None,
@@ -38,6 +38,7 @@ class KeywordRetriever(AbstractRetriever):
             return []
 
         try:
+            # this line gets all chunks for the paper_id (if namespace is paper-scoped)....
             chunks = self.vectordb.get_points(namespace=namespace, filter=final_filter if final_filter else None)
             
             hits = []

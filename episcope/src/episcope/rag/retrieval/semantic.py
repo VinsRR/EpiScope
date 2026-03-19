@@ -31,7 +31,7 @@ class SemanticRetriever(AbstractRetriever):
         else:
             self.hyde = None
 
-        model_name = self.vectordb.get_embedding_model()
+        model_name = self.vectordb.get_embedding_model()["dense"]
         if "embedding-001" in model_name: #model_name == "models/embedding-001" or "gemini" in model_name:
             model_name = "gemini-embedding-001" #"embedding-001" # fix for gemini model name change
         if not model_name:
@@ -70,7 +70,7 @@ class SemanticRetriever(AbstractRetriever):
 
         try:
             query_embedding = self.embedder.embed_text(final_query)
-            chunks = self.vectordb.search(
+            chunks = self.vectordb.search_dense(
                 query_vector=query_embedding,
                 top_k=top_k,
                 namespace=namespace,
