@@ -1,6 +1,6 @@
 import logging
 from .base import Embedder
-from .huggingface import HuggingFaceEmbedder
+from .huggingface import HuggingFaceEmbedder, HuggingFaceSparseEmbedder, HuggingFaceLateEmbedder
 from .ollama import OllamaEmbedder
 from .openai import OpenAIEmbedder
 from .gemini import GeminiEmbedder
@@ -47,3 +47,15 @@ class EmbedderFactory:
         else:
             logger.info(f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder.")
             return OllamaEmbedder(model=model_name, **kwargs)
+
+    @staticmethod
+    def get_sparse_embedder(model_name: str, **kwargs) -> HuggingFaceSparseEmbedder:
+        """Factory method to get a sparse embedder instance."""
+        logger.info(f"Creating HuggingFaceSparseEmbedder for model '{model_name}'.")
+        return HuggingFaceSparseEmbedder(model=model_name, **kwargs)
+
+    @staticmethod
+    def get_late_embedder(model_name: str, **kwargs) -> HuggingFaceLateEmbedder:
+        """Factory method to get a late-interaction embedder instance."""
+        logger.info(f"Creating HuggingFaceLateEmbedder for model '{model_name}'.")
+        return HuggingFaceLateEmbedder(model=model_name, **kwargs)
