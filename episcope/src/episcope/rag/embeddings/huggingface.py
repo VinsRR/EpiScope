@@ -432,8 +432,8 @@ class HuggingFaceCrossEncoderReranker:
         for cand, score in zip(usable_candidates, scores):
             item = dict(cand)
             item["cross_score"] = score
-            item["score"] = score
+            # Do NOT overwrite "score" so that similarity_score is preserved for thresholding
             reranked.append(item)
 
-        reranked.sort(key=lambda x: x["score"], reverse=True)
+        reranked.sort(key=lambda x: x.get("cross_score", float('-inf')), reverse=True)
         return reranked[:top_k] if top_k is not None else reranked

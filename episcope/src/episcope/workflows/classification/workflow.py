@@ -11,13 +11,11 @@ from pydantic import ValidationError
 from episcope.db.academic_db import AcademicDB
 from episcope.rag.generation.base import Generator
 from episcope.rag.interfaces import AbstractRetriever
-from episcope.rag.postprocessing.reranker import Reranker           
 from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.base import AbstractRAG
 from episcope.workflows.classification.config import BaseClassifierConfig, PaperTypeClassifierConfig
 from episcope.workflows.classification.schemas import ClassificationResult
 from episcope.rag.provenance import (     
-    RankedChunk,
     Evidence,
     Provenance,
     CompletionSample,
@@ -59,13 +57,11 @@ class PaperClassifier(AbstractRAG):
         strategy_name: Optional[str] = None,
         config: Optional[BaseClassifierConfig] = None,
         academic_db: Optional[AcademicDB] = None,
-        reranker: Optional[Reranker] = None,
     ):
         super().__init__(retriever, generator)
         self.config = config or PaperTypeClassifierConfig()
         self.academic_db = academic_db
         self.strategy_name = strategy_name
-        self.reranker = reranker
 
     # -------------------------------------------------------------------------
     # Public entry point
@@ -121,26 +117,15 @@ class PaperClassifier(AbstractRAG):
         metadata: PaperMetadata,
         paper_id: str,
         top_k: int = 10,
-    ) -> List[RankedChunk]:
-        """Retrieve, globally deduplicate, rank, and optionally rerank chunks.
+    ) -> List[SearchResult]:
+        """Retrieve, globally deduplicate, and rank chunks.
 
         The pipeline is:
             fan-out retrieval (all categories × all templates)
             → cross-category deduplication + global ranking  → top_k
-            → optional neural reranking                       → config.top_k
-
-        Pass a larger top_k (e.g. 30) to feed the reranker a broad candidate
-        set, then let it reduce to config.top_k for the prompt.
         """
         aggregated = self._retrieve_all(paper_id, top_k)
         chunks = self._deduplicate_and_rank(aggregated, top_k)
-
-        if self.reranker:
-            query = (
-                getattr(self.config, "reranker_query", None)
-                or self._default_reranker_query()
-            )
-            chunks = self._apply_reranker(query, chunks)
 
         return chunks
 
@@ -148,29 +133,34 @@ class PaperClassifier(AbstractRAG):
         self,
         paper_id: str,
         top_k: int,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> Dict[str, Dict[str, SearchResult]]:
         """Fan out across all category templates.
 
-        Returns {category: {text: best_score}} — the best score each text
+        Returns {category: {text: SearchResult}} — the best score each text
         achieved within a category, before cross-category dedup.
         """
-        category_best: Dict[str, Dict[str, float]] = defaultdict(dict)
+        category_best: Dict[str, Dict[str, SearchResult]] = defaultdict(dict)
         for category, templates in self.config.template_paragraphs.items():
             for query in templates:
                 for chunk in self.retriever.retrieve_by_paper(query, paper_id, top_k=top_k):
                     text = chunk.text.strip()
                     if not text:
                         continue
-                    current = category_best[category].get(text, float("-inf"))
-                    if chunk.similarity_score > current:
-                        category_best[category][text] = chunk.similarity_score
+                    current = category_best[category].get(text)
+                    score = chunk.rank_score if hasattr(chunk, 'rank_score') and chunk.rank_score else chunk.similarity_score
+                    if current is None:
+                        category_best[category][text] = chunk
+                    else:
+                        current_score = current.rank_score if hasattr(current, 'rank_score') and current.rank_score else current.similarity_score
+                        if score > current_score:
+                            category_best[category][text] = chunk
         return category_best
 
     def _deduplicate_and_rank(
         self,
-        category_best: Dict[str, Dict[str, float]],
+        category_best: Dict[str, Dict[str, SearchResult]],
         top_k: int,
-    ) -> List[RankedChunk]:
+    ) -> List[SearchResult]:
         """Cross-category dedup + global ranking.
 
         Each text survives only under the category where it scored highest.
@@ -179,54 +169,25 @@ class PaperClassifier(AbstractRAG):
         # For each text, find the category where it scored highest
         winner: Dict[str, str] = {}  # text -> winning category
         for category, chunks in category_best.items():
-            for text, score in chunks.items():
-                current = winner.get(text)
-                if current is None or score > category_best[current][text]:
+            for text, chunk in chunks.items():
+                score = chunk.rank_score if hasattr(chunk, 'rank_score') and chunk.rank_score else chunk.similarity_score
+                current_category = winner.get(text)
+                if current_category is None:
                     winner[text] = category
+                else:
+                    current_chunk = category_best[current_category][text]
+                    current_score = current_chunk.rank_score if hasattr(current_chunk, 'rank_score') and current_chunk.rank_score else current_chunk.similarity_score
+                    if score > current_score:
+                        winner[text] = category
 
-        ranked = [
-            RankedChunk(
-                text=text,
-                score=category_best[category][text],
-                category=category,
-            )
-            for text, category in winner.items()
-        ]
-        ranked.sort(key=lambda c: c.score, reverse=True)
+        ranked = []
+        for text, category in winner.items():
+            chunk = category_best[category][text]
+            chunk.artifacts["category"] = category
+            ranked.append(chunk)
+
+        ranked.sort(key=lambda c: c.rank_score if hasattr(c, 'rank_score') and c.rank_score else c.similarity_score, reverse=True)
         return ranked[:top_k]
-
-    def _apply_reranker(
-        self,
-        query: str,
-        chunks: List[RankedChunk],
-    ) -> List[RankedChunk]:
-        """Bridge between RankedChunk and the Reranker interface.
-
-        Converts to SearchResult (what Reranker expects), reranks, then
-        converts back — preserving category via index since reranker may
-        reorder arbitrarily.
-        """
-        results = [
-            SearchResult(id=str(i), text=c.text, similarity_score=c.score)
-            for i, c in enumerate(chunks)
-        ]
-        index_to_category = {str(i): c.category for i, c in enumerate(chunks)}
-
-        reranked = self.reranker.rerank(query, results, top_k=self.config.top_k)
-
-        return [
-            RankedChunk(
-                text=r.text,
-                score=r.rank_score,
-                category=index_to_category.get(r.id, "unknown"),
-            )
-            for r in reranked
-        ]
-
-    def _default_reranker_query(self) -> str:
-        """Synthesise a reranker query from category labels when none is configured."""
-        labels = ", ".join(self.config.category_labels.values())
-        return f"Data availability: {labels}"
 
     # -------------------------------------------------------------------------
     # Classification
@@ -235,7 +196,7 @@ class PaperClassifier(AbstractRAG):
     def _llm_classify(
         self,
         metadata: PaperMetadata,
-        chunks: List[RankedChunk],
+        chunks: List[SearchResult],
     ) -> _LLMAttemptResult:
         """LLM-based classification with self-correcting retries.
 
@@ -322,7 +283,7 @@ class PaperClassifier(AbstractRAG):
     def _build_initial_prompt(
         self,
         metadata: PaperMetadata,
-        chunks: List[RankedChunk],
+        chunks: List[SearchResult],
     ) -> List[Dict[str, str]]:
         schema = self.config.output_schema.model_json_schema()
         categories = "\n".join(
@@ -346,21 +307,22 @@ class PaperClassifier(AbstractRAG):
             {"role": "user", "content": user_prompt},
         ]
 
-    def _format_chunks_for_prompt(self, chunks: List[RankedChunk]) -> str:
+    def _format_chunks_for_prompt(self, chunks: List[SearchResult]) -> str:
         """Group chunks by category for prompt readability.
 
         The underlying list is flat and globally ranked; grouping is purely
         presentational so the LLM can see which label each snippet supports.
         """
-        by_category: Dict[str, List[RankedChunk]] = defaultdict(list)
+        by_category: Dict[str, List[SearchResult]] = defaultdict(list)
         for chunk in chunks:
-            by_category[chunk.category].append(chunk)
+            category = chunk.artifacts.get("category", "unknown")
+            by_category[category].append(chunk)
 
         parts: List[str] = []
         for category, cat_chunks in by_category.items():
-            avg = np.mean([c.score for c in cat_chunks])
+            avg = np.mean([c.rank_score if hasattr(c, 'rank_score') and c.rank_score else c.similarity_score for c in cat_chunks])
             lines = [f"\n{category.upper()} (avg {avg:.3f}):"]
-            lines += [f"  • {c.score:.3f}: {c.text}" for c in cat_chunks]
+            lines += [f"  • {c.rank_score if hasattr(c, 'rank_score') and c.rank_score else c.similarity_score:.3f}: {c.text}" for c in cat_chunks]
             parts.append("\n".join(lines))
         return "\n".join(parts)
 
@@ -369,7 +331,7 @@ class PaperClassifier(AbstractRAG):
     # -------------------------------------------------------------------------
 
     def _build_evidences(
-        self, paper_id: str, chunks: List[RankedChunk]
+        self, paper_id: str, chunks: List[SearchResult]
     ) -> List[Evidence]:
         model_id = getattr(self.generator, "model_id", None)
         prompt_id = getattr(self.config, "prompt_id", None)
@@ -378,7 +340,7 @@ class PaperClassifier(AbstractRAG):
             Evidence(
                 paper_id=paper_id,
                 snippet=chunk.text,
-                section=chunk.category,
+                section=chunk.artifacts.get("category", "unknown"),
                 index_version=index_version,
                 model_id=model_id,
                 prompt_id=prompt_id,

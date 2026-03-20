@@ -1,11 +1,12 @@
 from __future__ import annotations
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from episcope.rag.embeddings.base import Embedder
 from episcope.rag.embeddings.factory import EmbedderFactory
 from episcope.rag.interfaces import AbstractRetriever
 from episcope.rag.embeddings.huggingface import HuggingFaceCrossEncoderReranker, HuggingFaceLateEmbedder, HuggingFaceSparseEmbedder
+from episcope.schemas.results import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -14,65 +15,128 @@ class HybridRetriever(AbstractRetriever):
     def __init__(
         self,
         vdb,
-        dense_embedder: Optional[Embedder] = None,
-        sparse_embedder: Optional[HuggingFaceSparseEmbedder] = None,
-        late_embedder: Optional[HuggingFaceLateEmbedder] = None,
-        cross_encoder_reranker: Optional[HuggingFaceCrossEncoderReranker] = None,
-        cross_encoder_model: Optional[str] = None,
-        *,
         prefetch_k: int = 50,
         rerank_top_k: int = 20,
         use_rerank: bool = True,
-        cross_encoder_batch_size: int = 16,
-        cross_encoder_max_length: Optional[int] = None,
+        cross_encoder: Optional[HuggingFaceCrossEncoderReranker] = None,
         cross_encoder_text_key: str = "text",
+        rrf_k: int = 60,
     ) -> None:
         self.vdb = vdb
+        self.prefetch_k = prefetch_k
+        self.rerank_top_k = rerank_top_k
+        self.use_rerank = use_rerank
+        self.cross_encoder = cross_encoder
+        self.cross_encoder_text_key = cross_encoder_text_key
+        self.rrf_k = rrf_k
+        
+        self._init_models()
 
+    def _init_models(self) -> None:
         models = {}
         if hasattr(self.vdb, "get_embedding_model"):
             models = self.vdb.get_embedding_model()
 
-        if dense_embedder is None and models.get("dense"):
+        # Dense
+        self.dense_embedder = None
+        if models.get("dense"):
             model_name = models["dense"]
             if "embedding-001" in model_name:
                 model_name = "gemini-embedding-001"
             logger.info(f"Auto-loading dense embedder: {model_name}")
             self.dense_embedder = EmbedderFactory.get_embedder(model_name)
-        else:
-            self.dense_embedder = dense_embedder
-
-        if sparse_embedder is None and models.get("sparse"):
+            
+        # Sparse
+        self.sparse_embedder = None
+        if models.get("sparse"):
             logger.info(f"Auto-loading sparse embedder: {models['sparse']}")
             self.sparse_embedder = EmbedderFactory.get_sparse_embedder(models["sparse"])
-        else:
-            self.sparse_embedder = sparse_embedder
 
-        if late_embedder is None and models.get("late"):
+        # Late
+        self.late_embedder = None
+        if models.get("late"):
             logger.info(f"Auto-loading late embedder: {models['late']}")
             self.late_embedder = EmbedderFactory.get_late_embedder(models["late"])
-        else:
-            self.late_embedder = late_embedder
-
-        if cross_encoder_reranker is not None and cross_encoder_model is not None:
-            raise ValueError("Provide either cross_encoder_reranker or cross_encoder_model, not both.")
-
-        if cross_encoder_reranker is not None:
-            self.cross_encoder_reranker = cross_encoder_reranker
-        else:
-            self.cross_encoder_reranker = None
-
-        self.prefetch_k = prefetch_k
-        self.rerank_top_k = rerank_top_k
-        self.use_rerank = use_rerank
-        self.cross_encoder_text_key = cross_encoder_text_key
 
     @property
     def uses_cross_encoder(self) -> bool:
-        return self.cross_encoder_reranker is not None
+        return self.cross_encoder is not None
+
+    def _reciprocal_rank_fusion(self, results_lists: List[List[Dict[str, Any]]], top_k: int) -> List[Dict[str, Any]]:
+        """Fuses multiple lists of results using Reciprocal Rank Fusion (RRF)."""
+        fused_scores: Dict[str, float] = {}
+        items: Dict[str, Dict[str, Any]] = {}
+        
+        for results in results_lists:
+            for rank, item in enumerate(results):
+                doc_id = item.get("id")
+                if doc_id is None:
+                    continue
+                if doc_id not in items:
+                    items[doc_id] = item
+                
+                # RRF Formula: 1 / (k + rank)
+                fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + 1.0 / (self.rrf_k + rank + 1)
+        
+        # Sort by the fused score descending
+        sorted_docs = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        fused_results = []
+        for doc_id, rrf_score in sorted_docs[:top_k]:
+            item = dict(items[doc_id])
+            item["rrf_score"] = rrf_score
+            # We preserve the original base 'score' for downstream threshold checks
+            fused_results.append(item)
+            
+        return fused_results
+
+    def _get_dense_candidates(self, query: str, top_k: int, namespace: Optional[str], filter: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not self.dense_embedder:
+            raise ValueError("Dense retrieval requested, but no dense embedder was provided.")
+        dense_query = self.dense_embedder.embed_text(query)
+        return list(self.vdb.search_dense(
+            query_vector=dense_query,
+            top_k=top_k,
+            namespace=namespace,
+            filter=filter,
+        ))
+
+    def _get_sparse_candidates(self, query: str, top_k: int, namespace: Optional[str], filter: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not self.sparse_embedder:
+            raise ValueError("Sparse retrieval requested, but no sparse embedder was provided.")
+        sparse_query = self.sparse_embedder.embed_text(query)
+        return list(self.vdb.search_sparse(
+            query_sparse=sparse_query,
+            top_k=top_k,
+            namespace=namespace,
+            filter=filter,
+        ))
+
+    def _get_hybrid_candidates(self, query: str, top_k: int, namespace: Optional[str], filter: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not self.dense_embedder or not self.sparse_embedder:
+            raise ValueError("Hybrid retrieval requires both dense and sparse embedders.")
+            
+        if hasattr(self.vdb, "search_hybrid"):
+            dense_query = self.dense_embedder.embed_text(query)
+            sparse_query = self.sparse_embedder.embed_text(query)
+            return list(self.vdb.search_hybrid(
+                dense_query=dense_query,
+                sparse_query=sparse_query,
+                top_k=top_k,
+                prefetch_k=self.prefetch_k,
+                namespace=namespace,
+                filter=filter,
+            ))
+        else:
+            # Explicit Python-level Reciprocal Rank Fusion
+            dense_results = self._get_dense_candidates(query, self.prefetch_k, namespace, filter)
+            sparse_results = self._get_sparse_candidates(query, self.prefetch_k, namespace, filter)
+            return self._reciprocal_rank_fusion([dense_results, sparse_results], top_k=top_k)
 
     def _rerank_cross(self, query: str, candidates: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
-        return self.cross_encoder_reranker.rerank(
+        if not self.cross_encoder:
+            return candidates[:top_k]
+        return self.cross_encoder.rerank(
             query=query,
             candidates=candidates,
             text_key=self.cross_encoder_text_key,
@@ -101,82 +165,107 @@ class HybridRetriever(AbstractRetriever):
             filter=filter,
         ))
 
+    def _to_search_results(
+        self,
+        candidates: List[Dict[str, Any]],
+        source: str,
+        similarity_threshold: float,
+    ) -> Sequence[SearchResult]:
+        results = []
+        for chunk in candidates:
+            # Preserve original vector distance/similarity
+            score = chunk.get("score", 0.0)
+            
+            # The cross_score (logits) or rrf_score may fall below a 0.0 threshold logic, 
+            # so we check similarity_threshold strictly against the base metric provided by the vector DB.
+            if score < similarity_threshold:
+                continue
+            
+            # Use explicit ranker scores in order of precedence: cross -> late (if applicable) -> rrf -> base score
+            rank_score = chunk.get("cross_score", chunk.get("rrf_score", chunk.get("rank_score", score)))
+            
+            results.append(
+                SearchResult(
+                    id=str(chunk.get("id", "")),
+                    paper_id=chunk.get("paper_id", ""),
+                    text=chunk.get("text", ""),
+                    section_type=chunk.get("section_type", "other"),
+                    title=chunk.get("title", ""),
+                    similarity_score=score,
+                    rank_score=rank_score,
+                    source=source,
+                )
+            )
+        return results
+
     def retrieve(
         self,
         query: str,
+        *,
         top_k: int = 5,
-        namespace: Optional[str] = None,
+        similarity_threshold: float = 0.0,
         filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> Sequence[SearchResult]:
         caps = self.vdb.capabilities()
 
-        use_cross = self.use_rerank and self.cross_encoder_reranker is not None
+        final_filter = filter.copy() if filter else {}
+        namespace = final_filter.pop("paper_id", None) or final_filter.pop("namespace", None)
+
+        use_cross = self.use_rerank and self.cross_encoder is not None
         use_late = self.use_rerank and not use_cross and caps.get("late", False)
 
         initial_top_k = self.rerank_top_k if (use_cross or use_late) else top_k
 
-        if caps["dense"] and caps["sparse"]:
-            if self.dense_embedder is None or self.sparse_embedder is None:
-                raise ValueError("Hybrid retrieval requires both dense and sparse embedders.")
+        results_dicts: List[Dict[str, Any]] = []
+        source = "hybrid"
 
-            dense_query = self.dense_embedder.embed_text(query)
-            sparse_query = self.sparse_embedder.embed_text(query)
-
-            fused = list(self.vdb.search_hybrid(
-                dense_query=dense_query,
-                sparse_query=sparse_query,
-                top_k=initial_top_k,
-                prefetch_k=self.prefetch_k,
-                namespace=namespace,
-                filter=filter,
-            ))
-
+        if caps.get("dense") and caps.get("sparse"):
+            source = "hybrid"
+            fused = self._get_hybrid_candidates(query, initial_top_k, namespace, final_filter)
+            
             if use_cross:
-                return self._rerank_cross(query=query, candidates=fused, top_k=top_k)
+                results_dicts = self._rerank_cross(query, fused, top_k)
+            elif use_late:
+                results_dicts = self._rerank_late(query, fused, top_k, namespace, final_filter)
+            else:
+                results_dicts = fused[:top_k]
 
-            if use_late:
-                return self._rerank_late(
-                    query=query,
-                    candidates=fused,
-                    top_k=top_k,
-                    namespace=namespace,
-                    filter=filter,
-                )
-
-            return fused
-
-        if caps["dense"]:
-            if self.dense_embedder is None:
-                raise ValueError("Dense retrieval requested, but no dense embedder was provided.")
-
-            dense_query = self.dense_embedder.embed_text(query)
-            results = list(self.vdb.search_dense(
-                query_vector=dense_query,
-                top_k=initial_top_k,
-                namespace=namespace,
-                filter=filter,
-            ))
-
+        elif caps.get("dense"):
+            source = "dense"
+            results = self._get_dense_candidates(query, initial_top_k, namespace, final_filter)
+            
             if use_cross:
-                return self._rerank_cross(query=query, candidates=results, top_k=top_k)
+                results_dicts = self._rerank_cross(query, results, top_k)
+            else:
+                results_dicts = results[:top_k]
 
-            return results[:top_k]
-
-        if caps["sparse"]:
-            if self.sparse_embedder is None:
-                raise ValueError("Sparse retrieval requested, but no sparse embedder was provided.")
-
-            sparse_query = self.sparse_embedder.embed_text(query)
-            results = list(self.vdb.search_sparse(
-                query_sparse=sparse_query,
-                top_k=initial_top_k,
-                namespace=namespace,
-                filter=filter,
-            ))
-
+        elif caps.get("sparse"):
+            source = "sparse"
+            results = self._get_sparse_candidates(query, initial_top_k, namespace, final_filter)
+            
             if use_cross:
-                return self._rerank_cross(query=query, candidates=results, top_k=top_k)
+                results_dicts = self._rerank_cross(query, results, top_k)
+            else:
+                results_dicts = results[:top_k]
+        else:
+            raise ValueError("No usable retrieval modality is available in the collection.")
 
-            return results[:top_k]
+        return self._to_search_results(results_dicts, source, similarity_threshold)
 
-        raise ValueError("No usable retrieval modality is available in the collection.")
+    def retrieve_by_paper(
+        self,
+        query: str,
+        paper_id: str,
+        *,
+        top_k: int = 5,
+        similarity_threshold: float = 0.0,
+        filter: Optional[Dict[str, Any]] = None,
+    ) -> Sequence[SearchResult]:
+        final_filter = filter.copy() if filter else {}
+        final_filter["paper_id"] = paper_id
+        return self.retrieve(
+            query,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+            filter=final_filter,
+        )

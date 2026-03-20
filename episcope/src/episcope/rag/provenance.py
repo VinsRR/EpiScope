@@ -3,20 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from episcope.schemas import PaperMetadata
+from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.classification.schemas import ClassificationResult
-
-
-# ---------------------------------------------------------------------------
-# Retrieval
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RankedChunk:
-    """A single retrieved chunk after global deduplication and ranking."""
-    text: str
-    score: float
-    category: str   # which template category produced the highest score for this text
 
 
 # ---------------------------------------------------------------------------
