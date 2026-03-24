@@ -33,6 +33,7 @@ class BaseClassifierConfig:
     top_k: int = 10
 
     template_paragraphs: Dict[str, List[str]] = field(default_factory=dict)
+    cr_template_sentencs: Dict[str, List[str]] = field(default_factory=dict)
     classification_mapping: Dict[str, Any] = field(default_factory=dict)
     category_labels: Dict[str, str] = field(default_factory=dict)
 
@@ -153,8 +154,6 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
             "De-identified data and analysis code are provided as supplementary CSV files.",
             # Paper-as-release (protocol: still OPEN)
             "We report a line list of confirmed cases and provide the full dataset in Table S1.",
-            # "This outbreak report provides daily case counts and timelines sufficient to reconstruct the time series from the manuscript.",
-            # "The appendix contains patient-level rows allowing reuse for additional analyses.",
         ],
         # REPORTED
         "reported": [
@@ -181,9 +180,33 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
             "The dataset is proprietary and cannot be made available.",
         ],
         # NOT_STATED
-        "not_stated": [
-            "No data availability statement is provided in the manuscript.",
-            "The paper does not describe whether or how the data can be accessed.",
+        "not_stated": [ 
+        ],
+    })
+
+    cr_template_sentencs: Dict[str, List[str]] = field(default_factory=lambda: { # prototypical evidence sentences 
+        # OPEN
+        "open": [
+            "The data are publicly available in a repository, supplement, paper package, or the full dataset is published in the paper itself."
+        ],
+        # REPORTED
+        "reported": [
+            "We report detailed counts or tables that allow the main results to be recomputed, but we do not release the full dataset."
+        ],
+        # AVAILABLE_UPON_REQUEST
+        "upon_request": [
+            "The data are available only on request, by author contact, committee approval, or an institutional access process."
+        ],        
+        # REFERENCED
+        "referenced": [
+                "We used data reported by a previous study or made available by a public health authority."
+        ],
+        # CLOSED
+        "closed": [
+            "The data cannot be shared because of legal, ethical, confidentiality, or licensing restrictions."
+        ],
+        # NOT_STATED
+        "not_stated": [ 
         ],
     })
 

@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from copy import deepcopy
 import numpy as np
 from pydantic import ValidationError
 
@@ -15,6 +16,7 @@ from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.base import AbstractRAG
 from episcope.workflows.classification.config import BaseClassifierConfig, PaperTypeClassifierConfig
 from episcope.workflows.classification.schemas import ClassificationResult
+from episcope.rag.postprocessing.reranker import Reranker
 from episcope.rag.provenance import (     
     Evidence,
     Provenance,
@@ -57,15 +59,19 @@ class PaperClassifier(AbstractRAG):
         strategy_name: Optional[str] = None,
         config: Optional[BaseClassifierConfig] = None,
         academic_db: Optional[AcademicDB] = None,
+        cross_encoder_reranker: Optional[Reranker] = None,
+        ce_mode: str = "off",
+        ce_top_k: Optional[int] = None,
     ):
         super().__init__(retriever, generator)
         self.config = config or PaperTypeClassifierConfig()
         self.academic_db = academic_db
         self.strategy_name = strategy_name
+        self.cross_encoder_reranker = cross_encoder_reranker
+        self.ce_mode = ce_mode
+        self.ce_top_k = ce_top_k
 
-    # -------------------------------------------------------------------------
-    # Public entry point
-    # -------------------------------------------------------------------------
+
 
     def run(
         self,
@@ -108,9 +114,7 @@ class PaperClassifier(AbstractRAG):
             raise ValueError("metadata must be provided when academic_db is not available.")
         return metadata
 
-    # -------------------------------------------------------------------------
-    # Retrieval
-    # -------------------------------------------------------------------------
+
 
     def get_relevant_chunks(
         self,
@@ -118,16 +122,19 @@ class PaperClassifier(AbstractRAG):
         paper_id: str,
         top_k: int = 10,
     ) -> List[SearchResult]:
-        """Retrieve, globally deduplicate, and rank chunks.
-
-        The pipeline is:
-            fan-out retrieval (all categories × all templates)
-            → cross-category deduplication + global ranking  → top_k
-        """
         aggregated = self._retrieve_all(paper_id, top_k)
-        chunks = self._deduplicate_and_rank(aggregated, top_k)
 
-        return chunks
+        ce_mode = getattr(self, "ce_mode", "off")
+        if self.cross_encoder_reranker is not None and ce_mode != "off":
+            logger.info("Applying cross-encoder reranking with mode=%s", ce_mode)
+            return self._rerank_with_cross_encoder(
+                aggregated,
+                top_k=top_k,
+                mode=ce_mode,
+            )
+
+        return self._deduplicate_and_rank(aggregated, top_k)
+
 
     def _retrieve_all(
         self,
@@ -189,9 +196,113 @@ class PaperClassifier(AbstractRAG):
         ranked.sort(key=lambda c: c.rank_score if hasattr(c, 'rank_score') and c.rank_score else c.similarity_score, reverse=True)
         return ranked[:top_k]
 
-    # -------------------------------------------------------------------------
-    # Classification
-    # -------------------------------------------------------------------------
+
+    def _rerank_with_cross_encoder(
+        self,
+        category_best: Dict[str, Dict[str, SearchResult]],
+        top_k: int,
+        mode: str,
+    ) -> List[SearchResult]:
+        if self.cross_encoder_reranker is None:
+            return self._deduplicate_and_rank(category_best, top_k)
+
+        if mode not in {"within_label", "global"}:
+            raise ValueError(f"Unknown ce_mode={mode!r}")
+
+        if mode == "within_label":
+            logger.info("Applying within-label cross-encoder reranking")
+            return self._rerank_within_label(category_best, top_k)
+
+        logger.info("Applying global cross-encoder reranking")
+        return self._rerank_global(category_best, top_k)
+
+
+    def _rerank_within_label(
+        self,
+        category_best: Dict[str, Dict[str, SearchResult]],
+        top_k: int,
+    ) -> List[SearchResult]:
+        reranked_by_category: Dict[str, Dict[str, SearchResult]] = defaultdict(dict)
+
+        for category, chunks_by_text in category_best.items():
+            if not chunks_by_text:
+                continue
+
+            query = self.config.template_paragraphs[category][0]
+            candidates = list(chunks_by_text.values())
+
+            if self.ce_top_k is not None:
+                candidates = sorted(
+                    candidates,
+                    key=self._get_score,
+                    reverse=True,
+                )[:self.ce_top_k]
+
+            reranked = self.cross_encoder_reranker.rerank(
+                query=query,
+                results=list(candidates),
+                top_k=len(candidates),
+            )
+
+            for chunk in reranked:
+                chunk.artifacts["category"] = category
+                reranked_by_category[category][chunk.text.strip()] = chunk
+
+        return self._deduplicate_and_rank(reranked_by_category, top_k)
+
+
+    def _rerank_global(
+        self,
+        category_best: Dict[str, Dict[str, SearchResult]],
+        top_k: int,
+    ) -> List[SearchResult]:
+        # Union of all candidate chunks after first-stage retrieval
+        all_chunks_by_text: Dict[str, SearchResult] = {}
+        for chunks_by_text in category_best.values():
+            for text, chunk in chunks_by_text.items():
+                current = all_chunks_by_text.get(text)
+                if current is None or self._get_score(chunk) > self._get_score(current):
+                    all_chunks_by_text[text] = chunk
+
+        candidates = list(all_chunks_by_text.values())
+
+        if self.ce_top_k is not None:
+            candidates = sorted(candidates, key=self._get_score, reverse=True)[:self.ce_top_k]
+
+        rescored_by_category: Dict[str, Dict[str, SearchResult]] = defaultdict(dict)
+
+        for category, templates in self.config.template_paragraphs.items():
+            if not templates:
+                continue
+            query = templates[0]
+
+            scored = self.cross_encoder_reranker.rerank(
+                query=query,
+                results=[self._clone_chunk(chunk) for chunk in candidates],
+                top_k=len(candidates),
+            )
+
+            for chunk in scored:
+                text = chunk.text.strip()
+                chunk.artifacts["category"] = category
+                rescored_by_category[category][text] = chunk
+
+        return self._deduplicate_and_rank(rescored_by_category, top_k)
+
+    # need a clone helper because CrossEncoderReranker.rerank() mutates rank_score in place. Reusing the same object across multiple label queries, later passes overwrite earlier scores.    
+    def _clone_chunk(self, chunk: SearchResult) -> SearchResult:
+        copied = deepcopy(chunk)
+        if copied.artifacts is None:
+            copied.artifacts = {}
+        return copied
+
+    def _get_score(self, chunk: SearchResult) -> float:
+        if getattr(chunk, "rank_score", None) is not None:
+            return chunk.rank_score
+        if getattr(chunk, "similarity_score", None) is not None:
+            return chunk.similarity_score
+        return 0.0
+
 
     def _llm_classify(
         self,

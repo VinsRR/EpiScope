@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
 from episcope.schemas import SearchResult
-from episcope.rag.postprocessing.scoring import Scorer, default_scorer
+# from episcope.rag.postprocessing.scoring import Scorer, default_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -23,42 +23,45 @@ class Reranker(ABC):
         ...
 
 
-# ---------------------------------------------------------------------------
-# Heuristic reranker
-# ---------------------------------------------------------------------------
+# # ---------------------------------------------------------------------------
+# # Heuristic reranker
+# # ---------------------------------------------------------------------------
 
-class ResultRanker(Reranker):
-    """Deduplicates and ranks results using an injected Scorer.
+# class ResultRanker(Reranker):
+#     """Deduplicates and ranks results using an injected Scorer.
 
-    Does not use `query` — scores are derived purely from result content
-    and pre-computed similarity scores. Use as the first stage of a
-    CascadeReranker to cheaply reduce a large candidate pool.
-    """
+#     Does not use `query` — scores are derived purely from result content
+#     and pre-computed similarity scores. Use as the first stage of a
+#     CascadeReranker to cheaply reduce a large candidate pool.
+#     """
 
-    def __init__(self, scorer: Optional[Scorer] = None):
-        self.scorer = scorer or default_scorer()
+#     def __init__(self, scorer: Optional[Scorer] = None):
+#         self.scorer = scorer or default_scorer()
 
-    def rerank(self, query: str, results: List[SearchResult], top_k: int) -> List[SearchResult]:
-        if not results:
-            return []
-        self._apply_scores(results)
-        unique = self._deduplicate(results)
-        unique.sort(key=lambda r: r.rank_score, reverse=True)
-        return unique[:top_k]
+#     def rerank(self, query: str, results: List[SearchResult], top_k: int) -> List[SearchResult]:
+#         if not results:
+#             return []
+#         self._apply_scores(results)
+#         unique = self._deduplicate(results)
+#         unique.sort(key=lambda r: r.rank_score, reverse=True)
+#         return unique[:top_k]
 
-    def _apply_scores(self, results: List[SearchResult]) -> None:
-        for result in results:
-            result.rank_score = self.scorer(result)
+#     def _apply_scores(self, results: List[SearchResult]) -> None:
+#         for result in results:
+#             result.rank_score = self.scorer(result)
 
-    @staticmethod
-    def _deduplicate(results: List[SearchResult]) -> List[SearchResult]:
-        """Keep the highest-scoring result per normalised text signature."""
-        seen: Dict[str, SearchResult] = {}
-        for result in results:
-            sig = result.artifacts.get("normalized_text", result.text)[:200].lower().strip()
-            if sig not in seen or result.rank_score > seen[sig].rank_score:
-                seen[sig] = result
-        return list(seen.values())
+#     @staticmethod
+#     def _deduplicate(results: List[SearchResult]) -> List[SearchResult]:
+#         """Keep the highest-scoring result per normalised text signature."""
+#         seen: Dict[str, SearchResult] = {}
+#         for result in results:
+#             sig = result.artifacts.get("normalized_text", result.text)[:200].lower().strip()
+#             if sig not in seen or result.rank_score > seen[sig].rank_score:
+#                 seen[sig] = result
+#         return list(seen.values())
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +126,12 @@ class CrossEncoderReranker(Reranker):
             "Wrap it in a thin adapter that exposes one of these methods."
         )
 
+
+    @classmethod
+    def from_huggingface(cls, model_name: str, device: Optional[str] = None, **kwargs) -> "CrossEncoderReranker":
+        from sentence_transformers import CrossEncoder
+        model = CrossEncoder(model_name, device=device)
+        return cls(model, **kwargs)
 
 # ---------------------------------------------------------------------------
 # Cascade reranker

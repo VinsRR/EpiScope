@@ -217,7 +217,7 @@ class QdrantDB(AbstractVectorDB):
             self.client.upsert(
                 collection_name=self.collection,
                 points=batch,
-                wait=True,
+                wait=False,
             )
 
     def _build_filter(
