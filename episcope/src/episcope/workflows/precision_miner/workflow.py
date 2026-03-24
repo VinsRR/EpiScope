@@ -6,7 +6,7 @@ from episcope.db.academic_db import AcademicDB
 from episcope.workflows.precision_miner.config import PrecisionMinerConfig, FindDataSourcesConfig
 from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
-from episcope.rag.interfaces import AbstractRetriever
+from episcope.rag.retrieval.base import BaseRetriever
 from episcope.schemas import PaperMetadata
 from .schemas import ExtractionResult, ExtractionItem, ExtractionResultSchema
 
@@ -17,7 +17,7 @@ class PrecisionMiner(AbstractRAG):
     """A configurable RAG workflow for extracting structured information from papers."""
 
     def __init__(self, 
-                 retriever: AbstractRetriever, 
+                 retriever: BaseRetriever, 
                  generator: Generator,
                  strategy_name: str = None,
                  config: Optional[PrecisionMinerConfig] = None,

@@ -14,7 +14,7 @@ class Reranker(ABC):
     """Base class for all rerankers.
 
     `query` is part of the interface even for score-based rerankers that
-    ignore it, so every Reranker is drop-in composable inside HybridRetriever
+    ignore it, so every Reranker is drop-in composable inside Retriever
     and CascadeReranker.
     """
 

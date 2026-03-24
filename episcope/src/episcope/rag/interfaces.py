@@ -1,11 +1,9 @@
 """Abstract interfaces for core RAG components.
 
-This module defines abstract base classes (ABCs) for the major phases
-of retrieval‑augmented generation (RAG) in the EpiScope project.  By
-defining these interfaces, implementations of indexing, retrieval and
-generation can be swapped out or extended without modifying calling
-code.  The abstract classes follow a minimal, Pythonic API that
-captures the required behaviours.
+This module defines abstract base classes (ABCs) for indexing and
+generation. Retrieval now lives under ``episcope.rag.retrieval`` with a
+single shared ``BaseRetriever`` foundation for vector-database-backed
+retrieval pipelines.
 """
 
 from __future__ import annotations
@@ -42,39 +40,6 @@ class AbstractIndexer(ABC):
                 support logical isolation of vectors; others may
                 ignore this parameter.
         """
-
-
-
-class AbstractRetriever(ABC):
-    """Abstract base class for retrieval strategies.
-
-    Retrievers wrap an underlying indexer (or multiple indexers)
-    together with optional query augmentation mechanisms such as
-    HYDE.  The ``retrieve`` method returns a list of context
-    dictionaries suitable for downstream answer generation.  More
-    specialised retrievers may expose additional methods (e.g. for
-    multi‑paper retrieval).  Clients should depend on the abstract
-    class rather than concrete implementations to allow swapping
-    implementations.
-    """
-
-    @abstractmethod
-    def retrieve(self, query: str, *, top_k: int = 5, similarity_threshold: float = 0.0, **kwargs: Any) -> Sequence[Dict[str, Any]]:
-        """Retrieve contexts for a query.
-
-        Args:
-            query: The user query.
-            top_k: Maximum number of contexts to return.
-            similarity_threshold: Minimum similarity score for a context to be returned.
-            **kwargs: Additional arguments for the retrieval strategy.
-
-        Returns:
-            A sequence of context dictionaries containing text and
-            associated metadata.  The exact fields depend on the
-            implementation.  At minimum, each context should contain
-            a ``content`` key with the text snippet.
-        """
-
 
 class AbstractGenerator(ABC):
     """Abstract base class for answer generation.

@@ -17,7 +17,39 @@ implementation is unavailable.
 from __future__ import annotations
 from typing import Any
 
-__all__ = ["RAGFactory"]
+from episcope.rag.retrieval.base import BaseRetriever
+
+__all__ = [
+    "BaseRetriever",
+    "Retriever",
+    "SemanticCandidateRetriever",
+    "HybridCandidateRetriever",
+    "SparseCandidateRetriever",
+    "RAGFactory",
+]
+
+
+class _UnavailableRetriever:  # type: ignore
+    """Fallback used when optional retrieval dependencies are missing."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise ImportError(
+            "Retriever components are unavailable because required retrieval dependencies are missing."
+        )
+
+
+try:
+    from episcope.rag.retrieval.candidates import (
+        HybridCandidateRetriever,
+        SemanticCandidateRetriever,
+        SparseCandidateRetriever,
+    )
+    from episcope.rag.retrieval.retriever import Retriever
+except Exception:
+    Retriever = _UnavailableRetriever
+    HybridCandidateRetriever = _UnavailableRetriever
+    SemanticCandidateRetriever = _UnavailableRetriever
+    SparseCandidateRetriever = _UnavailableRetriever
 
 try:
     # Attempt to import the concrete RAGFactory implementation.  This

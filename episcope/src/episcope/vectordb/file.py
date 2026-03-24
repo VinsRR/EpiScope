@@ -49,14 +49,24 @@ class FileDB(AbstractVectorDB):
             # Silently fail if loading fails, will start with an empty DB
             pass
 
-    def upsert(self, points: Iterable[Dict[str, Any]], namespace: Optional[str] = None, embed_model: Optional[str] = None, chunking_config: Optional[Dict[str, Any]] = None) -> None:
-        if embed_model:
+    def upsert(
+        self,
+        points: Iterable[Dict[str, Any]],
+        namespace: Optional[str] = None,
+        embed_models: Optional[Dict[str, str]] = None,
+        chunking_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        dense_model = embed_models.get("dense") if embed_models else None
+        if dense_model:
             # Only set the DB-level model if it's not already configured.
             if self._model is None:
-                self._model = embed_model
+                self._model = dense_model
                 self._dirty = True
-            elif self._model != embed_model:
-                assert False, f"Warning: upsert called with embed_model={embed_model} but DB already has embed_model={self._model}; DB model not changed"
+            elif self._model != dense_model:
+                assert False, (
+                    f"Warning: upsert called with dense embed model={dense_model} "
+                    f"but DB already has embed_model={self._model}; DB model not changed"
+                )
 
         if chunking_config:
             if self._chunking_config is None:
@@ -158,6 +168,13 @@ class FileDB(AbstractVectorDB):
     def get_chunking_config(self) -> Optional[Dict[str, Any]]:
         """Get the name of the chunking strategy used for the database."""
         return self._chunking_config
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "dense": True,
+            "sparse": False,
+            "late": False,
+        }
 
     def save(self) -> None:
         if not self._dirty:

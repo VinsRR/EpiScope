@@ -6,7 +6,22 @@ from .config import (
     DataTypeClassifierConfig,
     GeoClassifierConfig,
 )
+from .evidence_reranking import (
+    BaseCrossEncoderEvidenceReranker,
+    EvidenceRerankingStrategy,
+    NoOpEvidenceReranker,
+    WithinLabelCrossEncoderReranker,
+    GlobalCrossEncoderReranker,
+)
+from .output import (
+    ClassificationDecision,
+    ClassificationTrace,
+    ClassificationTrainingRecord,
+    CompletionSample,
+    DetailedClassificationResult,
+)
 from .schemas import (
+    BaseClassificationSchema,
     ClassificationResult,
     PaperType,
     DataAccessibility,
@@ -21,6 +36,17 @@ __all__ = [
     "DataAccessibilityClassifierConfig",
     "DataTypeClassifierConfig",
     "GeoClassifierConfig",
+    "BaseCrossEncoderEvidenceReranker",
+    "EvidenceRerankingStrategy",
+    "NoOpEvidenceReranker",
+    "WithinLabelCrossEncoderReranker",
+    "GlobalCrossEncoderReranker",
+    "BaseClassificationSchema",
+    "ClassificationDecision",
+    "ClassificationTrace",
+    "ClassificationTrainingRecord",
+    "CompletionSample",
+    "DetailedClassificationResult",
     "ClassificationResult",
     "PaperType",
     "DataAccessibility",

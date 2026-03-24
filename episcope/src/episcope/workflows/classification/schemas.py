@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 # Base output schema (shared by all classifiers)
 # -----------------------------------------------------------------------------
 
-class ClassificationOutput(BaseModel):
+class BaseClassificationSchema(BaseModel):
     """Base output schema returned by an LLM classifier."""
     reasoning: str = Field(..., description="Short 1–3 sentence explanation grounded in the provided text.")
     confidence: Optional[float] = Field(
@@ -96,7 +96,7 @@ class ClassificationOutput(BaseModel):
 # }
 
 
-# class PaperTypeClassificationOutput(ClassificationOutput):
+# class PaperTypeClassificationOutput(BaseClassificationSchema):
 #     classification: PaperTypeCode = Field(
 #         ...,
 #         description="A single letter code (A–F) for the  taxonomy.",
@@ -169,7 +169,7 @@ PAPER_TYPE_DEFINITIONS: Dict[str, str] = {
 
 
 
-class PaperTypeClassificationOutput(ClassificationOutput):
+class PaperTypeClassificationOutput(BaseClassificationSchema):
     """Primary + secondary output for PAPER_TYPE.
 
     Papers often combine multiple tasks (data collection, parameter inference, forecasting).
@@ -299,7 +299,7 @@ DATA_ACCESS_CODE_DEFINITIONS: Dict[DataAccessibilityCode, str] = {
 }
 
 
-class DataAccessibilityClassificationOutput(ClassificationOutput):
+class DataAccessibilityClassificationOutput(BaseClassificationSchema):
     """
     Multi-label output for Data Availability
 
@@ -423,7 +423,7 @@ class GeoExtras(BaseModel):
         return self
 
 
-class GeoClassificationOutput(ClassificationOutput):
+class GeoClassificationOutput(BaseClassificationSchema):
     classification: List[GeoCode] = Field(
         ...,
         min_length=1,
@@ -522,7 +522,7 @@ DATA_TYPE_CODE_DEFINITIONS: Dict[DataTypeCode, str] = {
 }
 
 
-class DataTypeClassificationOutput(ClassificationOutput):
+class DataTypeClassificationOutput(BaseClassificationSchema):
     """Multi-label output for DTYPE."""
     classification: List[DataTypeCode] = Field(
         ...,

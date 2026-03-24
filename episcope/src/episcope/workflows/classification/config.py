@@ -7,7 +7,7 @@ from .schemas import (
     # Enums
     PaperType, DataAccessibility, GeoRegion, DataType,
     # Output schemas
-    ClassificationOutput, PaperTypeClassificationOutput,
+    BaseClassificationSchema, PaperTypeClassificationOutput,
     DataAccessibilityClassificationOutput, GeoClassificationOutput,
     DataTypeClassificationOutput,
 )
@@ -33,14 +33,14 @@ class BaseClassifierConfig:
     top_k: int = 10
 
     template_paragraphs: Dict[str, List[str]] = field(default_factory=dict)
-    cr_template_sentencs: Dict[str, List[str]] = field(default_factory=dict)
+    cr_template_sentences: Dict[str, List[str]] = field(default_factory=dict)
     classification_mapping: Dict[str, Any] = field(default_factory=dict)
     category_labels: Dict[str, str] = field(default_factory=dict)
 
     system_prompt: str = ""
     user_prompt_template: str = ""
 
-    output_schema: Any = ClassificationOutput
+    output_schema: Any = BaseClassificationSchema
     default_classification: Any = None
 
     # How many times to re-ask the LLM if JSON does not validate.
@@ -179,12 +179,12 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
             "Patient-level data are confidential and not available for public release.",
             "The dataset is proprietary and cannot be made available.",
         ],
-        # NOT_STATED
-        "not_stated": [ 
-        ],
+        # # NOT_STATED
+        # "not_stated": [ 
+        # ],
     })
 
-    cr_template_sentencs: Dict[str, List[str]] = field(default_factory=lambda: { # prototypical evidence sentences 
+    cr_template_sentences: Dict[str, List[str]] = field(default_factory=lambda: { # prototypical evidence sentences 
         # OPEN
         "open": [
             "The data are publicly available in a repository, supplement, paper package, or the full dataset is published in the paper itself."
@@ -205,9 +205,9 @@ class DataAccessibilityClassifierConfig(BaseClassifierConfig):
         "closed": [
             "The data cannot be shared because of legal, ethical, confidentiality, or licensing restrictions."
         ],
-        # NOT_STATED
-        "not_stated": [ 
-        ],
+        # # NOT_STATED
+        # "not_stated": [ 
+        # ],
     })
 
     classification_mapping: Dict[str, DataAccessibility] = field(
