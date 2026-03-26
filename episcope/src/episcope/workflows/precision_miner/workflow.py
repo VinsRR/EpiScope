@@ -1,111 +1,140 @@
-import json
+from __future__ import annotations
+
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from episcope.db.academic_db import AcademicDB
-from episcope.workflows.precision_miner.config import PrecisionMinerConfig, FindDataSourcesConfig
-from episcope.workflows.base import AbstractRAG
 from episcope.rag.generation.base import Generator
+from episcope.rag.provenance import Provenance
 from episcope.rag.retrieval.base import BaseRetriever
-from episcope.schemas import PaperMetadata
-from .schemas import ExtractionResult, ExtractionItem, ExtractionResultSchema
+from episcope.schemas import PaperMetadata, SearchResult
+from episcope.workflows.base import AbstractRAG
+from episcope.workflows.precision_miner.config import FindDataSourcesConfig, PrecisionMinerConfig
+from episcope.workflows.precision_miner.output import DetailedExtractionResult, ExtractionTrace
+from episcope.workflows.precision_miner.parsing import PrecisionMinerResponseParser
+from episcope.workflows.precision_miner.prompting import PrecisionMinerPromptBuilder
+from episcope.workflows.precision_miner.schemas import ExtractionResult
 
 logger = logging.getLogger(__name__)
 
 
 class PrecisionMiner(AbstractRAG):
-    """A configurable RAG workflow for extracting structured information from papers."""
+    """Configurable extraction workflow over retrieved paper evidence."""
 
-    def __init__(self, 
-                 retriever: BaseRetriever, 
-                 generator: Generator,
-                 strategy_name: str = None,
-                 config: Optional[PrecisionMinerConfig] = None,
-                 academic_db: Optional[AcademicDB] = None):
+    def __init__(
+        self,
+        retriever: BaseRetriever,
+        generator: Generator,
+        strategy_name: Optional[str] = None,
+        config: Optional[PrecisionMinerConfig] = None,
+        academic_db: Optional[AcademicDB] = None,
+    ):
         super().__init__(retriever, generator)
         self.config = config or FindDataSourcesConfig()
         self.academic_db = academic_db
         self.strategy_name = strategy_name
+        self.prompt_builder = PrecisionMinerPromptBuilder(self.config)
+        self.response_parser = PrecisionMinerResponseParser()
 
-    def run(self, paper_id: str, metadata: Optional[PaperMetadata] = None) -> ExtractionResult:
-        """
-        Run the extraction workflow for a single paper.
-        """
-        if self.academic_db:
-            metadata = self.academic_db.get_paper_metadata(paper_id, self.strategy_name)
-        elif not metadata:
-            raise ValueError("metadata must be provided when academic_db is not available.")
+    def run(
+        self,
+        paper_id: str,
+        metadata: Optional[PaperMetadata] = None,
+    ) -> ExtractionResult:
+        """Run extraction and return the compact structured result."""
+        detailed = self.run_detailed(paper_id, metadata=metadata)
+        return detailed.result
 
+    def run_detailed(
+        self,
+        paper_id: str,
+        metadata: Optional[PaperMetadata] = None,
+    ) -> DetailedExtractionResult:
+        """Run extraction and return the detailed result with provenance and trace."""
+        metadata = self._resolve_metadata(paper_id, metadata)
         relevant_chunks = self.retrieve_chunks(paper_id)
-        return self.generate_extraction(relevant_chunks, metadata)
+        messages = self.prompt_builder.build_messages(metadata, relevant_chunks)
 
-    def retrieve_chunks(self, paper_id: str) -> List[Dict]:
-        """Retrieve relevant chunks for the extraction task."""
-        all_chunks = []
-        for query in self.config.retrieval_templates:
-            chunks = self.retriever.retrieve_by_paper(
-                query,
-                paper_id,
-                top_k=self.config.top_k,
-                filter={"section_type": self.config.section_filters} if self.config.section_filters else None,
-            )
-            all_chunks.extend(chunks)
-        return self._deduplicate_chunks(all_chunks)
-
-    def _deduplicate_chunks(self, chunks: List[Dict]) -> List[Dict]:
-        """Deduplicate a list of chunk dictionaries based on their text content."""
-        unique_chunks = {}
-        for chunk in chunks:
-            if chunk.text not in unique_chunks:
-                unique_chunks[chunk.text] = chunk
-        return list(unique_chunks.values())
-
-    def generate_extraction(self, relevant_chunks: List[Dict], metadata: PaperMetadata) -> ExtractionResult:
-        """Generate the structured extraction using the LLM."""
         try:
             provenance = self.generator.generate(
                 contexts=relevant_chunks,
-                message_builder=self._build_initial_prompt,
-                metadata=metadata,
-                format="json"
+                message_builder=lambda **_: messages,
+                format="json",
             )
-            response_content = provenance.answer
-            return self._parse_extraction_response(response_content)
-        except Exception as e:
-            logger.error(f"Extraction failed: {e}")
-            return ExtractionResult(description="Extraction failed", items=[])
+            result = self.response_parser.parse(provenance.answer)
+            raw_response = provenance.answer
+        except Exception as exc:
+            logger.error("Extraction failed: %s", exc)
+            result = self.response_parser.fallback(exc)
+            raw_response = ""
+            provenance = Provenance(answer=raw_response, evidences=[])
 
-    def _build_initial_prompt(self, **kwargs) -> List[Dict[str, str]]:
-        """Build the prompt for the extraction task."""
-        metadata = kwargs.get("metadata")
-        contexts = kwargs.get("contexts")
-        chunks_info = self._format_chunks_for_prompt(contexts)
-        schema = ExtractionResultSchema.model_json_schema()
-
-        user_prompt = self.config.user_prompt_template.format(
-            title=metadata.title,
-            abstract=metadata.abstract or 'N/A',
-            keywords=', '.join(metadata.keywords or []),
-            chunks_info=chunks_info,
-            schema= json.dumps(schema)
+        return DetailedExtractionResult(
+            paper_id=paper_id,
+            metadata=metadata,
+            result=result,
+            provenance=provenance,
+            trace=ExtractionTrace(
+                prompt_messages=messages,
+                raw_llm_response=raw_response,
+            ),
+            relevant_chunks=list(relevant_chunks),
         )
-        return [
-            {"role": "system", "content": self.config.system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
 
-    def _format_chunks_for_prompt(self, relevant_chunks: List[Dict]) -> str:
-        """Format chunks information for the LLM prompt."""
-        return "\n\n".join([chunk.text for chunk in relevant_chunks])
+    def _resolve_metadata(
+        self,
+        paper_id: str,
+        metadata: Optional[PaperMetadata],
+    ) -> PaperMetadata:
+        if self.academic_db:
+            return self.academic_db.get_paper_metadata(paper_id, self.strategy_name)
+        if metadata is None:
+            raise ValueError("metadata must be provided when academic_db is not available.")
+        return metadata
 
-    def _parse_extraction_response(self, response: str) -> ExtractionResult:
-        """Parse JSON response from extraction LLM."""
-        try:
-            # if response starts with ```json\n it means the LLM formatted it as a string code block
-            if response.startswith("```json"):
-                response = response.replace("```json", "").replace("```", "").strip()
+    def retrieve_chunks(self, paper_id: str) -> List[SearchResult]:
+        """Retrieve and deduplicate relevant chunks for the extraction task."""
+        all_chunks: List[SearchResult] = []
+        for query in self.config.retrieval_templates:
+            retrieved = self.retriever.retrieve_by_paper(
+                query,
+                paper_id,
+                top_k=self.config.top_k,
+            )
+            all_chunks.extend(retrieved)
+        filtered = self._filter_chunks(all_chunks)
+        return self._deduplicate_chunks(filtered)
 
-            return ExtractionResult.model_validate_json(response)
-        except Exception as e:
-            logger.error(f"Extraction parsing/validation failed: {e}")
-            return ExtractionResult(description=f"Parsing/validation failed: {e}", items=[])
+    def _filter_chunks(self, chunks: List[SearchResult]) -> List[SearchResult]:
+        if not self.config.section_filters:
+            return chunks
+
+        allowed = {section.lower() for section in self.config.section_filters}
+        filtered: List[SearchResult] = []
+        for chunk in chunks:
+            section = (chunk.section_type or "").lower()
+            if section in allowed:
+                filtered.append(chunk)
+        return filtered
+
+    def _deduplicate_chunks(self, chunks: List[SearchResult]) -> List[SearchResult]:
+        best_by_text = {}
+        for chunk in chunks:
+            text = chunk.text.strip()
+            if not text:
+                continue
+
+            current = best_by_text.get(text)
+            if current is None or self._score(chunk) > self._score(current):
+                best_by_text[text] = chunk
+
+        ranked = sorted(best_by_text.values(), key=self._score, reverse=True)
+        return ranked[: self.config.top_k]
+
+    @staticmethod
+    def _score(chunk: SearchResult) -> float:
+        if getattr(chunk, "rank_score", None) is not None:
+            return chunk.rank_score
+        if getattr(chunk, "similarity_score", None) is not None:
+            return chunk.similarity_score
+        return 0.0

@@ -5,6 +5,7 @@ from .config import (
     FindSupplementaryLinksConfig,
     IdentifyKeyReferencesConfig,
 )
+from .output import DetailedExtractionResult, ExtractionTrace
 from .schemas import ExtractionResult, ExtractionItem, DataSource
 
 __all__ = [
@@ -13,6 +14,8 @@ __all__ = [
     "FindDataSourcesConfig",
     "FindSupplementaryLinksConfig",
     "IdentifyKeyReferencesConfig",
+    "DetailedExtractionResult",
+    "ExtractionTrace",
     "ExtractionResult",
     "ExtractionItem",
     "DataSource",
