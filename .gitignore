@@ -22,3 +22,5 @@ stderr*.txt
 final*.tsv
 provenance_*.jsonl
 *.png
+*.zip
+.env
