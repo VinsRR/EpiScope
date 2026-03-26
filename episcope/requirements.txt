@@ -10,6 +10,7 @@ faiss-cpu
 ollama
 streamlit
 typer
+python-dotenv
 openai # might be required for some LLM providers
 # pymongo is optional; if installed the MongoAcademicDB will use it
 pymongo # if we use mongo, we ll also need MongoDB running, and Atlas or some other way to host it (MongoDB for VS code)

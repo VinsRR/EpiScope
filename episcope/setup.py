@@ -13,6 +13,7 @@ setup(
         "numpy",
         "scikit-learn",
         "pandas",
+        "python-dotenv",
         "torch",
         "transformers",
         "faiss-cpu",
