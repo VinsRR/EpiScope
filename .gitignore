@@ -21,3 +21,4 @@ stdout*.txt
 stderr*.txt
 final*.tsv
 provenance_*.jsonl
+*.png
