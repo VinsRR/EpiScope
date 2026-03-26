@@ -24,3 +24,4 @@ provenance_*.jsonl
 *.png
 *.zip
 .env
+*.tex
