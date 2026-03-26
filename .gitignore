@@ -16,3 +16,8 @@ academic_db_backup.json
 *.pdf
 *.numbers
 *.npy
+*.log
+stdout*.txt
+stderr*.txt
+final*.tsv
+provenance_*.jsonl
