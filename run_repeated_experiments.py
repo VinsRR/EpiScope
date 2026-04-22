@@ -38,7 +38,7 @@ class Settings:
     retrieval_mode: str = "sparse_only" # one of ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
     # hybris uses both dense and sparse retrievers and does the reranking
     # while hybrid_candidates_only uses both retrievers and RRF
-    # 
+    #
     evidence_reranker_kind: str = "none" # one of ["none", "global_cross_encoder", "within_label_cross_encoder"]
     cross_encoder_model: Optional[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2" # e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2"
     cross_encoder_top_k: Optional[int] = 15
@@ -56,16 +56,16 @@ class Settings:
 class Tee:
     """
     Stream splitter - FIXED to handle closed files gracefully.
-    
+
     The bug: when file handles close (e.g., at end of with block),
     logging systems may still try to write to them, causing
     "ValueError: I/O operation on closed file"
-    
+
     The fix: check if streams are closed before writing.
     """
     def __init__(self, *streams):
         self.streams = streams
-    
+
     def write(self, data):
         for s in self.streams:
             try:
@@ -78,7 +78,7 @@ class Tee:
                 # Silently skip streams that error
                 # (they're probably closed or broken)
                 continue
-    
+
     def flush(self):
         for s in self.streams:
             try:
@@ -113,24 +113,24 @@ def atomic_write_tsv(df: pd.DataFrame, path: Path, sep: str = "\t") -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
         df.to_csv(tmp, sep=sep, index=False)
-        
+
         if not tmp.exists():
             raise IOError(f"Temp TSV not created: {tmp}")
-        
+
         tmp_size = tmp.stat().st_size
         if tmp_size == 0:
             raise IOError(f"Temp TSV is empty: {tmp}")
-        
+
         tmp.replace(path)
-        
+
         if not path.exists():
             raise IOError(f"Final TSV missing after replace: {path}")
-        
+
         final_size = path.stat().st_size
         msg = f"[TSV_OK] {path.name}: {len(df)} rows, {final_size:,} bytes"
         print(msg)
         print(msg, file=sys.stderr)
-        
+
     except Exception as e:
         err = f"[TSV_FAIL] {path}: {e}"
         print(err)
@@ -285,7 +285,7 @@ def build_classifier(settings: Settings):
 
     vdb = QdrantDB(collection=settings.qdrant_collection, url=settings.qdrant_url)
     # Notice: rerankers here always set to false because we are offloading the reranking to the classifier
-    # i.e., rereanking here would rerank the chunks of the individual queries, rather than across queries 
+    # i.e., rereanking here would rerank the chunks of the individual queries, rather than across queries
     if settings.retrieval_mode == "dense_only":
         retriever = Retriever(
             vectordb=vdb,
@@ -294,7 +294,7 @@ def build_classifier(settings: Settings):
         )
     elif settings.retrieval_mode == "hybrid":
         retriever = Retriever(
-            vectordb=vdb, 
+            vectordb=vdb,
             use_rerank=False
             )
     elif settings.retrieval_mode == "sparse_only":
@@ -675,28 +675,28 @@ def run_once(settings: Settings, repeat_idx: int) -> None:
     FIXED VERSION - Tee class now handles closed files gracefully
     """
     run_dir = build_run_dir(settings)
-    
+
     print(f"\n{'='*70}")
     print(f"RUN DIRECTORY: {run_dir.absolute()}")
     print(f"REPEAT INDEX:  {repeat_idx}")
     print(f"{'='*70}\n")
-    
+
     run_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if not run_dir.exists():
         raise IOError(f"CRITICAL: Failed to create run directory: {run_dir.absolute()}")
-    
+
     p = paths_for_repeat(run_dir, repeat_idx)
 
     stdout_path = run_dir / f"stdout_{repeat_idx}.txt"
     stderr_path = run_dir / f"stderr_{repeat_idx}.txt"
 
     orig_out, orig_err = sys.stdout, sys.stderr
-    
+
     # Open files and create Tee objects
     with stdout_path.open("a", encoding="utf-8") as out_f, \
          stderr_path.open("a", encoding="utf-8") as err_f:
-        
+
         sys.stdout = Tee(orig_out, out_f)
         sys.stderr = Tee(orig_err, err_f)
 
@@ -848,11 +848,11 @@ def run_once(settings: Settings, repeat_idx: int) -> None:
             if settings.ground_truth_csv_path:
                 discrepancy_df = build_discrepancy_dataframe(df_ckpt, settings)
                 atomic_write_csv(discrepancy_df, p["discrepancy_csv"])
-            
+
             # Verify
             if not p["final_tsv"].exists():
                 raise IOError(f"CRITICAL: Final TSV missing: {p['final_tsv']}")
-            
+
             verify_msg = f"SUCCESS: Final TSV at {p['final_tsv']} ({p['final_tsv'].stat().st_size:,} bytes, {len(df_ckpt)} rows)"
             print(verify_msg)
             append_log(p["log_txt"], verify_msg)
@@ -1002,9 +1002,9 @@ def main():
 
     # Grid
     CLASSIFIER_KINDS = [
-        # "paper_type", 
-        "data_accessibility", 
-        # "data_type", 
+        # "paper_type",
+        "data_accessibility",
+        # "data_type",
         # "geo"
         ]
     LLM_MODELS = [

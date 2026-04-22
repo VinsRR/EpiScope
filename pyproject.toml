@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "episcope"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "typer",
+    "numpy",
+    "scikit-learn",
+    "pandas",
+    "python-dotenv",
+    "torch",
+    "transformers",
+    "faiss-cpu",
+    "unstructured",
+    "ollama",
+    "pymongo",
+]
+
+[project.scripts]
+episcope = "episcope.episcope:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
