@@ -1,15 +1,17 @@
-/.DS_Store
+# ── Project-specific ──────────────────────────────────────────────────────────
 .DS_Store
-/.env
-/100 Tips to Write Clean Code.pdf
-/h_storage
-/indices
-/output
-/pdfs
-*.pyc
-__pycache__/
-episcope/.DS_Store
-academic_db_backup.json
+.env
+.envrc
+h_storage/
+indices/
+output/
+pdfs/
+OLD/
+outputs/
+expanded_papers/
+docs/
+
+# Data / output files
 *.json
 *.faiss
 *.csv
@@ -17,11 +19,136 @@ academic_db_backup.json
 *.numbers
 *.npy
 *.log
+*.tex
+*.png
+*.zip
 stdout*.txt
 stderr*.txt
 final*.tsv
 provenance_*.jsonl
-*.png
-*.zip
-.env
-*.tex
+academic_db_backup.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+MANIFEST
+.installed.cfg
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# ── Virtual environments / package managers ───────────────────────────────────
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+__pypackages__/
+.pdm-python
+.pdm-build/
+.pixi/
+.ruff_cache/
+.pypirc
+
+# ── Frameworks ────────────────────────────────────────────────────────────────
+# Django
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# ── Message queues / databases ────────────────────────────────────────────────
+*.rdb
+*.aof
+*.pid
+mnesia/
+rabbitmq/
+rabbitmq-data/
+activemq-data/
+celerybeat-schedule
+celerybeat.pid
+
+# ── Documentation ─────────────────────────────────────────────────────────────
+docs/_build/
+/site
+
+# ── Type checkers / static analysis ──────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+
+# ── Notebooks / REPLs ─────────────────────────────────────────────────────────
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# ── Misc tooling ──────────────────────────────────────────────────────────────
+.spyderproject
+.spyproject
+.ropeproject
+.abstra/
+tempCodeRunnerFile.py
+*.sage.py
+
+# ── App-specific ──────────────────────────────────────────────────────────────
+# Marimo
+marimo/_static/
+marimo/_lsp/
+__marimo__/
+
+# Streamlit
+.streamlit/secrets.toml
