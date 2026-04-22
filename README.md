@@ -1,161 +1,318 @@
 # EpiScope
 
-EpiScope is a modular framework for evidence‑based question answering and
-structured information extraction over scientific papers.  It brings
-together retrieval‑augmented generation (RAG) and deep parsing to
-support both high‑level exploration and detailed data mining.
+EpiScope is a Python package for retrieval-backed analysis of scientific papers, with a focus on evidence-aware workflows over epidemiology and public-health literature.
 
-## Features
+Today, the codebase is centered around three main entry points:
 
-* **Explorer mode** – Embed all papers in a project and answer
-  questions with provenance using dense, sparse and late interaction
-  embeddings stored in Qdrant.  Powered by local or cloud LLMs.
-* **PrecisionMiner mode** – Parse individual PDFs via GROBID, extract
-  tables, classify paper type, run LLM‑based extraction and build
-  per‑paper FAISS indices.
-* **Provenance** – All answers include citations: paper ID, snippet,
-  section, index version and model/prompt identifiers.
-* **Document loaders** – Flexible backends (Unstructured, GROBID or
-  future options) convert local PDFs and text files into structured
-  sections compatible with the indexers.
-* **Pluggable providers** – Support for local (Ollama) and proprietary
-  (OpenAI, Gemini) language models.  Configurable via environment.
-* **REST API and CLI** – Access the system via FastAPI or a Typer
-  command line interface.  A simple Streamlit UI is also available.
-* **Project separation and snapshots** – Placeholder directories for
-  organising data by project; future work will add snapshotting and
-  versioning support.
+- a FastAPI backend in `src/episcope/api.py`
+- a Streamlit UI in `ui/streamlit_app.py`
+- reusable Python workflows under `src/episcope/workflows`
 
-## Quickstart
+## What Is In The Package Today
 
-### Build and run via Docker
+The current `src/episcope` package includes:
 
-A `Dockerfile` and `docker-compose.yml` are provided for running the
-API alongside Qdrant and GROBID.  To build and start the services:
+- `api.py`: FastAPI app with `/health`, `/explore`, `/classify`, and `/precision-miner`
+- `clients.py`: provider clients for Gemini, OpenAI, OpenRouter, and Ollama
+- `db/`: academic paper storage interfaces plus MongoDB and in-memory implementations
+- `rag/`: retrieval, query transformation, fusion, reranking, ingestion, embeddings, and generation components
+- `schemas/`: paper metadata, sections, references, provenance, and search result schemas
+- `vectordb/`: vector DB abstractions and Qdrant / FAISS-backed helpers
+- `workflows/classification/`: evidence-backed paper classification workflows
+- `workflows/precision_miner/`: targeted extraction workflows over retrieved evidence
+- `finetuning/`: trace capture, review, repository, and JSONL export utilities for supervised fine-tuning data
+- `settings.py`: environment-driven runtime configuration
 
-```bash
-docker compose up --build
+The main workflow families currently exposed by the package are:
+
+- `PaperClassifier`
+- `PrecisionMiner`
+
+The currently supported classification configs are:
+
+- `PaperTypeClassifierConfig`
+- `DataAccessibilityClassifierConfig`
+- `DataTypeClassifierConfig`
+- `GeoClassifierConfig`
+
+The currently supported precision-miner configs are:
+
+- `FindDataSourcesConfig`
+- `FindSupplementaryLinksConfig`
+- `IdentifyKeyReferencesConfig`
+
+## Repository Layout
+
+This repository now uses a standard `src` layout:
+
+```text
+EpiScope/
+├── src/
+│   └── episcope/
+│       ├── api.py
+│       ├── clients.py
+│       ├── settings.py
+│       ├── db/
+│       ├── finetuning/
+│       ├── rag/
+│       ├── schemas/
+│       ├── vectordb/
+│       └── workflows/
+├── tests/
+├── ui/
+├── docs/
+├── notebooks/
+├── deploy/
+├── tableref/
+├── pyproject.toml
+└── README.md
 ```
 
-The API will be available at http://localhost:8000 and GROBID at
-http://localhost:8070 (if enabled).
+Notes:
 
-### Install dependencies locally
+- `tableref/` is a sibling packaged component in the repo, not part of the main `episcope` package.
+- `tests/` contains the active smoke, unit, and integration suites.
+- `docs/` and `notebooks/` contain supporting material, but the source of truth for behavior is the code in `src/episcope/`.
 
-EpiScope relies on Python 3.10+.  Install dependencies via pip:
+## Installation
+
+EpiScope requires Python 3.10+.
+
+For local development, the most reliable setup is:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-### Ingesting and querying via CLI
+Why both files?
 
-To ingest a PDF and ask a question from the command line:
+- `pyproject.toml` contains the packaging metadata for the installable `episcope` package
+- `requirements.txt` is currently the more complete local runtime/development stack, including API, UI, retrieval, and provider integrations
 
-```bash
-episcope ingest --file-path /path/to/paper.pdf
-episcope query "What is the basic reproduction number?" --top-k 3
-```
-
-### Loading documents for indexers
-
-For workflows that require per‑paper indexing (e.g. PrecisionMiner),
-you can convert a local file into structured sections and minimal
-metadata using the document loader factory.  For example:
-
-```python
-from episcope.rag.ingestion.document_loader import DocumentLoaderFactory
-
-loader = DocumentLoaderFactory.get_loader("unstructured")
-sections, metadata = loader.load("/path/to/paper.txt")
-# Pass sections and metadata to PaperIndexer.index_paper()
-```
-
-The loader will automatically detect the file type and use the
-appropriate backend (currently Unstructured for PDFs and plain text
-parsers for other formats).  See
-`src/episcope/rag/ingestion/document_loader.py` for details.
-
-### GROBID extraction and persistence
-
-The PrecisionMiner mode uses GROBID to obtain rich structured data
-from PDFs.  The GROBID-backed document loader can parse a single PDF,
-extract structured sections and metadata, and then persist each
-component into a document store that implements the
-:class:`episcope.db.academic_db.AcademicDB` interface.
-Callers must supply a ``strategy_name`` to namespace extractions.
-The `get_academic_db` factory function can be used to obtain a database instance.
-For example:
-
-```python
-from episcope.db import get_academic_db
-from episcope.rag.ingestion.document_loader import DocumentLoaderFactory
-
-# Use an in‑memory database for testing
-db = get_academic_db(use_in_memory=True)
-loader = DocumentLoaderFactory.get_loader("grobid")
-loader.extract_paper(
-    "/path/to/paper.pdf",
-    strategy_name="Strategy_V1_GROBID_Standard",
-    db=db,
-)
-
-# Retrieve the stored metadata
-metadata = db.retrieve("paper", "metadata", "Strategy_V1_GROBID_Standard")
-if metadata:
-    print(metadata.title)
-```
-
-If a running MongoDB instance is available and ``pymongo`` is
-installed, the factory will return a MongoDB-backed store.
-When MongoDB is unavailable the factory falls back
-automatically to an in-memory store. You can optionally persist the in‑memory store to a
-JSON file via the ``backup_file`` parameter. A unique index on
-``(paper_id, data_type)`` within a collection named after the ``strategy_name`` prevents accidental
-overwrites in MongoDB.
-```
-
-### Running the API
-
-To start the API locally:
+If you only want to build the package from the repository root:
 
 ```bash
-uvicorn episcope.api:app --reload --port 8000
+python -m pip install build
+python -m build
 ```
 
-You can then ingest and query via HTTP as documented in `docs/API.md`.
+## Configuration
 
-### Streamlit UI
+Runtime configuration is read from environment variables, with `.env` loaded automatically if present.
 
-A simple evidence‑first user interface is provided.  Run:
+Common settings:
+
+- `EPISCOPE_STRATEGY_NAME`
+- `MONGO_URI`
+- `MONGO_DB_NAME`
+- `QDRANT_URL`
+- `QDRANT_COLLECTION`
+- `EPISCOPE_LLM_PROVIDER`
+- `EPISCOPE_LLM_MODEL`
+- `CROSS_ENCODER_MODEL`
+- `OLLAMA_HOST`
+- `EPISCOPE_API_HOST`
+- `EPISCOPE_API_PORT`
+- `EPISCOPE_API_BASE_URL`
+- `EPISCOPE_LOG_LEVEL`
+
+Provider-specific credentials:
+
+- `GEMINI_API_KEY`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENROUTER_API_KEY`
+
+Current provider values supported by the API and UI:
+
+- `gemini`
+- `openai`
+- `openrouter`
+- `ollama`
+
+The default runtime settings live in `src/episcope/settings.py`.
+
+## Running The API
+
+Start the FastAPI app from the repository root:
+
+```bash
+uvicorn episcope.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+The current API exposes:
+
+- `GET /health`
+- `POST /explore`
+- `POST /classify`
+- `POST /precision-miner`
+
+Example health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Example explorer request:
+
+```bash
+curl -X POST http://localhost:8000/explore \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What data sources were used in this study?",
+    "top_k": 5,
+    "generate_answer": true
+  }'
+```
+
+Example classification request:
+
+```bash
+curl -X POST http://localhost:8000/classify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "paper_id": "paper-123",
+    "classifier_kind": "data_accessibility",
+    "detailed": true
+  }'
+```
+
+Practical runtime notes:
+
+- `/explore` expects an existing Qdrant collection
+- `/classify` and `/precision-miner` expect both Qdrant and a configured MongoDB backend
+- the request-level `config` object can override provider, model, retrieval mode, reranking, and backend settings per call
+
+## Running The UI
+
+Start the Streamlit app from the repository root:
 
 ```bash
 streamlit run ui/streamlit_app.py
 ```
 
-Upload a PDF via the sidebar and ask questions in the main panel.
+The current UI includes three tabs:
 
-## Configuration
+- `Explorer`
+- `Classification`
+- `Precision Miner`
 
-Global configuration is defined in `src/episcope/settings.py` and can
-be overridden with environment variables.  See `docs/CONFIGS.md` for
-details.
+The UI talks to the FastAPI backend and exposes the same main runtime controls:
 
-## Roadmap
+- backend URLs and collection names
+- LLM provider and model
+- retrieval mode
+- optional evidence reranking
+- workflow kind selection for classification and precision-miner tasks
 
-The current refactor lays the foundation for a clean, modular
-codebase but leaves several areas for future development:
+## Running With Docker Compose
 
-* Port the remaining RAG methods (ColPali and GraphRAG) into
-  `retrieve/rag/`.
-* Integrate the PDF download utilities into the ingestion pipeline to
-  support DOI ingestion and PDF validation.
-* Add snapshotting and versioning of project data under `projects/`.
-* Expand the test suite to cover ingestion, parsing, indexing,
-  retrieval and API endpoints.  Provide fixtures and mocks for
-  external services.
-* Optimise performance by adding asynchronous processing and caching.
+The root `docker-compose.yml` currently starts:
 
-Contributions are welcome!  Please file issues or pull requests on the
-project repository.
+- `qdrant`
+- `api`
+- `ui`
+
+Start everything with:
+
+```bash
+docker compose up --build
+```
+
+Important limitations of the current compose setup:
+
+- it does not start MongoDB
+- it does not start GROBID
+
+That means:
+
+- `/explore` can work once Qdrant is populated
+- `/classify` and `/precision-miner` still need an external Mongo instance via `MONGO_URI`
+- the GROBID-backed loader requires separate GROBID setup if you want structured PDF parsing through that path
+
+## Python Usage
+
+The public Python imports that are currently covered by the smoke test include:
+
+```python
+from episcope.workflows import PaperClassifier, PrecisionMiner
+from episcope.workflows.classification import (
+    ClassificationDecision,
+    DataAccessibilityClassifierConfig,
+    DetailedClassificationResult,
+)
+from episcope.workflows.precision_miner import (
+    DetailedExtractionResult,
+    FindDataSourcesConfig,
+)
+from episcope.db import get_academic_db
+```
+
+The document loader entry point is:
+
+```python
+from episcope.rag.ingestion.document_loader import DocumentLoaderFactory
+
+loader = DocumentLoaderFactory.get_loader("unstructured")
+sections, metadata, references = loader.load("/path/to/paper.pdf")
+```
+
+The current workflow objects are designed to be composed from:
+
+- a retriever
+- a generator
+- a strategy name
+- an academic DB backend when metadata should be resolved by paper id
+
+For example, classification and precision-miner workflows are typically constructed around:
+
+- `episcope.rag.retrieval.Retriever`
+- `episcope.rag.generation.llm_generator.LLMGenerator`
+- `episcope.vectordb.qdrant.QdrantDB`
+- `episcope.db.MongoAcademicDB` or `episcope.db.get_academic_db(...)`
+
+## Finetuning Utilities
+
+The `episcope.finetuning` package is now part of the repo and supports a trace-review workflow for classifier outputs.
+
+Key pieces:
+
+- `TrainingCaptureSink`: persist completed classification traces
+- `TrainingRepository`: store and load raw/reviewed records
+- `TraceReviewer`: review captured traces and approve them into buckets
+- `SFTExporter`: export approved records into JSONL training data
+
+This is currently covered by `tests/unit/finetuning/test_capture_review_export.py`.
+
+## Testing
+
+After installing the package, run:
+
+```bash
+pytest -q
+```
+
+If you want to run tests from a checkout without installing the package first:
+
+```bash
+PYTHONPATH=src pytest -q
+```
+
+Useful entry points:
+
+- `tests/smoke/test_public_imports.py`
+- `tests/TESTING_GUIDE.md`
+
+## Current Status Notes
+
+A few parts of the repository are in transition:
+
+- the FastAPI app, Streamlit UI, workflows, and `src/episcope` package structure are the clearest current entry points
+- the `src/episcope/episcope.py` Typer CLI module is still present, but it points at older internal paths and should be treated as legacy until it is refreshed
+- some older docs and notebooks may still reflect pre-flattening or pre-refactor module names
+
+When in doubt, prefer the package modules under `src/episcope/` and the tested imports in `tests/`.
