@@ -211,28 +211,117 @@ The UI talks to the FastAPI backend and exposes the same main runtime controls:
 
 ## Running With Docker Compose
 
-The root `docker-compose.yml` currently starts:
+The root [docker-compose.yml](/Users/vins/Documents/Projects/EpiScope/docker-compose.yml) supports three practical modes.
+
+### 1. Local Dev Mode
+
+This is the simplest setup and the best default for normal local development.
+
+It starts:
 
 - `qdrant`
 - `api`
 - `ui`
 
-Start everything with:
+Run:
 
 ```bash
 docker compose up --build
 ```
 
-Important limitations of the current compose setup:
+Direct local URLs:
 
-- it does not start MongoDB
-- it does not start GROBID
+- Qdrant: `http://127.0.0.1:6333`
+- API: `http://127.0.0.1:8000`
+- UI: `http://127.0.0.1:8501`
+
+Use this mode when:
+
+- you are developing locally
+- you do not need a reverse proxy
+- you want the smallest Docker setup in this repo
+
+### 2. Local Or Server Mode With Reverse Proxy
+
+This adds Caddy in front of the API and UI.
+
+It starts:
+
+- `qdrant`
+- `api`
+- `ui`
+- `proxy`
+
+Run:
+
+```bash
+docker compose --profile deploy up -d --build
+```
+
+Default proxy URL:
+
+- `http://127.0.0.1:8080`
+
+Routing behavior:
+
+- `/` goes to the Streamlit UI
+- `/api/...` goes to the FastAPI backend
+- `/health` goes to the FastAPI backend
+
+Use this mode when:
+
+- you want one stable entrypoint instead of separate API/UI ports
+- you want to mimic a deployment layout locally
+- you want to expose only the proxy on a server
+
+For a server-facing Linux deployment, you can publish the proxy more broadly:
+
+```bash
+EPISCOPE_PROXY_BIND_ADDRESS=0.0.0.0 \
+EPISCOPE_PROXY_PORT=80 \
+docker compose --profile deploy up -d --build
+```
+
+### 3. Proxy Mode With Optional Cloudflare Tunnel
+
+This keeps the same proxy-based layout, but also starts `cloudflared`.
+
+Run:
+
+```bash
+docker compose --profile tunnel up -d
+```
+
+This profile implicitly includes the proxy stack and adds:
+
+- `cloudflared`
+
+Use this mode when:
+
+- you want to share a local/private deployment temporarily
+- you want a quick public URL without managing a domain
+
+### What The Compose Stack Does Not Start
+
+The Docker Compose setup still does not provide:
+
+- MongoDB
+- GROBID
 
 That means:
 
-- `/explore` can work once Qdrant is populated
+- `/explore` can work once Qdrant contains indexed data
 - `/classify` and `/precision-miner` still need an external Mongo instance via `MONGO_URI`
-- the GROBID-backed loader requires separate GROBID setup if you want structured PDF parsing through that path
+- GROBID-backed PDF parsing still requires a separate GROBID setup if you want that path specifically
+
+### Quick Summary
+
+- `docker compose up --build`
+  Best for simple local development with direct ports
+- `docker compose --profile deploy up -d --build`
+  Best for proxy-based local testing or a server deployment pattern
+- `docker compose --profile tunnel up -d`
+  Best for temporary external sharing through Cloudflare
 
 ## Python Usage
 

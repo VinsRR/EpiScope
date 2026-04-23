@@ -8,8 +8,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/episcope
-ExecStart=/usr/bin/docker compose -f /opt/episcope/deploy/linux/docker-compose.yml up -d
-ExecStop=/usr/bin/docker compose -f /opt/episcope/deploy/linux/docker-compose.yml down
+ExecStart=/usr/bin/docker compose --profile deploy up -d
+ExecStop=/usr/bin/docker compose --profile deploy down
 TimeoutStartSec=0
 
 [Install]

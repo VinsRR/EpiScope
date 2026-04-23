@@ -46,5 +46,34 @@ services:
       - "${EPISCOPE_UI_BIND_ADDRESS:-127.0.0.1}:8501:8501"
     restart: unless-stopped
 
+  proxy:
+    image: caddy:2
+    container_name: episcope-proxy
+    depends_on:
+      - api
+      - ui
+    ports:
+      - "${EPISCOPE_PROXY_BIND_ADDRESS:-127.0.0.1}:${EPISCOPE_PROXY_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    profiles:
+      - deploy
+      - tunnel
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: episcope-cloudflared
+    depends_on:
+      - proxy
+    command: tunnel --no-autoupdate --url http://proxy:8080
+    restart: unless-stopped
+    profiles:
+      - tunnel
+
 volumes:
   qdrant_data:
+  caddy_data:
+  caddy_config:
