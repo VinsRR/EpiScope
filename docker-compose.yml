@@ -8,6 +8,17 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  grobid:
+    image: grobid/grobid:0.9.0-crf
+    container_name: episcope-grobid
+    init: true
+    ulimits:
+      core: 0
+    ports:
+      - "${GROBID_BIND_ADDRESS:-127.0.0.1}:8070:8070"
+      - "${GROBID_ADMIN_BIND_ADDRESS:-127.0.0.1}:8071:8071"
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -17,8 +28,10 @@ services:
       - .env
     depends_on:
       - qdrant
+      - grobid
     environment:
       QDRANT_URL: http://qdrant:6333
+      GROBID_URL: http://grobid:8070
       EPISCOPE_API_HOST: 0.0.0.0
       EPISCOPE_API_PORT: 8000
     ports:

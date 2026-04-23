@@ -42,7 +42,7 @@ class Settings:
     evidence_reranker_kind: str = "none" # one of ["none", "global_cross_encoder", "within_label_cross_encoder"]
     cross_encoder_model: Optional[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2" # e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2"
     cross_encoder_top_k: Optional[int] = 15
-    base_output_dir: str = "test_out_sparse"#"output"
+    base_output_dir: str = "test_RANDOM"#"output"
     explicit_run_dir: Optional[str] = None
     checkpoint_every: int = 10
     fail_fast: bool = False

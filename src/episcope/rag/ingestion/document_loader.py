@@ -40,6 +40,7 @@ from dataclasses import dataclass
 
 from episcope.schemas import StructuredSection, PaperMetadata, Reference
 from episcope.db.academic_db import AcademicDB
+from episcope.settings import env
 
 logger = logging.getLogger(__name__)
 
@@ -422,11 +423,11 @@ class GrobidDocumentLoader(AbstractDocumentLoader):
     """
 
     def __init__(self, grobid_url: Optional[str] = None) -> None:
-        self.grobid_url = grobid_url
+        self.grobid_url = grobid_url or env("GROBID_URL", "http://localhost:8070") or "http://localhost:8070"
         self._fallback = UnstructuredDocumentLoader()
         try:
             from episcope.rag.ingestion.local_grobid_client import GrobidClient
-            self.client = GrobidClient(grobid_server=self.grobid_url or "http://localhost:8070")
+            self.client = GrobidClient(grobid_server=self.grobid_url)
         except ImportError as e:
             logger.warning(f"Could not import GrobidClient, GROBID loader will not be available: {e}")
             self.client = None

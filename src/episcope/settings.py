@@ -24,6 +24,7 @@ class AppSettings:
     mongo_db_name: str = "episcope_academic_db"
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
+    grobid_url: str = "http://localhost:8070"
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     cross_encoder_model: Optional[str] = None
@@ -42,6 +43,7 @@ class AppSettings:
             mongo_db_name=env("MONGO_DB_NAME", legacy_names=("mongo_db_name",)) or "episcope_academic_db",
             qdrant_url=env("QDRANT_URL", "http://localhost:6333") or "http://localhost:6333",
             qdrant_collection=env("QDRANT_COLLECTION", "episcope_academic") or "episcope_academic",
+            grobid_url=env("GROBID_URL", "http://localhost:8070") or "http://localhost:8070",
             llm_provider=(env("EPISCOPE_LLM_PROVIDER", "gemini") or "gemini").lower(),
             llm_model=env("EPISCOPE_LLM_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",
             cross_encoder_model=env("CROSS_ENCODER_MODEL"),
