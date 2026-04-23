@@ -355,13 +355,15 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
         return sections, metadata, []
 
     def _load_pdf(self, path: Path) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Parse a PDF using Unstructured, falling back on plain text."""
+        """Parse a PDF using Unstructured, falling back to simpler PDF extraction."""
         try:
             from unstructured.partition.pdf import partition_pdf
             from unstructured.documents.elements import Title, Header, Text as TextElement
         except ImportError:
-            logger.warning("Unstructured library not found. PDFs will be treated as plain text.")
-            return self._load_text(path)
+            logger.warning(
+                "Unstructured PDF parsing is unavailable. Falling back to basic PDF text extraction."
+            )
+            return self._load_pdf_with_pypdf(path)
 
         try:
             elements = partition_pdf(
@@ -372,7 +374,7 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             )
         except Exception as exc:
             logger.warning(f"Failed to parse {path} with unstructured: {exc}")
-            return self._load_text(path)
+            return self._load_pdf_with_pypdf(path)
 
         sections: List[StructuredSection] = []
         current_title: str = ""
@@ -395,6 +397,35 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
                 StructuredSection(title=current_title, content="\n".join(current_content))
             )
 
+        metadata = PaperMetadata(title=path.stem)
+        return sections, metadata
+
+    def _load_pdf_with_pypdf(self, path: Path) -> Tuple[List[StructuredSection], PaperMetadata]:
+        """Extract text from a PDF without OCR-heavy dependencies."""
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise RuntimeError(
+                "PDF parsing is unavailable. Install unstructured PDF extras, run GROBID, or install pypdf."
+            ) from exc
+
+        try:
+            reader = PdfReader(str(path))
+            page_texts = [
+                (page.extract_text() or "").strip()
+                for page in reader.pages
+            ]
+        except Exception as exc:
+            raise RuntimeError(f"Failed to extract text from PDF {path}: {exc}") from exc
+
+        content = "\n\n".join(text for text in page_texts if text)
+        if not content:
+            raise RuntimeError(
+                f"PDF {path} did not yield extractable text. Try --loader grobid for OCR/structured parsing."
+            )
+
+        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+        sections = [StructuredSection(title="", content=p) for p in paragraphs]
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
 

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 from episcope.rag.ingestion.document_loader import GrobidDocumentLoader
+from episcope.rag.ingestion.document_loader import UnstructuredDocumentLoader
 
 
 def test_grobid_loader_uses_env_url(monkeypatch) -> None:
@@ -44,3 +46,40 @@ def test_grobid_loader_explicit_url_overrides_env(monkeypatch) -> None:
 
     assert loader.grobid_url == "http://custom-grobid:8070"
     assert captured["grobid_server"] == "http://custom-grobid:8070"
+
+
+def test_unstructured_pdf_loader_falls_back_to_pypdf(monkeypatch, tmp_path: Path) -> None:
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def extract_text(self) -> str:
+            return self._text
+
+    class FakeReader:
+        def __init__(self, _path: str) -> None:
+            self.pages = [
+                FakePage("Title page\n\nMain finding one."),
+                FakePage("Main finding two."),
+            ]
+
+    monkeypatch.setitem(sys.modules, "pypdf", types.SimpleNamespace(PdfReader=FakeReader))
+    original_import = __import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "unstructured.partition.pdf":
+            raise ImportError("simulated missing unstructured PDF extras")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    sections, metadata, references = UnstructuredDocumentLoader().load(pdf_path)
+
+    assert metadata.title == "paper"
+    assert references == []
+    assert sections
+    combined_text = "\n".join(section.content for section in sections)
+    assert "Main finding one." in combined_text
