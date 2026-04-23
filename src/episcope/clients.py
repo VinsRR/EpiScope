@@ -54,10 +54,72 @@ class LLMClient(Protocol):
         """Return embeddings for a list of texts."""
 
 
+@dataclass
+class TokenUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    call_count: int = 0
+
+    def to_dict(self) -> Dict[str, int]:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "cached_tokens": self.cached_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "call_count": self.call_count,
+        }
+
+    def copy(self) -> "TokenUsage":
+        return TokenUsage(**self.to_dict())
+
+
+class UsageTrackingMixin:
+    """Small helper for providers that can surface token usage."""
+
+    def _init_usage_tracking(self) -> None:
+        self.last_usage = TokenUsage()
+        self.cumulative_usage = TokenUsage()
+
+    def usage_snapshot(self) -> TokenUsage:
+        return self.cumulative_usage.copy()
+
+    def _record_usage(
+        self,
+        *,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        total_tokens: Optional[int] = None,
+        cached_tokens: Optional[int] = None,
+        reasoning_tokens: Optional[int] = None,
+        increment_calls: bool = True,
+    ) -> None:
+        usage = TokenUsage(
+            prompt_tokens=int(prompt_tokens or 0),
+            completion_tokens=int(completion_tokens or 0),
+            total_tokens=int(total_tokens or 0),
+            cached_tokens=int(cached_tokens or 0),
+            reasoning_tokens=int(reasoning_tokens or 0),
+            call_count=1 if increment_calls else 0,
+        )
+        if usage.total_tokens == 0:
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
+        self.last_usage = usage
+        self.cumulative_usage.prompt_tokens += usage.prompt_tokens
+        self.cumulative_usage.completion_tokens += usage.completion_tokens
+        self.cumulative_usage.total_tokens += usage.total_tokens
+        self.cumulative_usage.cached_tokens += usage.cached_tokens
+        self.cumulative_usage.reasoning_tokens += usage.reasoning_tokens
+        self.cumulative_usage.call_count += usage.call_count
+
+
 # Provider-specific implementations
 
 @dataclass
-class OllamaClient(LLMClient):
+class OllamaClient(UsageTrackingMixin, LLMClient):
     """
     Lightweight client for a local Ollama server.
 
@@ -70,6 +132,9 @@ class OllamaClient(LLMClient):
     timeout_s: int = 600
     # If you prefer non-streaming responses; we stitch streamed chunks anyway.
     stream: bool = True
+
+    def __post_init__(self):
+        self._init_usage_tracking()
 
     def chat(
         self,
@@ -111,9 +176,14 @@ class OllamaClient(LLMClient):
             r.raise_for_status()
             if not self.stream:
                 data = r.json()
+                self._record_usage(
+                    prompt_tokens=data.get("prompt_eval_count"),
+                    completion_tokens=data.get("eval_count"),
+                )
                 return data.get("message", {}).get("content", "")
 
             parts: List[str] = []
+            final_obj: Dict[str, Any] | None = None
             for line in r.iter_lines(decode_unicode=True):
                 if not line:
                     continue
@@ -127,7 +197,13 @@ class OllamaClient(LLMClient):
                 if content:
                     parts.append(content)
                 if obj.get("done"):
+                    final_obj = obj
                     break
+            if final_obj is not None:
+                self._record_usage(
+                    prompt_tokens=final_obj.get("prompt_eval_count"),
+                    completion_tokens=final_obj.get("eval_count"),
+                )
             return "".join(parts)
 
     def embed(
@@ -149,7 +225,7 @@ class OllamaClient(LLMClient):
 
 
 @dataclass
-class OpenRouterClient(LLMClient):
+class OpenRouterClient(UsageTrackingMixin, LLMClient):
     """
     Client for the OpenRouter API (OpenAI-compatible).
 
@@ -163,6 +239,7 @@ class OpenRouterClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        self._init_usage_tracking()
         if OpenAI is None:
             raise ImportError(
                 "The openai package is not installed. Install it to use OpenRouterClient."
@@ -199,6 +276,14 @@ class OpenRouterClient(LLMClient):
             max_tokens=max_tokens,
             **supported_kwargs,
         )
+        usage = getattr(response, "usage", None)
+        self._record_usage(
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            total_tokens=getattr(usage, "total_tokens", None),
+            reasoning_tokens=getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None),
+            cached_tokens=getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None),
+        )
         return response.choices[0].message.content or ""
 
     def embed(
@@ -221,7 +306,7 @@ class OpenRouterClient(LLMClient):
 
 @dataclass
 # OpenRouter could even just be called from OpenAIClient since it's compatible. Keeping separate for clarity.
-class OpenAIClient(LLMClient):
+class OpenAIClient(UsageTrackingMixin, LLMClient):
     """
     Client for OpenAI API compatible endpoints (including Azure).
 
@@ -233,6 +318,7 @@ class OpenAIClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        self._init_usage_tracking()
         if OpenAI is None:
             raise ImportError(
                 "The openai package is not installed. Install it to use OpenAIClient."
@@ -262,6 +348,14 @@ class OpenAIClient(LLMClient):
             max_tokens=max_tokens,
             **supported_kwargs,
         )
+        usage = getattr(response, "usage", None)
+        self._record_usage(
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            total_tokens=getattr(usage, "total_tokens", None),
+            reasoning_tokens=getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None),
+            cached_tokens=getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None),
+        )
         return response.choices[0].message.content or ""
 
     def embed(
@@ -280,7 +374,7 @@ class OpenAIClient(LLMClient):
 
 
 @dataclass
-class GeminiClient(LLMClient):
+class GeminiClient(UsageTrackingMixin, LLMClient):
     """
     Client for Google's Gemini models via the google-genai SDK.
 
@@ -291,6 +385,7 @@ class GeminiClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        self._init_usage_tracking()
         if genai is None or genai_types is None:
             raise ImportError(
                 "The google-genai package is not installed. Install it to use GeminiClient."
@@ -324,6 +419,14 @@ class GeminiClient(LLMClient):
             contents=full_prompt,
             config=generation_config,
             **supported_kwargs,
+        )
+        usage = getattr(response, "usage_metadata", None)
+        self._record_usage(
+            prompt_tokens=getattr(usage, "prompt_token_count", None),
+            completion_tokens=getattr(usage, "candidates_token_count", None),
+            total_tokens=getattr(usage, "total_token_count", None),
+            cached_tokens=getattr(usage, "cached_content_token_count", None),
+            reasoning_tokens=getattr(usage, "thoughts_token_count", None),
         )
         return response.text or ""
 
