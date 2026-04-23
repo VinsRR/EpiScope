@@ -1,54 +1,1145 @@
-"""
-cli/episcope.py
+"""Command-line interface for EpiScope."""
 
-Command line interface for EpiScope using Typer.  This CLI exposes
-commands to ingest documents and query the system.  It is intended for
-local experimentation and development; for production use the REST API
-may be more appropriate.
-"""
 from __future__ import annotations
 
+import json
+import tempfile
+from dataclasses import asdict, dataclass, is_dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
 import typer
-from typing import Optional
 
-from episcope.rag.ingestion.pipeline import IngestPipeline
-from episcope.rag.generation.answer import AnswerGenerator
+from episcope.db import InMemoryAcademicDB, MongoAcademicDB
+from episcope.rag.embeddings.factory import EmbedderFactory
+from episcope.rag.indexing.chunking import (
+    FixedSizeChunker,
+    NoChunker,
+    ParagraphChunker,
+    SentenceChunker,
+)
+from episcope.rag.indexing.indexer import Indexer
+from episcope.rag.ingestion.document_loader import DocumentLoaderFactory
+from episcope.rag.generation.nollm_generator import NoLLMGenerator
+from episcope.rag.retrieval.candidates import (
+    HybridCandidateRetriever,
+    SemanticCandidateRetriever,
+    SparseCandidateRetriever,
+)
+from episcope.rag.retrieval.retriever import Retriever
+from episcope.schemas import PaperMetadata, Reference, StructuredSection
+from episcope.settings import AppSettings
+from episcope.vectordb.faiss import FaissDB
+from episcope.vectordb.file import FileDB
+from episcope.vectordb.qdrant import QdrantDB
+from episcope.workflows import PaperClassifier, PrecisionMiner
+from episcope.workflows.classification import (
+    DataAccessibilityClassifierConfig,
+    DataTypeClassifierConfig,
+    GeoClassifierConfig,
+    GlobalCrossEncoderReranker,
+    PaperTypeClassifierConfig,
+    WithinLabelCrossEncoderReranker,
+)
+from episcope.workflows.precision_miner import (
+    FindDataSourcesConfig,
+    FindSupplementaryLinksConfig,
+    IdentifyKeyReferencesConfig,
+)
 
-app = typer.Typer(help="EpiScope CLI")
+
+app = typer.Typer(
+    help="EpiScope CLI with local-first defaults for indexing, retrieval, classification, and extraction.",
+    no_args_is_help=True,
+)
+
+_SETTINGS = AppSettings.from_env()
+_CLI_ROOT = Path(".episcope")
+_DEFAULT_INDEX_DIR = _CLI_ROOT / "index"
+_DEFAULT_DB_BACKUP = _CLI_ROOT / "academic_db.json"
+_DEFAULT_STRATEGY_NAME = "local-cli"
+_DEFAULT_EMBED_MODEL = "gemini-embedding-001"
+_DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+_DEFAULT_MIN_CHUNK_SIZE = 20
 
 
-@app.command()
-def ingest(
-    file_path: Optional[str] = typer.Option(None, help="Path to a PDF to ingest"),
-    directory: Optional[str] = typer.Option(None, help="Directory containing PDFs to ingest"),
-    doi: Optional[str] = typer.Option(None, help="DOI of a document to ingest"),
-    rag_method: str = typer.Option("text", help="RAG method to use (default: text)"),
+class LoaderKind(str, Enum):
+    unstructured = "unstructured"
+    grobid = "grobid"
+
+
+class IndexBackend(str, Enum):
+    file = "file"
+    faiss = "faiss"
+    qdrant = "qdrant"
+
+
+class MetadataBackend(str, Enum):
+    memory = "memory"
+    mongo = "mongo"
+
+
+class ChunkerKind(str, Enum):
+    none = "none"
+    sentence = "sentence"
+    paragraph = "paragraph"
+    fixed_size = "fixed_size"
+
+
+class RetrievalMode(str, Enum):
+    dense_only = "dense_only"
+    hybrid = "hybrid"
+    sparse_only = "sparse_only"
+    hybrid_candidates_only = "hybrid_candidates_only"
+
+
+class LLMProvider(str, Enum):
+    nollm = "nollm"
+    gemini = "gemini"
+    openai = "openai"
+    openrouter = "openrouter"
+    ollama = "ollama"
+
+
+class ClassifierKind(str, Enum):
+    paper_type = "paper_type"
+    data_accessibility = "data_accessibility"
+    data_type = "data_type"
+    geo = "geo"
+
+
+class PrecisionMinerKind(str, Enum):
+    find_data_sources = "find_data_sources"
+    find_supplementary_links = "find_supplementary_links"
+    identify_key_references = "identify_key_references"
+
+
+class EvidenceRerankerKind(str, Enum):
+    none = "none"
+    global_cross_encoder = "global_cross_encoder"
+    within_label_cross_encoder = "within_label_cross_encoder"
+
+
+@dataclass
+class LoadedPaper:
+    paper_id: str
+    path: Path
+    sections: list[StructuredSection]
+    metadata: PaperMetadata
+    references: list[Reference]
+
+
+def main() -> None:
+    app()
+
+
+def _json_ready(value: Any) -> Any:
+    if is_dataclass(value):
+        return {key: _json_ready(item) for key, item in asdict(value).items()}
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_ready(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return _json_ready(value.model_dump())
+    if hasattr(value, "name") and hasattr(value, "value"):
+        return getattr(value, "name")
+    return value
+
+
+def _echo_json(value: Any) -> None:
+    typer.echo(json.dumps(_json_ready(value), indent=2, ensure_ascii=False))
+
+
+def _abort(message: str) -> None:
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=1)
+
+
+def _ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _build_chunker(
+    chunker_kind: ChunkerKind,
+    *,
+    min_chunk_size: int,
+    chunk_size: int,
+    chunk_overlap: int,
 ):
-    """Ingest a PDF file, directory of PDFs or a DOI."""
-    pipeline = IngestPipeline(rag_method)
-    if file_path:
-        pipeline.ingest_pdf(file_path)
-    elif directory:
-        pipeline.ingest_directory(directory)
-    elif doi:
-        pipeline.ingest_doi(doi)
+    if chunker_kind == ChunkerKind.none:
+        return NoChunker()
+    if chunker_kind == ChunkerKind.sentence:
+        return SentenceChunker()
+    if chunker_kind == ChunkerKind.paragraph:
+        return ParagraphChunker(min_chunk_size=min_chunk_size)
+    if chunker_kind == ChunkerKind.fixed_size:
+        return FixedSizeChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    raise ValueError(f"Unsupported chunker: {chunker_kind.value}")
+
+
+def _build_vector_db(
+    backend: IndexBackend,
+    *,
+    index_dir: Path,
+    qdrant_collection: str,
+    qdrant_url: str,
+    dense_dim: Optional[int] = None,
+):
+    if backend == IndexBackend.file:
+        index_dir.mkdir(parents=True, exist_ok=True)
+        return FileDB(str(index_dir))
+    if backend == IndexBackend.faiss:
+        index_dir.mkdir(parents=True, exist_ok=True)
+        return FaissDB(str(index_dir))
+    if backend == IndexBackend.qdrant:
+        return QdrantDB(
+            collection=qdrant_collection,
+            url=qdrant_url,
+            dense_dim=dense_dim,
+            use_dense=True,
+            use_sparse=False,
+            use_late=False,
+        )
+    raise ValueError(f"Unsupported backend: {backend.value}")
+
+
+def _build_metadata_db(
+    backend: MetadataBackend,
+    *,
+    db_backup: Path,
+    mongo_uri: Optional[str],
+    mongo_db_name: str,
+):
+    if backend == MetadataBackend.memory:
+        _ensure_parent_dir(db_backup)
+        return InMemoryAcademicDB(backup_file=str(db_backup))
+    if not mongo_uri:
+        raise ValueError("Mongo metadata backend requires --mongo-uri or MONGO_URI.")
+    return MongoAcademicDB(uri=mongo_uri, db_name=mongo_db_name)
+
+
+def _build_generator(provider: LLMProvider, model: Optional[str], temperature: float):
+    from episcope.rag.generation.llm_generator import LLMGenerator
+    from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
+
+    if provider == LLMProvider.nollm:
+        return NoLLMGenerator()
+
+    resolved_model = model
+    if resolved_model is None:
+        if provider == LLMProvider.gemini:
+            resolved_model = (
+                _SETTINGS.llm_model
+                if _SETTINGS.llm_provider == LLMProvider.gemini.value and _SETTINGS.llm_model
+                else _DEFAULT_GEMINI_MODEL
+            )
+        else:
+            raise ValueError(
+                f"--llm-model is required when --llm-provider is {provider.value!r}."
+            )
+
+    if provider == LLMProvider.gemini:
+        client = GeminiClient()
+    elif provider == LLMProvider.openai:
+        client = OpenAIClient()
+    elif provider == LLMProvider.openrouter:
+        client = OpenRouterClient()
+    elif provider == LLMProvider.ollama:
+        client = OllamaClient()
     else:
-        typer.echo("Provide either --file-path, --directory or --doi")
+        raise ValueError(f"Unsupported llm provider: {provider.value}")
+
+    return LLMGenerator(client=client, model=resolved_model, temperature=temperature)
+
+
+def _build_retriever(
+    vectordb: Any,
+    *,
+    retrieval_mode: RetrievalMode,
+    dense_embedder: Any = None,
+):
+    if retrieval_mode == RetrievalMode.dense_only:
+        return Retriever(
+            vectordb=vectordb,
+            use_rerank=False,
+            candidate_retrievers=[
+                SemanticCandidateRetriever(vectordb, dense_embedder=dense_embedder)
+            ],
+        )
+
+    capabilities = vectordb.capabilities()
+    if not capabilities.get("sparse"):
+        raise ValueError(
+            f"Retrieval mode {retrieval_mode.value!r} requires sparse-capable storage. "
+            "Use --retrieval-mode dense-only for file/faiss indexes."
+        )
+
+    if retrieval_mode == RetrievalMode.sparse_only:
+        return Retriever(
+            vectordb=vectordb,
+            use_rerank=False,
+            candidate_retrievers=[SparseCandidateRetriever(vectordb)],
+        )
+    if retrieval_mode == RetrievalMode.hybrid_candidates_only:
+        return Retriever(
+            vectordb=vectordb,
+            use_rerank=False,
+            candidate_retrievers=[HybridCandidateRetriever(vectordb)],
+        )
+    if retrieval_mode == RetrievalMode.hybrid:
+        return Retriever(vectordb=vectordb, use_rerank=False)
+
+    raise ValueError(f"Unsupported retrieval mode: {retrieval_mode.value}")
+
+
+def _build_classifier_config(kind: ClassifierKind, top_k: int):
+    config_map = {
+        ClassifierKind.paper_type: PaperTypeClassifierConfig,
+        ClassifierKind.data_accessibility: DataAccessibilityClassifierConfig,
+        ClassifierKind.data_type: DataTypeClassifierConfig,
+        ClassifierKind.geo: GeoClassifierConfig,
+    }
+    config = config_map[kind]()
+    config.top_k = top_k
+    return config
+
+
+def _build_precision_miner_config(kind: PrecisionMinerKind, top_k: int):
+    config_map = {
+        PrecisionMinerKind.find_data_sources: FindDataSourcesConfig,
+        PrecisionMinerKind.find_supplementary_links: FindSupplementaryLinksConfig,
+        PrecisionMinerKind.identify_key_references: IdentifyKeyReferencesConfig,
+    }
+    config = config_map[kind]()
+    config.top_k = top_k
+    return config
+
+
+def _build_evidence_reranker(
+    kind: EvidenceRerankerKind,
+    *,
+    cross_encoder_model: Optional[str],
+    cross_encoder_top_k: int,
+):
+    if kind == EvidenceRerankerKind.none:
+        return None
+    if not cross_encoder_model:
+        raise ValueError(
+            "--cross-encoder-model is required when an evidence reranker is enabled."
+        )
+    if kind == EvidenceRerankerKind.global_cross_encoder:
+        return GlobalCrossEncoderReranker.from_huggingface(
+            model_name=cross_encoder_model,
+            top_k=cross_encoder_top_k,
+        )
+    if kind == EvidenceRerankerKind.within_label_cross_encoder:
+        return WithinLabelCrossEncoderReranker.from_huggingface(
+            model_name=cross_encoder_model,
+            top_k=cross_encoder_top_k,
+        )
+    raise ValueError(f"Unsupported evidence reranker: {kind.value}")
+
+
+def _loader_for(kind: LoaderKind):
+    return DocumentLoaderFactory.get_loader(kind.value)
+
+
+def _is_supported_file(path: Path) -> bool:
+    return path.suffix.lower() in {".pdf", ".txt", ".md", ".text"}
+
+
+def _iter_supported_files(path: Path) -> Iterable[Path]:
+    if path.is_file():
+        if not _is_supported_file(path):
+            raise ValueError(f"Unsupported file type: {path}")
+        yield path
+        return
+
+    if not path.is_dir():
+        raise ValueError(f"Expected a file or directory, got: {path}")
+
+    for child in sorted(path.rglob("*")):
+        if child.is_file() and _is_supported_file(child):
+            yield child
+
+
+def _load_paper(path: Path, *, loader_kind: LoaderKind, paper_id: Optional[str] = None) -> LoadedPaper:
+    loader = _loader_for(loader_kind)
+    sections, metadata, references = loader.load(path)
+    if not metadata.title:
+        metadata.title = path.stem
+    metadata.file_path = str(path)
+    return LoadedPaper(
+        paper_id=paper_id or path.stem,
+        path=path,
+        sections=sections,
+        metadata=metadata,
+        references=references,
+    )
+
+
+def _load_path(
+    path: Path,
+    *,
+    loader_kind: LoaderKind,
+    paper_id: Optional[str] = None,
+) -> list[LoadedPaper]:
+    files = list(_iter_supported_files(path))
+    if not files:
+        raise ValueError(f"No supported documents found under {path}")
+    if paper_id and len(files) != 1:
+        raise ValueError("--paper-id can only be used when indexing a single file.")
+
+    seen_ids: set[str] = set()
+    papers: list[LoadedPaper] = []
+    for file_path in files:
+        loaded = _load_paper(file_path, loader_kind=loader_kind, paper_id=paper_id)
+        if loaded.paper_id in seen_ids:
+            raise ValueError(
+                f"Duplicate paper id {loaded.paper_id!r}. Rename files or index them separately."
+            )
+        seen_ids.add(loaded.paper_id)
+        papers.append(loaded)
+    return papers
+
+
+def _persist_papers(papers: list[LoadedPaper], *, db: Any, strategy_name: str) -> None:
+    for paper in papers:
+        db.insert(
+            paper.paper_id,
+            "sections",
+            strategy_name,
+            [section.to_dict() for section in paper.sections],
+        )
+        db.insert(
+            paper.paper_id,
+            "metadata",
+            strategy_name,
+            paper.metadata.to_dict(),
+        )
+        db.insert(
+            paper.paper_id,
+            "references",
+            strategy_name,
+            [reference.to_dict() for reference in paper.references],
+        )
+
+
+def _index_papers(
+    papers: list[LoadedPaper],
+    *,
+    vectordb: Any,
+    embed_model: str,
+    chunker_kind: ChunkerKind,
+    min_chunk_size: int,
+    chunk_size: int,
+    chunk_overlap: int,
+):
+    chunker = _build_chunker(
+        chunker_kind,
+        min_chunk_size=min_chunk_size,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    embedder = EmbedderFactory.get_embedder(embed_model)
+    indexer = Indexer(vectordb, embedder=embedder, chunker=chunker)
+    for paper in papers:
+        indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
+    if hasattr(vectordb, "save"):
+        vectordb.save()
+    return embedder
+
+
+def _paper_summaries(papers: list[LoadedPaper]) -> list[dict[str, Any]]:
+    return [
+        {
+            "paper_id": paper.paper_id,
+            "path": str(paper.path),
+            "title": paper.metadata.title,
+            "section_count": len(paper.sections),
+            "reference_count": len(paper.references),
+        }
+        for paper in papers
+    ]
+
+
+def _transient_retriever_for_path(
+    path: Path,
+    *,
+    loader_kind: LoaderKind,
+    embed_model: str,
+    chunker_kind: ChunkerKind,
+    min_chunk_size: int,
+    chunk_size: int,
+    chunk_overlap: int,
+):
+    papers = _load_path(path, loader_kind=loader_kind)
+    tempdir = tempfile.TemporaryDirectory(prefix="episcope-cli-")
+    vectordb = FileDB(tempdir.name)
+    embedder = _index_papers(
+        papers,
+        vectordb=vectordb,
+        embed_model=embed_model,
+        chunker_kind=chunker_kind,
+        min_chunk_size=min_chunk_size,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    retriever = _build_retriever(
+        vectordb,
+        retrieval_mode=RetrievalMode.dense_only,
+        dense_embedder=embedder,
+    )
+    return tempdir, papers, retriever
+
+
+def _resolve_paper_from_store(
+    paper_id: str,
+    *,
+    loader_kind: LoaderKind,
+    file_path: Optional[Path],
+    strategy_name: str,
+    metadata_backend: MetadataBackend,
+    db_backup: Path,
+    mongo_uri: Optional[str],
+    mongo_db_name: str,
+    index_backend: IndexBackend,
+    index_dir: Path,
+    qdrant_collection: str,
+    qdrant_url: str,
+    retrieval_mode: RetrievalMode,
+    embed_model: str,
+    chunker_kind: ChunkerKind,
+    min_chunk_size: int,
+    chunk_size: int,
+    chunk_overlap: int,
+):
+    if file_path is not None:
+        if retrieval_mode != RetrievalMode.dense_only:
+            raise ValueError(
+                "Transient --file mode only supports --retrieval-mode dense-only."
+            )
+        tempdir, papers, retriever = _transient_retriever_for_path(
+            file_path,
+            loader_kind=loader_kind,
+            embed_model=embed_model,
+            chunker_kind=chunker_kind,
+            min_chunk_size=min_chunk_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        if len(papers) != 1:
+            raise ValueError("--file mode expects a single document.")
+        return {
+            "paper_id": papers[0].paper_id,
+            "metadata": papers[0].metadata,
+            "retriever": retriever,
+            "academic_db": None,
+            "tempdir": tempdir,
+        }
+
+    if not paper_id:
+        raise ValueError("Provide either a paper_id argument or --file.")
+
+    academic_db = _build_metadata_db(
+        metadata_backend,
+        db_backup=db_backup,
+        mongo_uri=mongo_uri,
+        mongo_db_name=mongo_db_name,
+    )
+    metadata = academic_db.get_paper_metadata(paper_id, strategy_name)
+    if metadata is None:
+        raise ValueError(
+            f"Paper {paper_id!r} was not found under strategy {strategy_name!r}. "
+            "Run `episcope papers` to inspect the available ids."
+        )
+
+    vectordb = _build_vector_db(
+        index_backend,
+        index_dir=index_dir,
+        qdrant_collection=qdrant_collection,
+        qdrant_url=qdrant_url,
+    )
+    retriever = _build_retriever(vectordb, retrieval_mode=retrieval_mode)
+    return {
+        "paper_id": paper_id,
+        "metadata": metadata,
+        "retriever": retriever,
+        "academic_db": academic_db,
+        "tempdir": None,
+    }
+
+
+@app.command("inspect")
+def inspect_document(
+    file_path: Path = typer.Argument(..., exists=True, help="Document file to parse."),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        help="Parsing backend. Unstructured is the local-first default.",
+    ),
+) -> None:
+    """Parse a file and print its extracted metadata and section counts."""
+    try:
+        paper = _load_paper(file_path, loader_kind=loader)
+    except Exception as exc:
+        _abort(str(exc))
+
+    _echo_json(
+        {
+            "paper_id": paper.paper_id,
+            "path": str(paper.path),
+            "metadata": paper.metadata,
+            "section_count": len(paper.sections),
+            "reference_count": len(paper.references),
+            "section_titles": [section.title for section in paper.sections[:10]],
+        }
+    )
 
 
 @app.command()
-def query(
-    query: str = typer.Argument(..., help="Question to answer"),
-    rag_method: str = typer.Option("text", help="RAG method to use"),
-    top_k: int = typer.Option(5, help="Number of contexts to retrieve"),
-):
-    """Query the system and print the answer with provenance."""
-    generator = AnswerGenerator(rag_method)
-    provenance = generator.answer_question(query, top_k=top_k)
-    typer.echo(provenance.answer)
-    for ev in provenance.evidences:
-        typer.echo(f"- {ev.paper_id} [{ev.section}]: {ev.snippet[:100]}...")
+def index(
+    path: Path = typer.Argument(..., exists=True, help="File or directory to index."),
+    paper_id: Optional[str] = typer.Option(
+        None,
+        "--paper-id",
+        help="Override the paper id when indexing a single file.",
+    ),
+    strategy_name: str = typer.Option(
+        _DEFAULT_STRATEGY_NAME,
+        "--strategy-name",
+        help="Namespace used for stored metadata and extracted content.",
+    ),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        help="Parsing backend. Unstructured avoids requiring a separate GROBID service.",
+    ),
+    index_backend: IndexBackend = typer.Option(
+        IndexBackend.file,
+        "--index-backend",
+        help="Vector backend. File-backed dense search is the local-first default.",
+    ),
+    index_dir: Path = typer.Option(
+        _DEFAULT_INDEX_DIR,
+        "--index-dir",
+        help="Directory for file/faiss indexes.",
+    ),
+    qdrant_url: str = typer.Option(
+        _SETTINGS.qdrant_url,
+        "--qdrant-url",
+        help="Qdrant URL when --index-backend=qdrant.",
+    ),
+    qdrant_collection: str = typer.Option(
+        _SETTINGS.qdrant_collection,
+        "--qdrant-collection",
+        help="Qdrant collection when --index-backend=qdrant.",
+    ),
+    metadata_backend: MetadataBackend = typer.Option(
+        MetadataBackend.memory,
+        "--metadata-backend",
+        help="Metadata store. JSON-backed in-memory storage is the local-first default.",
+    ),
+    db_backup: Path = typer.Option(
+        _DEFAULT_DB_BACKUP,
+        "--db-backup",
+        help="JSON file used by the local metadata store.",
+    ),
+    mongo_uri: Optional[str] = typer.Option(
+        _SETTINGS.mongo_uri,
+        "--mongo-uri",
+        help="Mongo URI when --metadata-backend=mongo.",
+    ),
+    mongo_db_name: str = typer.Option(
+        _SETTINGS.mongo_db_name,
+        "--mongo-db-name",
+        help="Mongo database name when --metadata-backend=mongo.",
+    ),
+    embed_model: str = typer.Option(
+        _DEFAULT_EMBED_MODEL,
+        "--embed-model",
+        help="Dense embedding model used for indexing. The default only needs a Gemini API key.",
+    ),
+    chunker: ChunkerKind = typer.Option(
+        ChunkerKind.paragraph,
+        "--chunker",
+        help="Chunking strategy used before indexing.",
+    ),
+    min_chunk_size: int = typer.Option(
+        _DEFAULT_MIN_CHUNK_SIZE,
+        "--min-chunk-size",
+        help="Minimum paragraph length when --chunker=paragraph.",
+    ),
+    chunk_size: int = typer.Option(
+        600,
+        "--chunk-size",
+        help="Chunk size when --chunker=fixed-size.",
+    ),
+    chunk_overlap: int = typer.Option(
+        100,
+        "--chunk-overlap",
+        help="Chunk overlap when --chunker=fixed-size.",
+    ),
+) -> None:
+    """Index documents into local or Qdrant-backed storage and persist metadata."""
+    try:
+        papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
+        embedder = EmbedderFactory.get_embedder(embed_model)
+        vectordb = _build_vector_db(
+            index_backend,
+            index_dir=index_dir,
+            qdrant_collection=qdrant_collection,
+            qdrant_url=qdrant_url,
+            dense_dim=getattr(embedder, "dim", None),
+        )
+        academic_db = _build_metadata_db(
+            metadata_backend,
+            db_backup=db_backup,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+        )
+        chunker_instance = _build_chunker(
+            chunker,
+            min_chunk_size=min_chunk_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        indexer = Indexer(vectordb, embedder=embedder, chunker=chunker_instance)
+        for paper in papers:
+            indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
+        if hasattr(vectordb, "save"):
+            vectordb.save()
+        _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
+    except Exception as exc:
+        _abort(str(exc))
+
+    _echo_json(
+        {
+            "status": "ok",
+            "strategy_name": strategy_name,
+            "index_backend": index_backend,
+            "metadata_backend": metadata_backend,
+            "embed_model": embed_model,
+            "papers": _paper_summaries(papers),
+        }
+    )
+
+
+@app.command()
+def papers(
+    strategy_name: str = typer.Option(
+        _DEFAULT_STRATEGY_NAME,
+        "--strategy-name",
+        help="Namespace to inspect.",
+    ),
+    metadata_backend: MetadataBackend = typer.Option(
+        MetadataBackend.memory,
+        "--metadata-backend",
+        help="Metadata store to inspect.",
+    ),
+    db_backup: Path = typer.Option(
+        _DEFAULT_DB_BACKUP,
+        "--db-backup",
+        help="JSON file used by the local metadata store.",
+    ),
+    mongo_uri: Optional[str] = typer.Option(
+        _SETTINGS.mongo_uri,
+        "--mongo-uri",
+        help="Mongo URI when --metadata-backend=mongo.",
+    ),
+    mongo_db_name: str = typer.Option(
+        _SETTINGS.mongo_db_name,
+        "--mongo-db-name",
+        help="Mongo database name when --metadata-backend=mongo.",
+    ),
+) -> None:
+    """List available paper ids in the configured metadata store."""
+    try:
+        academic_db = _build_metadata_db(
+            metadata_backend,
+            db_backup=db_backup,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+        )
+        doc_ids = academic_db.list_docs(strategy_name)
+    except Exception as exc:
+        _abort(str(exc))
+
+    _echo_json(
+        {
+            "strategy_name": strategy_name,
+            "metadata_backend": metadata_backend,
+            "count": len(doc_ids),
+            "paper_ids": doc_ids,
+        }
+    )
+
+
+@app.command()
+def explore(
+    query: str = typer.Argument(..., help="Question or search query."),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path",
+        exists=True,
+        help="Index a file or directory on the fly for this query.",
+    ),
+    paper_id: Optional[str] = typer.Option(
+        None,
+        "--paper-id",
+        help="Restrict retrieval to a single indexed paper id.",
+    ),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        help="Parsing backend used only with --path.",
+    ),
+    embed_model: str = typer.Option(
+        _DEFAULT_EMBED_MODEL,
+        "--embed-model",
+        help="Dense embedding model used only with --path.",
+    ),
+    chunker: ChunkerKind = typer.Option(
+        ChunkerKind.paragraph,
+        "--chunker",
+        help="Chunking strategy used only with --path.",
+    ),
+    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
+    chunk_size: int = typer.Option(600, "--chunk-size"),
+    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    index_backend: IndexBackend = typer.Option(
+        IndexBackend.file,
+        "--index-backend",
+        help="Backend used for previously indexed corpora.",
+    ),
+    index_dir: Path = typer.Option(
+        _DEFAULT_INDEX_DIR,
+        "--index-dir",
+        help="Directory for previously built file/faiss indexes.",
+    ),
+    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    qdrant_collection: str = typer.Option(
+        _SETTINGS.qdrant_collection,
+        "--qdrant-collection",
+    ),
+    retrieval_mode: RetrievalMode = typer.Option(
+        RetrievalMode.dense_only,
+        "--retrieval-mode",
+        help="Dense-only is the most local-friendly mode.",
+    ),
+    top_k: int = typer.Option(5, "--top-k", min=1),
+    similarity_threshold: float = typer.Option(0.0, "--similarity-threshold"),
+    generate_answer: bool = typer.Option(
+        False,
+        "--generate-answer/--retrieval-only",
+        help="Retrieval-only is the default so the command can run without an LLM.",
+    ),
+    llm_provider: LLMProvider = typer.Option(
+        LLMProvider.nollm,
+        "--llm-provider",
+        help="Used only when --generate-answer is enabled. `nollm` is the least-assumptive default.",
+    ),
+    llm_model: Optional[str] = typer.Option(
+        None,
+        "--llm-model",
+        help="Optional explicit generation model.",
+    ),
+    temperature: float = typer.Option(0.0, "--temperature"),
+) -> None:
+    """Retrieve relevant chunks from a transient or previously indexed corpus."""
+    tempdir = None
+    try:
+        if path is not None:
+            if retrieval_mode != RetrievalMode.dense_only:
+                raise ValueError("--path mode only supports --retrieval-mode dense-only.")
+            tempdir, papers, retriever = _transient_retriever_for_path(
+                path,
+                loader_kind=loader,
+                embed_model=embed_model,
+                chunker_kind=chunker,
+                min_chunk_size=min_chunk_size,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            if paper_id is not None and paper_id not in {paper.paper_id for paper in papers}:
+                raise ValueError(f"Paper {paper_id!r} was not found under transient --path input.")
+        else:
+            vectordb = _build_vector_db(
+                index_backend,
+                index_dir=index_dir,
+                qdrant_collection=qdrant_collection,
+                qdrant_url=qdrant_url,
+            )
+            retriever = _build_retriever(vectordb, retrieval_mode=retrieval_mode)
+
+        filter_payload = {"paper_id": paper_id} if paper_id else None
+        results = list(
+            retriever.retrieve(
+                query,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                filter=filter_payload,
+            )
+        )
+        payload: dict[str, Any] = {
+            "query": query,
+            "paper_id": paper_id,
+            "retrieval_mode": retrieval_mode,
+            "retrieval_count": len(results),
+            "retrieved_chunks": results,
+            "answer": None,
+            "provenance": None,
+        }
+        if generate_answer:
+            generator = _build_generator(llm_provider, llm_model, temperature)
+            provenance = generator.generate(results, question=query)
+            payload["answer"] = provenance.answer
+            payload["provenance"] = provenance
+        _echo_json(payload)
+    except Exception as exc:
+        _abort(str(exc))
+    finally:
+        if tempdir is not None:
+            tempdir.cleanup()
+
+
+@app.command()
+def classify(
+    paper_id: Optional[str] = typer.Argument(
+        None,
+        help="Indexed paper id. Omit this when using --file for transient local classification.",
+    ),
+    file_path: Optional[Path] = typer.Option(
+        None,
+        "--file",
+        exists=True,
+        help="Single file to classify without requiring a prebuilt index or metadata store.",
+    ),
+    classifier_kind: ClassifierKind = typer.Option(
+        ClassifierKind.data_accessibility,
+        "--classifier-kind",
+        help="Data accessibility is the most lightweight default workflow.",
+    ),
+    strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
+    loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
+    embed_model: str = typer.Option(
+        _DEFAULT_EMBED_MODEL,
+        "--embed-model",
+        help="Used only with --file.",
+    ),
+    chunker: ChunkerKind = typer.Option(
+        ChunkerKind.paragraph,
+        "--chunker",
+        help="Used only with --file.",
+    ),
+    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
+    chunk_size: int = typer.Option(600, "--chunk-size"),
+    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
+    index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
+    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    qdrant_collection: str = typer.Option(_SETTINGS.qdrant_collection, "--qdrant-collection"),
+    metadata_backend: MetadataBackend = typer.Option(
+        MetadataBackend.memory,
+        "--metadata-backend",
+    ),
+    db_backup: Path = typer.Option(_DEFAULT_DB_BACKUP, "--db-backup"),
+    mongo_uri: Optional[str] = typer.Option(_SETTINGS.mongo_uri, "--mongo-uri"),
+    mongo_db_name: str = typer.Option(_SETTINGS.mongo_db_name, "--mongo-db-name"),
+    retrieval_mode: RetrievalMode = typer.Option(
+        RetrievalMode.dense_only,
+        "--retrieval-mode",
+    ),
+    workflow_top_k: int = typer.Option(10, "--workflow-top-k", min=1),
+    llm_provider: LLMProvider = typer.Option(LLMProvider.gemini, "--llm-provider"),
+    llm_model: Optional[str] = typer.Option(None, "--llm-model"),
+    temperature: float = typer.Option(0.0, "--temperature"),
+    evidence_reranker: EvidenceRerankerKind = typer.Option(
+        EvidenceRerankerKind.none,
+        "--evidence-reranker",
+    ),
+    cross_encoder_model: Optional[str] = typer.Option(None, "--cross-encoder-model"),
+    cross_encoder_top_k: int = typer.Option(15, "--cross-encoder-top-k", min=1),
+    detailed: bool = typer.Option(
+        False,
+        "--detailed/--compact",
+        help="Emit the full trace/training payload instead of only the compact decision.",
+    ),
+) -> None:
+    """Run a paper classification workflow with local-first defaults."""
+    tempdir = None
+    try:
+        resolved = _resolve_paper_from_store(
+            paper_id or "",
+            loader_kind=loader,
+            file_path=file_path,
+            strategy_name=strategy_name,
+            metadata_backend=metadata_backend,
+            db_backup=db_backup,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+            index_backend=index_backend,
+            index_dir=index_dir,
+            qdrant_collection=qdrant_collection,
+            qdrant_url=qdrant_url,
+            retrieval_mode=retrieval_mode,
+            embed_model=embed_model,
+            chunker_kind=chunker,
+            min_chunk_size=min_chunk_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        tempdir = resolved["tempdir"]
+        generator = _build_generator(llm_provider, llm_model, temperature)
+        classifier = PaperClassifier(
+            retriever=resolved["retriever"],
+            generator=generator,
+            strategy_name=strategy_name,
+            academic_db=resolved["academic_db"],
+            config=_build_classifier_config(classifier_kind, workflow_top_k),
+            evidence_reranker=_build_evidence_reranker(
+                evidence_reranker,
+                cross_encoder_model=cross_encoder_model,
+                cross_encoder_top_k=cross_encoder_top_k,
+            ),
+        )
+        if detailed:
+            result = classifier.run_detailed(
+                resolved["paper_id"],
+                metadata=resolved["metadata"],
+            )
+        else:
+            result = classifier.run(
+                resolved["paper_id"],
+                metadata=resolved["metadata"],
+            )
+        _echo_json(result)
+    except Exception as exc:
+        _abort(str(exc))
+    finally:
+        if tempdir is not None:
+            tempdir.cleanup()
+
+
+@app.command("precision-miner")
+def precision_miner(
+    paper_id: Optional[str] = typer.Argument(
+        None,
+        help="Indexed paper id. Omit this when using --file for transient local extraction.",
+    ),
+    file_path: Optional[Path] = typer.Option(
+        None,
+        "--file",
+        exists=True,
+        help="Single file to analyze without requiring Mongo or Qdrant.",
+    ),
+    miner_kind: PrecisionMinerKind = typer.Option(
+        PrecisionMinerKind.find_data_sources,
+        "--miner-kind",
+        help="Find data sources is the lowest-friction default extraction workflow.",
+    ),
+    strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
+    loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
+    embed_model: str = typer.Option(_DEFAULT_EMBED_MODEL, "--embed-model"),
+    chunker: ChunkerKind = typer.Option(ChunkerKind.paragraph, "--chunker"),
+    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
+    chunk_size: int = typer.Option(600, "--chunk-size"),
+    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
+    index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
+    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    qdrant_collection: str = typer.Option(_SETTINGS.qdrant_collection, "--qdrant-collection"),
+    metadata_backend: MetadataBackend = typer.Option(
+        MetadataBackend.memory,
+        "--metadata-backend",
+    ),
+    db_backup: Path = typer.Option(_DEFAULT_DB_BACKUP, "--db-backup"),
+    mongo_uri: Optional[str] = typer.Option(_SETTINGS.mongo_uri, "--mongo-uri"),
+    mongo_db_name: str = typer.Option(_SETTINGS.mongo_db_name, "--mongo-db-name"),
+    retrieval_mode: RetrievalMode = typer.Option(
+        RetrievalMode.dense_only,
+        "--retrieval-mode",
+    ),
+    workflow_top_k: int = typer.Option(10, "--workflow-top-k", min=1),
+    llm_provider: LLMProvider = typer.Option(LLMProvider.gemini, "--llm-provider"),
+    llm_model: Optional[str] = typer.Option(None, "--llm-model"),
+    temperature: float = typer.Option(0.0, "--temperature"),
+    detailed: bool = typer.Option(
+        False,
+        "--detailed/--compact",
+        help="Emit provenance/trace/chunks instead of only the extraction result.",
+    ),
+) -> None:
+    """Run a precision-miner workflow with local-first defaults."""
+    tempdir = None
+    try:
+        resolved = _resolve_paper_from_store(
+            paper_id or "",
+            loader_kind=loader,
+            file_path=file_path,
+            strategy_name=strategy_name,
+            metadata_backend=metadata_backend,
+            db_backup=db_backup,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+            index_backend=index_backend,
+            index_dir=index_dir,
+            qdrant_collection=qdrant_collection,
+            qdrant_url=qdrant_url,
+            retrieval_mode=retrieval_mode,
+            embed_model=embed_model,
+            chunker_kind=chunker,
+            min_chunk_size=min_chunk_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        tempdir = resolved["tempdir"]
+        generator = _build_generator(llm_provider, llm_model, temperature)
+        miner = PrecisionMiner(
+            retriever=resolved["retriever"],
+            generator=generator,
+            strategy_name=strategy_name,
+            academic_db=resolved["academic_db"],
+            config=_build_precision_miner_config(miner_kind, workflow_top_k),
+        )
+        if detailed:
+            result = miner.run_detailed(
+                resolved["paper_id"],
+                metadata=resolved["metadata"],
+            )
+        else:
+            result = {
+                "paper_id": resolved["paper_id"],
+                "result": miner.run(
+                    resolved["paper_id"],
+                    metadata=resolved["metadata"],
+                ),
+            }
+        _echo_json(result)
+    except Exception as exc:
+        _abort(str(exc))
+    finally:
+        if tempdir is not None:
+            tempdir.cleanup()
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(_SETTINGS.api_host, "--host"),
+    port: int = typer.Option(_SETTINGS.api_port, "--port"),
+    reload: bool = typer.Option(False, "--reload/--no-reload"),
+) -> None:
+    """Run the FastAPI app."""
+    try:
+        import uvicorn
+    except ImportError as exc:
+        _abort(f"uvicorn is required to run the API server: {exc}")
+    uvicorn.run("episcope.api:app", host=host, port=port, reload=reload)
 
 
 if __name__ == "__main__":
-    app()
+    main()

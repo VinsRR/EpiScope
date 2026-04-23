@@ -69,6 +69,15 @@ class FaissDB(AbstractVectorDB):
         embed_models: Optional[Dict[str, str]] = None,
         chunking_config: Optional[Dict[str, Any]] = None,
     ) -> None:
+        def _dense_vector(point: Dict[str, Any]) -> List[float]:
+            if "vector" in point:
+                return point["vector"]
+            vectors = point.get("vectors") or {}
+            dense = vectors.get("dense")
+            if dense is None:
+                raise ValueError("Point is missing a dense vector.")
+            return dense
+
         dense_model = embed_models.get("dense") if embed_models else None
         if dense_model:
             # Only set the DB-level model if it's not already configured.
@@ -108,10 +117,10 @@ class FaissDB(AbstractVectorDB):
             point_id = p["payload"].get("id")
             if point_id in id_to_index:
                 idx = id_to_index[point_id]
-                existing_embeds_list[idx] = p["vector"]
+                existing_embeds_list[idx] = _dense_vector(p)
                 existing_meta[idx] = p["payload"]
             else:
-                existing_embeds_list.append(p["vector"])
+                existing_embeds_list.append(_dense_vector(p))
                 existing_meta.append(p["payload"])
 
         if existing_embeds_list:

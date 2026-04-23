@@ -15,9 +15,18 @@ from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
 from dataclasses import dataclass, field
 
 import requests
-from openai import OpenAI
-from google import genai
-from google.genai import types as genai_types
+
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - exercised in environments without the SDK
+    OpenAI = None
+
+try:
+    from google import genai
+    from google.genai import types as genai_types
+except ImportError:  # pragma: no cover - exercised in environments without the SDK
+    genai = None
+    genai_types = None
 
 
 # Provider-agnostic interface
@@ -154,6 +163,10 @@ class OpenRouterClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        if OpenAI is None:
+            raise ImportError(
+                "The openai package is not installed. Install it to use OpenRouterClient."
+            )
         key = self.api_key or os.environ.get("OPENROUTER_API_KEY")
         if not key:
             raise ValueError("`api_key` not provided and `OPENROUTER_API_KEY` env var not set.")
@@ -220,6 +233,10 @@ class OpenAIClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        if OpenAI is None:
+            raise ImportError(
+                "The openai package is not installed. Install it to use OpenAIClient."
+            )
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
             raise ValueError("`api_key` not provided and `OPENAI_API_KEY` env var not set.")
@@ -274,6 +291,10 @@ class GeminiClient(LLMClient):
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
+        if genai is None or genai_types is None:
+            raise ImportError(
+                "The google-genai package is not installed. Install it to use GeminiClient."
+            )
         key = self.api_key or os.environ.get("GEMINI_API_KEY")
         if not key:
             raise ValueError("`api_key` not provided and `GEMINI_API_KEY` env var not set.")

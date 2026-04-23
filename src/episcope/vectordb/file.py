@@ -56,6 +56,15 @@ class FileDB(AbstractVectorDB):
         embed_models: Optional[Dict[str, str]] = None,
         chunking_config: Optional[Dict[str, Any]] = None,
     ) -> None:
+        def _dense_vector(point: Dict[str, Any]) -> List[float]:
+            if "vector" in point:
+                return point["vector"]
+            vectors = point.get("vectors") or {}
+            dense = vectors.get("dense")
+            if dense is None:
+                raise ValueError("Point is missing a dense vector.")
+            return dense
+
         dense_model = embed_models.get("dense") if embed_models else None
         if dense_model:
             # Only set the DB-level model if it's not already configured.
@@ -93,7 +102,10 @@ class FileDB(AbstractVectorDB):
 
         for p in points_list:
             point_id = p["payload"].get("id")
-            existing_points[point_id] = p
+            existing_points[point_id] = {
+                "vector": _dense_vector(p),
+                "payload": p["payload"],
+            }
 
         updated_points = list(existing_points.values())
         if not updated_points:

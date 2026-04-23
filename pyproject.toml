@@ -9,22 +9,29 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
+    "uvicorn",
     "pydantic",
     "typer",
+    "requests",
     "numpy",
     "scikit-learn",
     "pandas",
     "python-dotenv",
     "torch",
     "transformers",
+    "sentence-transformers",
     "faiss-cpu",
+    "qdrant-client",
     "unstructured",
-    "ollama",
+    "openai",
+    "google-genai",
+    "rapidfuzz",
+    "lxml",
     "pymongo",
 ]
 
 [project.scripts]
-episcope = "episcope.episcope:app"
+episcope = "episcope.episcope:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
