@@ -29,9 +29,10 @@ class Settings:
     ground_truth_csv_sep: str = "\t"
     mongo_uri_or_env: str = "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF@cluster0.s82lhln.mongodb.net/"
     mongo_db_name: str = "episcope_academic_db"
-    qdrant_url: str = "http://localhost:6334"
+    qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
-    llm_model: str = "gemini-2.5-flash"
+    llm_provider: str = "openrouter"  # one of ["gemini", "openrouter", "openai", "ollama"]
+    llm_model: str = "deepseek/deepseek-v3.2"  # "gemini-2.5-flash"
     llm_temperature: float = 0.0
     classifier_kind: str = "data_accessibility" # one of ["paper_type", "data_accessibility", "data_type", "geo"]
     workflow_top_k: int = 15
@@ -44,7 +45,7 @@ class Settings:
     cross_encoder_top_k: Optional[int] = 15
     base_output_dir: str = "test_RANDOM"#"output"
     explicit_run_dir: Optional[str] = None
-    checkpoint_every: int = 10
+    checkpoint_every: int = 1
     fail_fast: bool = False
     record_failures: bool = True
     allow_delete_on_errors: bool = False
@@ -255,7 +256,7 @@ def load_paper_ids(settings: Settings) -> List[str]:
 def build_classifier(settings: Settings):
     from episcope.db.mongo_academic_db import MongoAcademicDB
     from episcope.vectordb.qdrant import QdrantDB
-    from episcope.clients import GeminiClient
+    from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
     from episcope.rag.generation.llm_generator import LLMGenerator
     from episcope.workflows import PaperClassifier
     from episcope.workflows.classification import (
@@ -285,7 +286,24 @@ def build_classifier(settings: Settings):
     uri = resolve_mongo_uri(settings.mongo_uri_or_env)
     db = MongoAcademicDB(uri=uri, db_name=settings.mongo_db_name)
 
-    vdb = QdrantDB(collection=settings.qdrant_collection, url=settings.qdrant_url)
+    needs_dense = settings.retrieval_mode in {"dense_only", "hybrid", "hybrid_candidates_only"}
+    needs_sparse = settings.retrieval_mode in {"sparse_only", "hybrid", "hybrid_candidates_only"}
+
+    try:
+        vdb = QdrantDB(
+            collection=settings.qdrant_collection,
+            url=settings.qdrant_url,
+            use_dense=needs_dense,
+            use_sparse=needs_sparse,
+        )
+    except Exception as exc:
+        message = str(exc)
+        if "dense_dim must be provided" in message:
+            raise ValueError(
+                f"Qdrant collection {settings.qdrant_collection!r} was not found at {settings.qdrant_url}. "
+                "This experiment runner expects an existing indexed collection for dense or hybrid retrieval."
+            ) from exc
+        raise
     # Notice: rerankers here always set to false because we are offloading the reranking to the classifier
     # i.e., rereanking here would rerank the chunks of the individual queries, rather than across queries
     if settings.retrieval_mode == "dense_only":
@@ -317,7 +335,19 @@ def build_classifier(settings: Settings):
             "Use one of ['dense_only', 'hybrid', 'sparse_only', 'hybrid_candidates_only']."
         )
 
-    client = GeminiClient()
+    if settings.llm_provider == "gemini":
+        client = GeminiClient()
+    elif settings.llm_provider == "openrouter":
+        client = OpenRouterClient()
+    elif settings.llm_provider == "openai":
+        client = OpenAIClient()
+    elif settings.llm_provider == "ollama":
+        client = OllamaClient()
+    else:
+        raise ValueError(
+            f"Unknown llm_provider={settings.llm_provider}. "
+            "Use one of ['gemini', 'openrouter', 'openai', 'ollama']."
+        )
 
     try:
         generator = LLMGenerator(client=client, model=settings.llm_model, temperature=settings.llm_temperature)
@@ -429,6 +459,7 @@ def result_row_from_output(paper_id: str, c_res, classifier_kind: str) -> Dict[s
 
 def compute_run_signature(settings: Settings) -> Dict[str, Any]:
     return {
+        "llm_provider": settings.llm_provider,
         "classifier_kind": settings.classifier_kind,
         "workflow_top_k": settings.workflow_top_k,
         "retrieval_mode": settings.retrieval_mode,
@@ -552,7 +583,7 @@ def _usage_snapshot_from_classifier(classifier: Any) -> Optional[Any]:
 def _usage_payload_for_row(settings: Settings, usage_delta: Optional[Dict[str, int]]) -> Dict[str, Any]:
     usage = usage_delta or {}
     return {
-        "llm_provider": "gemini",
+        "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
         "llm_completion_tokens": int(usage.get("completion_tokens", 0) or 0),
@@ -567,7 +598,7 @@ def build_token_summary(results_df: pd.DataFrame, settings: Settings, *, repeat_
     if results_df.empty:
         return {
             "repeat_idx": repeat_idx,
-            "llm_provider": "gemini",
+            "llm_provider": settings.llm_provider,
             "llm_model": settings.llm_model,
             "paper_count": 0,
             "papers_with_llm_usage": 0,
@@ -592,7 +623,7 @@ def build_token_summary(results_df: pd.DataFrame, settings: Settings, *, repeat_
 
     return {
         "repeat_idx": repeat_idx,
-        "llm_provider": "gemini",
+        "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "paper_count": int(len(results_df)),
         "papers_with_llm_usage": papers_with_usage,
@@ -603,6 +634,20 @@ def build_token_summary(results_df: pd.DataFrame, settings: Settings, *, repeat_
         "reasoning_tokens": _sum_column("llm_reasoning_tokens"),
         "call_count": _sum_column("llm_call_count"),
     }
+
+
+def _looks_like_credit_exhaustion(error: Exception) -> bool:
+    text = repr(error).lower()
+    needles = (
+        "insufficient credits",
+        "insufficient credit",
+        "insufficient balance",
+        "quota exceeded",
+        "out of credits",
+        "payment required",
+        "402",
+    )
+    return any(needle in text for needle in needles)
 
 
 def detailed_record_from_output(
@@ -838,6 +883,7 @@ def run_once(settings: Settings, repeat_idx: int) -> None:
             list_provenance: List[Dict[str, Any]] = []
             processed_since_flush = 0
             n_errors = 0
+            stop_due_to_credits = False
 
             for idx, paper_id in enumerate(paper_ids, start=1):
 
@@ -862,6 +908,18 @@ def run_once(settings: Settings, repeat_idx: int) -> None:
                     n_errors += 1
                     append_log(p["log_txt"], f"ERROR paper_id={paper_id} err={repr(e)}")
                     print(f"[ERROR] paper_id={paper_id} err={repr(e)}")
+
+                    if _looks_like_credit_exhaustion(e):
+                        append_log(
+                            p["log_txt"],
+                            f"Stopping repeat={repeat_idx} after provider credit exhaustion at paper_id={paper_id}.",
+                        )
+                        print(
+                            f"[WARN] stopping after provider credit exhaustion at paper_id={paper_id}. "
+                            "Checkpoint data will be preserved for resume."
+                        )
+                        stop_due_to_credits = True
+                        break
 
                     if settings.fail_fast:
                         raise
@@ -961,6 +1019,13 @@ def run_once(settings: Settings, repeat_idx: int) -> None:
             append_log(p["log_txt"], f"Run end: done={n_done}/{expected_n}, errors={n_errors}")
             print(f"[INFO] run end: done={n_done}/{expected_n}, errors={n_errors}")
 
+            if stop_due_to_credits:
+                print(
+                    f"[WARN] Provider credits exhausted before completion: {n_done}/{expected_n}. "
+                    "Resume later after restoring credits or switching provider/model."
+                )
+                return
+
             if n_done != expected_n:
                 print(f"[WARN] Not complete: {n_done}/{expected_n}. Resume will continue.")
                 return
@@ -1025,6 +1090,12 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--strategy-name", type=str, default=None)
     ap.add_argument("--qdrant-url", type=str, default=None)
     ap.add_argument("--qdrant-collection", type=str, default=None)
+    ap.add_argument(
+        "--llm-provider",
+        type=str,
+        default=None,
+        choices=["gemini", "openrouter", "openai", "ollama"],
+    )
     ap.add_argument("--mongo-uri-or-env", type=str, default=None)
     ap.add_argument("--mongo-db-name", type=str, default=None)
     ap.add_argument("--base-output-dir", type=str, default=None)
@@ -1072,6 +1143,8 @@ def merge_settings(settings: Settings, args: argparse.Namespace) -> Settings:
         d["qdrant_url"] = args.qdrant_url
     if args.qdrant_collection is not None:
         d["qdrant_collection"] = args.qdrant_collection
+    if args.llm_provider is not None:
+        d["llm_provider"] = args.llm_provider
     if args.mongo_uri_or_env is not None:
         d["mongo_uri_or_env"] = args.mongo_uri_or_env
     if args.mongo_db_name is not None:
@@ -1114,6 +1187,7 @@ def main():
         value is not None
         for value in [
             args.classifier_kind,
+            args.llm_provider,
             args.llm_model,
             args.llm_temperature,
             args.paper_source,
@@ -1139,10 +1213,12 @@ def main():
         # "data_type",
         # "geo"
         ]
+    LLM_PROVIDERS = [
+        base.llm_provider,
+    ]
     LLM_MODELS = [
-        # "gemini-2.5-pro",
-        "gemini-2.5-flash"
-        ]
+        base.llm_model,
+    ]
     TEMPERATURES = [
         0.0,
         # 1.0
@@ -1157,23 +1233,36 @@ def main():
     had_failure = False
 
     for kind in CLASSIFIER_KINDS:
-        for model in LLM_MODELS:
-            for temp in TEMPERATURES:
-                combo = {"classifier_kind": kind, "llm_model": model, "llm_temperature": float(temp)}
-                settings = apply_overrides(base, combo)
-                run_dir = build_run_dir(settings)
+        for provider in LLM_PROVIDERS:
+            for model in LLM_MODELS:
+                for temp in TEMPERATURES:
+                    combo = {
+                        "classifier_kind": kind,
+                        "llm_provider": provider,
+                        "llm_model": model,
+                        "llm_temperature": float(temp),
+                    }
+                    settings = apply_overrides(base, combo)
+                    run_dir = build_run_dir(settings)
 
-                print(f"\n=== PARAMS kind={kind} | model={model} | temp={temp} | dir={run_dir} ===")
+                    print(
+                        f"\n=== PARAMS kind={kind} | provider={provider} | model={model} | "
+                        f"temp={temp} | dir={run_dir} ==="
+                    )
 
-                for rep in range(1, REPEATS + 1):
-                    try:
-                        print(f"\n--- repeat {rep}/{REPEATS} ---")
-                        run_once(settings, repeat_idx=rep)
-                    except Exception as e:
-                        had_failure = True
-                        print(f"[FATAL] kind={kind} model={model} temp={temp} rep={rep} err={repr(e)}", file=sys.stderr)
-                        if settings.fail_fast:
-                            raise
+                    for rep in range(1, REPEATS + 1):
+                        try:
+                            print(f"\n--- repeat {rep}/{REPEATS} ---")
+                            run_once(settings, repeat_idx=rep)
+                        except Exception as e:
+                            had_failure = True
+                            print(
+                                f"[FATAL] kind={kind} provider={provider} model={model} "
+                                f"temp={temp} rep={rep} err={repr(e)}",
+                                file=sys.stderr,
+                            )
+                            if settings.fail_fast:
+                                raise
 
     if had_failure:
         sys.exit(1)
