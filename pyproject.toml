@@ -22,7 +22,7 @@ dependencies = [
     "sentence-transformers",
     "faiss-cpu",
     "qdrant-client",
-    "unstructured",
+    "unstructured[pdf]",
     "openai",
     "google-genai",
     "rapidfuzz",

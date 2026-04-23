@@ -2,7 +2,7 @@ fastapi
 uvicorn
 pydantic
 qdrant-client
-unstructured
+unstructured[pdf]
 llama-index
 fastembed
 sentence-transformers
