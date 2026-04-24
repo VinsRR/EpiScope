@@ -32,11 +32,11 @@ class Settings:
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
     llm_provider: str = "openrouter"  # one of ["gemini", "openrouter", "openai", "ollama"]
-    llm_model: str = "deepseek/deepseek-v3.2"  # "gemini-2.5-flash"
+    llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"  # "minimax/minimax-m2.5:free"  #  "deepseek/deepseek-v3.2"  # "gemini-2.5-flash"
     llm_temperature: float = 0.0
     classifier_kind: str = "data_accessibility" # one of ["paper_type", "data_accessibility", "data_type", "geo"]
     workflow_top_k: int = 15
-    retrieval_mode: str = "sparse_only" # one of ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
+    retrieval_mode: str = "dense_only" # one of ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
     # hybris uses both dense and sparse retrievers and does the reranking
     # while hybrid_candidates_only uses both retrievers and RRF
     #
@@ -298,6 +298,11 @@ def build_classifier(settings: Settings):
         )
     except Exception as exc:
         message = str(exc)
+        if "connection refused" in message.lower():
+            raise ValueError(
+                f"Qdrant is not reachable at {settings.qdrant_url}. "
+                "Start Qdrant or point qdrant_url at a running instance."
+            ) from exc
         if "dense_dim must be provided" in message:
             raise ValueError(
                 f"Qdrant collection {settings.qdrant_collection!r} was not found at {settings.qdrant_url}. "
@@ -1126,6 +1131,8 @@ def parse_args() -> argparse.Namespace:
 
 def merge_settings(settings: Settings, args: argparse.Namespace) -> Settings:
     d = dataclasses.asdict(settings)
+    if isinstance(d.get("llm_model"), tuple) and len(d["llm_model"]) == 1:
+        d["llm_model"] = d["llm_model"][0]
     if args.paper_source is not None:
         d["paper_source"] = args.paper_source
     if args.subset_papers_csv is not None:
