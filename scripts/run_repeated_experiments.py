@@ -23,9 +23,9 @@ dotenv.load_dotenv()
 class Settings:
     strategy_name: str = "grobid"
     paper_source: str = "csv_subset" # one of ["all_db", "csv_subset"]
-    subset_papers_csv_path: Optional[str] = "sampled_papers_full.csv" # None
+    subset_papers_csv_path: Optional[str] = "../sampled_papers_full.csv" # None
     subset_papers_csv_sep: str = "\t"
-    ground_truth_csv_path: Optional[str] = "sampled_papers_full.csv"
+    ground_truth_csv_path: Optional[str] = "../sampled_papers_full.csv"
     ground_truth_csv_sep: str = "\t"
     mongo_uri_or_env: str = "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF@cluster0.s82lhln.mongodb.net/"
     mongo_db_name: str = "episcope_academic_db"
@@ -35,7 +35,7 @@ class Settings:
     llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"  # "minimax/minimax-m2.5:free"  #  "deepseek/deepseek-v3.2"  # "gemini-2.5-flash"
     llm_temperature: float = 0.0
     classifier_kind: str = "data_accessibility" # one of ["paper_type", "data_accessibility", "data_type", "geo"]
-    workflow_top_k: int = 15
+    workflow_top_k: int = 20
     retrieval_mode: str = "dense_only" # one of ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
     # hybris uses both dense and sparse retrievers and does the reranking
     # while hybrid_candidates_only uses both retrievers and RRF
@@ -43,7 +43,7 @@ class Settings:
     evidence_reranker_kind: str = "none" # one of ["none", "global_cross_encoder", "within_label_cross_encoder"]
     cross_encoder_model: Optional[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2" # e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2"
     cross_encoder_top_k: Optional[int] = 15
-    base_output_dir: str = "test_RANDOM"#"output"
+    base_output_dir: str = "outputs/nemotron_dense"#"output"
     explicit_run_dir: Optional[str] = None
     checkpoint_every: int = 1
     fail_fast: bool = False
