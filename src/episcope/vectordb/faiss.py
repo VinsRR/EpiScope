@@ -7,6 +7,7 @@ import numpy as np
 
 from .base import AbstractVectorDB
 
+
 class FaissDB(AbstractVectorDB):
     """
     A file-based vector database using FAISS.
@@ -47,7 +48,9 @@ class FaissDB(AbstractVectorDB):
                 self._embeddings = np.load(self.index_dir / "embeddings.npy")
 
             if (self.index_dir / "index.faiss").exists():
-                self._faiss_index = faiss.read_index(str(self.index_dir / "index.faiss"))
+                self._faiss_index = faiss.read_index(
+                    str(self.index_dir / "index.faiss")
+                )
 
             if (self.index_dir / "config.json").exists():
                 with open(self.index_dir / "config.json", "r", encoding="utf-8") as f:
@@ -95,13 +98,17 @@ class FaissDB(AbstractVectorDB):
                 self._chunking_config = chunking_config
                 self._dirty = True
             elif self._chunking_config != chunking_config:
-                raise ValueError(f"Inconsistent chunking config. DB uses '{self._chunking_config}', but upsert was called with '{chunking_config}'.")
+                raise ValueError(
+                    f"Inconsistent chunking config. DB uses '{self._chunking_config}', but upsert was called with '{chunking_config}'."
+                )
 
         points_list = list(points)
         if not points_list:
             return
 
-        if not self._loaded:  # if this is the first instantiation create the payload keys
+        if (
+            not self._loaded
+        ):  # if this is the first instantiation create the payload keys
             for p in points_list:
                 payload = p.setdefault("payload", {})
                 if namespace:
@@ -109,7 +116,9 @@ class FaissDB(AbstractVectorDB):
                 self._payload_keys.update(payload.keys())
 
         existing_meta = self._metadata
-        existing_embeds_list = self._embeddings.tolist() if self._embeddings.size > 0 else []
+        existing_embeds_list = (
+            self._embeddings.tolist() if self._embeddings.size > 0 else []
+        )
 
         id_to_index = {meta.get("id"): i for i, meta in enumerate(existing_meta)}
 
@@ -163,7 +172,9 @@ class FaissDB(AbstractVectorDB):
 
             meta = self._metadata[idx]
 
-            if combined_filter and not all(meta.get(key) == value for key, value in combined_filter.items()):
+            if combined_filter and not all(
+                meta.get(key) == value for key, value in combined_filter.items()
+            ):
                 continue
 
             results.append({**meta, "score": float(dist)})
@@ -173,7 +184,9 @@ class FaissDB(AbstractVectorDB):
 
         return results
 
-    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(
+        self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None
+    ) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
         combined_filter = dict(filter or {})
         if namespace:
@@ -183,7 +196,8 @@ class FaissDB(AbstractVectorDB):
             return self._metadata
 
         return [
-            point for point in self._metadata
+            point
+            for point in self._metadata
             if all(point.get(key) == value for key, value in combined_filter.items())
         ]
 
@@ -225,7 +239,7 @@ class FaissDB(AbstractVectorDB):
         config = {
             "embed_model": self._model,
             "chunking_config": self._chunking_config,
-            "payload_keys": list(self._payload_keys)
+            "payload_keys": list(self._payload_keys),
         }
         with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)

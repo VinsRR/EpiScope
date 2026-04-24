@@ -28,13 +28,21 @@ class Indexer:
     def _validate_embedders(self) -> None:
         caps = self.db.capabilities()
         if caps.get("dense") and self.embedder is None:
-            raise ValueError("DB requires dense vectors but no dense embedder was provided.")
+            raise ValueError(
+                "DB requires dense vectors but no dense embedder was provided."
+            )
         if caps.get("sparse") and self.sparse_embedder is None:
-            raise ValueError("DB requires sparse vectors but no sparse embedder was provided.")
+            raise ValueError(
+                "DB requires sparse vectors but no sparse embedder was provided."
+            )
         if caps.get("late") and self.late_embedder is None:
-            raise ValueError("DB requires late-interaction vectors but no late embedder was provided.")
+            raise ValueError(
+                "DB requires late-interaction vectors but no late embedder was provided."
+            )
 
-    def index_documents(self, docs: Iterable[Dict[str, Any]], namespace: Optional[str] = None) -> None:
+    def index_documents(
+        self, docs: Iterable[Dict[str, Any]], namespace: Optional[str] = None
+    ) -> None:
         self._validate_embedders()
 
         docs_list = list(docs)
@@ -53,7 +61,10 @@ class Indexer:
             dense_embeddings = np.array(dense_embeddings, dtype="float32")
 
             dense_distance = getattr(self.db, "dense_distance", None)
-            if dense_distance is not None and getattr(dense_distance, "name", str(dense_distance)) == "COSINE":
+            if (
+                dense_distance is not None
+                and getattr(dense_distance, "name", str(dense_distance)) == "COSINE"
+            ):
                 norms = np.linalg.norm(dense_embeddings, axis=1, keepdims=True) + 1e-9
                 dense_embeddings = dense_embeddings / norms
 
@@ -90,9 +101,7 @@ class Indexer:
                 point["vectors"] = vectors
 
             if sparse_embeddings is not None:
-                point["sparse_vectors"] = {
-                    "sparse": sparse_embeddings[i]
-                }
+                point["sparse_vectors"] = {"sparse": sparse_embeddings[i]}
 
             points.append(point)
 

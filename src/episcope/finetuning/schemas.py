@@ -117,25 +117,34 @@ def _deserialize_classification_result(data: Dict[str, Any]) -> ClassificationRe
     )
 
 
-def _serialize_decision(decision: Optional[ClassificationDecision]) -> Optional[Dict[str, Any]]:
+def _serialize_decision(
+    decision: Optional[ClassificationDecision],
+) -> Optional[Dict[str, Any]]:
     if decision is None:
         return None
     return {
         "paper_id": decision.paper_id,
         "metadata": decision.metadata.to_dict(),
         "result": _serialize_classification_result(decision.result),
-        "top_evidence": [_serialize_search_result(chunk) for chunk in decision.top_evidence],
+        "top_evidence": [
+            _serialize_search_result(chunk) for chunk in decision.top_evidence
+        ],
     }
 
 
-def _deserialize_decision(data: Optional[Dict[str, Any]]) -> Optional[ClassificationDecision]:
+def _deserialize_decision(
+    data: Optional[Dict[str, Any]],
+) -> Optional[ClassificationDecision]:
     if data is None:
         return None
     return ClassificationDecision(
         paper_id=data.get("paper_id", ""),
         metadata=PaperMetadata.from_dict(data.get("metadata", {}) or {}),
         result=_deserialize_classification_result(data.get("result", {}) or {}),
-        top_evidence=[_deserialize_search_result(item) for item in data.get("top_evidence", []) or []],
+        top_evidence=[
+            _deserialize_search_result(item)
+            for item in data.get("top_evidence", []) or []
+        ],
     )
 
 
@@ -175,7 +184,9 @@ def _deserialize_provenance(data: Optional[Dict[str, Any]]) -> Optional[Provenan
         return None
     return Provenance(
         answer=data.get("answer", ""),
-        evidences=[_deserialize_evidence(item) for item in data.get("evidences", []) or []],
+        evidences=[
+            _deserialize_evidence(item) for item in data.get("evidences", []) or []
+        ],
     )
 
 
@@ -215,7 +226,9 @@ def _deserialize_completion_sample(data: Dict[str, Any]) -> CompletionSample:
     )
 
 
-def _serialize_training(training: Optional[ClassificationTrainingRecord]) -> Optional[Dict[str, Any]]:
+def _serialize_training(
+    training: Optional[ClassificationTrainingRecord],
+) -> Optional[Dict[str, Any]]:
     if training is None:
         return None
     return {
@@ -223,12 +236,16 @@ def _serialize_training(training: Optional[ClassificationTrainingRecord]) -> Opt
         "result": _serialize_classification_result(training.result),
         "prompt_messages": _json_ready(training.prompt_messages),
         "raw_llm_response": training.raw_llm_response,
-        "all_samples": [_serialize_completion_sample(sample) for sample in training.all_samples],
+        "all_samples": [
+            _serialize_completion_sample(sample) for sample in training.all_samples
+        ],
         "gold_label": _json_ready(training.gold_label),
     }
 
 
-def _deserialize_training(data: Optional[Dict[str, Any]]) -> Optional[ClassificationTrainingRecord]:
+def _deserialize_training(
+    data: Optional[Dict[str, Any]],
+) -> Optional[ClassificationTrainingRecord]:
     if data is None:
         return None
     return ClassificationTrainingRecord(
@@ -236,7 +253,10 @@ def _deserialize_training(data: Optional[Dict[str, Any]]) -> Optional[Classifica
         result=_deserialize_classification_result(data.get("result", {}) or {}),
         prompt_messages=list(data.get("prompt_messages", []) or []),
         raw_llm_response=data.get("raw_llm_response"),
-        all_samples=[_deserialize_completion_sample(item) for item in data.get("all_samples", []) or []],
+        all_samples=[
+            _deserialize_completion_sample(item)
+            for item in data.get("all_samples", []) or []
+        ],
         gold_label=data.get("gold_label"),
     )
 

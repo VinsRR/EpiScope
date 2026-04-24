@@ -15,10 +15,9 @@ __version__ = "0.1.0"
 
 from episcope.db import mongo_academic_db, in_memory_academic_db
 from episcope import rag
-from episcope.rag import generation,indexing,ingestion, retrieval
+from episcope.rag import generation, indexing, ingestion, retrieval
 from episcope import workflows
 from episcope import utils
-
 
 
 __all__ = [
@@ -31,4 +30,5 @@ __all__ = [
     "indexing",
     "ingestion",
     "retrieval",
-    "__version__",]
+    "__version__",
+]

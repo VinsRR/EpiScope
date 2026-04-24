@@ -1,6 +1,10 @@
 import logging
 from .base import Embedder
-from .huggingface import HuggingFaceEmbedder, HuggingFaceSparseEmbedder, HuggingFaceLateEmbedder
+from .huggingface import (
+    HuggingFaceEmbedder,
+    HuggingFaceSparseEmbedder,
+    HuggingFaceLateEmbedder,
+)
 from .ollama import OllamaEmbedder
 from .openai import OpenAIEmbedder
 from .gemini import GeminiEmbedder
@@ -13,6 +17,7 @@ OPENAI_EMBEDDING_MODELS = {
     "text-embedding-3-small",
     "text-embedding-ada-002",
 }
+
 
 class EmbedderFactory:
     """Instantiates the correct embedder based on the model name."""
@@ -36,16 +41,24 @@ class EmbedderFactory:
             An instance of an Embedder subclass.
         """
         if "/" in model_name and not model_name.startswith("models/"):
-            logger.info(f"Detected HuggingFace model '{model_name}'. Creating HuggingFaceEmbedder.")
+            logger.info(
+                f"Detected HuggingFace model '{model_name}'. Creating HuggingFaceEmbedder."
+            )
             return HuggingFaceEmbedder(model=model_name, **kwargs)
         elif model_name in OPENAI_EMBEDDING_MODELS:
-            logger.info(f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder.")
+            logger.info(
+                f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder."
+            )
             return OpenAIEmbedder(model=model_name, **kwargs)
-        elif "embedding-001" in model_name: # not anymore like this....
-            logger.info(f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder.")
+        elif "embedding-001" in model_name:  # not anymore like this....
+            logger.info(
+                f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder."
+            )
             return GeminiEmbedder(model=model_name, **kwargs)
         else:
-            logger.info(f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder.")
+            logger.info(
+                f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder."
+            )
             return OllamaEmbedder(model=model_name, **kwargs)
 
     @staticmethod

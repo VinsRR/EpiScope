@@ -10,18 +10,15 @@ from transformers import AutoConfig, AutoModelForMaskedLM, AutoTokenizer, AutoMo
 from .base import Embedder, SparseEmbedder, LateEmbedder
 
 
-
-
-
 # SUPPORTED_CROSS_ENCODER_MODELS = {
 #     "cross-encoder/ms-marco-MiniLM-L6-v2",
 #     "cross-encoder/ms-marco-MiniLM-L4-v2",
 # }
 
 
-
-
-def _resolve_default_max_length(tokenizer, fallback: Optional[int] = None) -> Optional[int]:
+def _resolve_default_max_length(
+    tokenizer, fallback: Optional[int] = None
+) -> Optional[int]:
     model_max_length = getattr(tokenizer, "model_max_length", None)
     if model_max_length is None:
         return fallback
@@ -40,6 +37,8 @@ SUPPORTED_DENSE_MODELS = {
     "intfloat/e5-base-v2",
     "intfloat/e5-large-v2",
 }
+
+
 class HuggingFaceEmbedder(Embedder):
     """Dense text embedder backed by SentenceTransformer."""
 
@@ -127,12 +126,12 @@ class HuggingFaceEmbedder(Embedder):
         return vectors.tolist()
 
 
-
 SUPPORTED_SPARSE_MODELS = {
     "naver/splade-cocondenser-ensembledistil",
     "naver/splade-cocondenser-selfdistil",
     "naver/splade-v3-distilbert",
 }
+
 
 class HuggingFaceSparseEmbedder(SparseEmbedder):
     """Sparse embedder for SPLADE-style models."""
@@ -158,15 +157,19 @@ class HuggingFaceSparseEmbedder(SparseEmbedder):
         self._top_k = top_k
 
         self._tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
-        self._max_length = max_length if max_length is not None else _resolve_default_max_length(
-            self._tokenizer
+        self._max_length = (
+            max_length
+            if max_length is not None
+            else _resolve_default_max_length(self._tokenizer)
         )
 
         model_kwargs: Dict[str, Any] = {"trust_remote_code": True}
         if torch_dtype is not None:
             model_kwargs["torch_dtype"] = torch_dtype
 
-        self._encoder = AutoModelForMaskedLM.from_pretrained(model, **model_kwargs).to(device)
+        self._encoder = AutoModelForMaskedLM.from_pretrained(model, **model_kwargs).to(
+            device
+        )
         self._encoder.eval()
 
     @property
@@ -185,7 +188,7 @@ class HuggingFaceSparseEmbedder(SparseEmbedder):
         with torch.no_grad():
             logits = self._encoder(**encoded).logits  # [B, T, V]
             weights = torch.log1p(torch.relu(logits))
-            pooled = weights.max(dim=1).values        # [B, V]
+            pooled = weights.max(dim=1).values  # [B, V]
 
         outputs = []
         for row in pooled:
@@ -208,8 +211,10 @@ class HuggingFaceSparseEmbedder(SparseEmbedder):
     def embed_texts(self, texts: Iterable[str]) -> List[Dict[str, Any]]:
         texts_list = list(texts)
         outputs: List[Dict[str, Any]] = []
-        for i in tqdm(range(0, len(texts_list), self._batch_size), desc="Embedding sparse texts"):
-            outputs.extend(self._encode_batch(texts_list[i:i + self._batch_size]))
+        for i in tqdm(
+            range(0, len(texts_list), self._batch_size), desc="Embedding sparse texts"
+        ):
+            outputs.extend(self._encode_batch(texts_list[i : i + self._batch_size]))
         return outputs
 
 
@@ -238,6 +243,8 @@ _LATE_MODEL_PREFIXES = {
         "document": "[DocumentMarker]",
     },
 }
+
+
 class HuggingFaceLateEmbedder(LateEmbedder):
     """Late-interaction embedder supporting legacy ColBERT and prefix-based models.
 
@@ -268,12 +275,20 @@ class HuggingFaceLateEmbedder(LateEmbedder):
 
         # Resolve prefixes: explicit override > registry > empty string (legacy)
         _registry = _LATE_MODEL_PREFIXES.get(model, {})
-        self._query_prefix    = query_prefix    if query_prefix    is not None else _registry.get("query",    "")
-        self._document_prefix = document_prefix if document_prefix is not None else _registry.get("document", "")
+        self._query_prefix = (
+            query_prefix if query_prefix is not None else _registry.get("query", "")
+        )
+        self._document_prefix = (
+            document_prefix
+            if document_prefix is not None
+            else _registry.get("document", "")
+        )
 
         self._tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
-        self._max_length = max_length if max_length is not None else _resolve_default_max_length(
-            self._tokenizer, fallback=512
+        self._max_length = (
+            max_length
+            if max_length is not None
+            else _resolve_default_max_length(self._tokenizer, fallback=512)
         )
 
         model_kwargs: Dict[str, Any] = {"trust_remote_code": True}
@@ -325,11 +340,13 @@ class HuggingFaceLateEmbedder(LateEmbedder):
 
         return batch_outputs
 
-    def _embed_with_prefix(self, texts: List[str], prefix: str, desc: str) -> List[List[List[float]]]:
+    def _embed_with_prefix(
+        self, texts: List[str], prefix: str, desc: str
+    ) -> List[List[List[float]]]:
         prefixed = self._apply_prefix(texts, prefix)
         outputs: List[List[List[float]]] = []
         for i in tqdm(range(0, len(prefixed), self._batch_size), desc=desc):
-            outputs.extend(self._encode_batch(prefixed[i:i + self._batch_size]))
+            outputs.extend(self._encode_batch(prefixed[i : i + self._batch_size]))
         return outputs
 
     # --- Query-side -----------------------------------------------------
@@ -338,7 +355,9 @@ class HuggingFaceLateEmbedder(LateEmbedder):
         return self._encode_batch(self._apply_prefix([text], self._query_prefix))[0]
 
     def embed_queries(self, texts: Iterable[str]) -> List[List[List[float]]]:
-        return self._embed_with_prefix(list(texts), self._query_prefix, desc="Encoding queries")
+        return self._embed_with_prefix(
+            list(texts), self._query_prefix, desc="Encoding queries"
+        )
 
     # --- Document-side --------------------------------------------------
 
@@ -346,4 +365,6 @@ class HuggingFaceLateEmbedder(LateEmbedder):
         return self._encode_batch(self._apply_prefix([text], self._document_prefix))[0]
 
     def embed_documents(self, texts: Iterable[str]) -> List[List[List[float]]]:
-        return self._embed_with_prefix(list(texts), self._document_prefix, desc="Encoding documents")
+        return self._embed_with_prefix(
+            list(texts), self._document_prefix, desc="Encoding documents"
+        )

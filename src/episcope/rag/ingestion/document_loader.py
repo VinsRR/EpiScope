@@ -29,10 +29,9 @@ factory.
 from __future__ import annotations
 
 import abc
-import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Sequence
+from typing import Any, Dict, List, Optional, Tuple, Union, Sequence
 
 import difflib
 import requests
@@ -47,10 +46,12 @@ logger = logging.getLogger(__name__)
 # try fast fuzzy engine, fallback to difflib
 try:
     from rapidfuzz import fuzz
+
     HAS_RAPIDFUZZ = True
 except ImportError:
     fuzz = None
     HAS_RAPIDFUZZ = False
+
 
 @dataclass
 class CrossrefConfig:
@@ -58,6 +59,7 @@ class CrossrefConfig:
     min_title_score: float = 0.9
     user_agent_email: str = "user@example.com"
     timeout: int = 10
+
 
 def fetch_doi_from_crossref(
     title: str,
@@ -103,12 +105,15 @@ def fetch_doi_from_crossref(
         except Exception:
             pass
 
-    headers = {
-        "User-Agent": f"ReferenceMatcher/1.0 (mailto:{config.user_agent_email})"
-    }
+    headers = {"User-Agent": f"ReferenceMatcher/1.0 (mailto:{config.user_agent_email})"}
 
     try:
-        resp = requests.get("https://api.crossref.org/works", params=params, headers=headers, timeout=config.timeout)
+        resp = requests.get(
+            "https://api.crossref.org/works",
+            params=params,
+            headers=headers,
+            timeout=config.timeout,
+        )
         resp.raise_for_status()
         data = resp.json()
         items = data.get("message", {}).get("items", []) or []
@@ -125,7 +130,9 @@ def fetch_doi_from_crossref(
             if HAS_RAPIDFUZZ and fuzz is not None:
                 score = fuzz.token_set_ratio(title, it_title) / 100.0
             else:
-                score = difflib.SequenceMatcher(None, title.lower(), it_title.lower()).ratio()
+                score = difflib.SequenceMatcher(
+                    None, title.lower(), it_title.lower()
+                ).ratio()
             if score > best_score:
                 best_score = score
                 best = it
@@ -173,11 +180,14 @@ class AbstractDocumentLoader(abc.ABC):
     document.  Optionally subclasses may override :meth:`load_directory`
     to support batch loading.
     """
+
     def __init__(self) -> None:
         super().__init__()
 
     @abc.abstractmethod
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
+    def load(
+        self, file_path: Union[str, Path]
+    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
         """Extract structured sections, metadata, and references from a document.
 
         Args:
@@ -188,7 +198,9 @@ class AbstractDocumentLoader(abc.ABC):
             support reference extraction, ``references`` will be an empty list.
         """
 
-    def load_directory(self, dir_path: Union[str, Path]) -> Dict[str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]]:
+    def load_directory(
+        self, dir_path: Union[str, Path]
+    ) -> Dict[str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]]:
         """Extract documents from all supported files under a directory.
 
         The default implementation walks the directory tree and
@@ -203,7 +215,9 @@ class AbstractDocumentLoader(abc.ABC):
             A mapping from file names (as strings) to the extracted
             sections, metadata, and references for each file.
         """
-        results: Dict[str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]] = {}
+        results: Dict[
+            str, Tuple[List[StructuredSection], PaperMetadata, List[Reference]]
+        ] = {}
         path = Path(dir_path)
         if not path.is_dir():
             raise ValueError(f"Expected directory: {dir_path}")
@@ -215,25 +229,25 @@ class AbstractDocumentLoader(abc.ABC):
 
     def _is_supported(self, file_path: Path) -> bool:
         """Return True if this loader can process the given file extension."""
-        return file_path.suffix.lower() in {'.pdf', '.txt', '.md', '.text'}
+        return file_path.suffix.lower() in {".pdf", ".txt", ".md", ".text"}
 
     def _get_unique_doc_id(self, paper_id: str, metadata: PaperMetadata) -> str:
         """Generate a unique document ID."""
-        if hasattr(metadata, 'doi') and metadata.doi:
+        if hasattr(metadata, "doi") and metadata.doi:
             return metadata.doi
 
-        title = getattr(metadata, 'title', None)
+        title = getattr(metadata, "title", None)
         if title:
-            authors = getattr(metadata, 'authors', [])
+            authors = getattr(metadata, "authors", [])
             author_names = []
             for author in authors:
-                if hasattr(author, 'full_name'):
+                if hasattr(author, "full_name"):
                     author_names.append(author.full_name)
                 elif isinstance(author, str):
                     author_names.append(author)
 
-            journal = getattr(metadata, 'journal', None)
-            year = getattr(metadata, 'year', None)
+            journal = getattr(metadata, "journal", None)
+            year = getattr(metadata, "year", None)
 
             config = CrossrefConfig()
             try:
@@ -242,7 +256,7 @@ class AbstractDocumentLoader(abc.ABC):
                     config=config,
                     authors=author_names,
                     journal=journal,
-                    year=year
+                    year=year,
                 )
                 if crossref_result.get("doi"):
                     return crossref_result["doi"]
@@ -338,10 +352,13 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
     (e.g., ``.txt`` or ``.md``) the loader simply reads the file
     contents and wraps it in a single :class:`StructuredSection`.
     """
+
     def __init__(self) -> None:
         super().__init__()
 
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
+    def load(
+        self, file_path: Union[str, Path]
+    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -358,7 +375,11 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
         """Parse a PDF using Unstructured, falling back to simpler PDF extraction."""
         try:
             from unstructured.partition.pdf import partition_pdf
-            from unstructured.documents.elements import Title, Header, Text as TextElement
+            from unstructured.documents.elements import (
+                Title,
+                Header,
+                Text as TextElement,
+            )
         except ImportError:
             logger.warning(
                 "Unstructured PDF parsing is unavailable. Falling back to basic PDF text extraction."
@@ -383,7 +404,9 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             if isinstance(el, (Title, Header)):
                 if current_content:
                     sections.append(
-                        StructuredSection(title=current_title, content="\n".join(current_content))
+                        StructuredSection(
+                            title=current_title, content="\n".join(current_content)
+                        )
                     )
                     current_content = []
                 current_title = el.text.strip()
@@ -394,13 +417,17 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
 
         if current_content:
             sections.append(
-                StructuredSection(title=current_title, content="\n".join(current_content))
+                StructuredSection(
+                    title=current_title, content="\n".join(current_content)
+                )
             )
 
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
 
-    def _load_pdf_with_pypdf(self, path: Path) -> Tuple[List[StructuredSection], PaperMetadata]:
+    def _load_pdf_with_pypdf(
+        self, path: Path
+    ) -> Tuple[List[StructuredSection], PaperMetadata]:
         """Extract text from a PDF without OCR-heavy dependencies."""
         try:
             from pypdf import PdfReader
@@ -411,12 +438,11 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
 
         try:
             reader = PdfReader(str(path))
-            page_texts = [
-                (page.extract_text() or "").strip()
-                for page in reader.pages
-            ]
+            page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
         except Exception as exc:
-            raise RuntimeError(f"Failed to extract text from PDF {path}: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to extract text from PDF {path}: {exc}"
+            ) from exc
 
         content = "\n\n".join(text for text in page_texts if text)
         if not content:
@@ -454,16 +480,25 @@ class GrobidDocumentLoader(AbstractDocumentLoader):
     """
 
     def __init__(self, grobid_url: Optional[str] = None) -> None:
-        self.grobid_url = grobid_url or env("GROBID_URL", "http://localhost:8070") or "http://localhost:8070"
+        self.grobid_url = (
+            grobid_url
+            or env("GROBID_URL", "http://localhost:8070")
+            or "http://localhost:8070"
+        )
         self._fallback = UnstructuredDocumentLoader()
         try:
             from episcope.rag.ingestion.local_grobid_client import GrobidClient
+
             self.client = GrobidClient(grobid_server=self.grobid_url)
         except ImportError as e:
-            logger.warning(f"Could not import GrobidClient, GROBID loader will not be available: {e}")
+            logger.warning(
+                f"Could not import GrobidClient, GROBID loader will not be available: {e}"
+            )
             self.client = None
 
-    def load(self, file_path: Union[str, Path]) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
+    def load(
+        self, file_path: Union[str, Path]
+    ) -> Tuple[List[StructuredSection], PaperMetadata, List[Reference]]:
         """Load a PDF and return sections, metadata and references."""
         path = Path(file_path)
         if path.suffix.lower() != ".pdf" or not self.client:

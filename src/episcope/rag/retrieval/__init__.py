@@ -14,6 +14,7 @@ can still import this module.  When dependencies are missing, a dummy
 discovery.  This stub raises on use to indicate that the real
 implementation is unavailable.
 """
+
 from __future__ import annotations
 from typing import Any
 
@@ -57,10 +58,13 @@ try:
     # fastembed are not installed.  In that case, we provide a stub
     # class instead.
     from episcope.rag.factory import RAGFactory as _ConcreteRAGFactory
+
     RAGFactory = _ConcreteRAGFactory
 except Exception:
+
     class RAGFactory:  # type: ignore
         """Fallback RAGFactory used when optional dependencies are missing."""
+
         @classmethod
         def get(cls, *args: Any, **kwargs: Any) -> Any:
             """Raise ImportError since no RAG implementations are available."""

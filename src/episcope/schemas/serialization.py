@@ -13,19 +13,19 @@ class Serializable(ABC):
 
     @classmethod
     @abstractmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Serializable':
+    def from_dict(cls, data: Dict[str, Any]) -> "Serializable":
         """Create object from dictionary representation."""
         pass
 
     def to_json(self, filepath: str) -> None:
         """Save object to JSON file."""
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def from_json(cls, filepath: str) -> 'Serializable':
+    def from_json(cls, filepath: str) -> "Serializable":
         """Load object from JSON file."""
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         return cls.from_dict(data)
 
@@ -40,7 +40,7 @@ class SerializableList(Serializable):
         return {"items": [item.to_dict() for item in self.items]}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SerializableList':
+    def from_dict(cls, data: Dict[str, Any]) -> "SerializableList":
         # This will be overridden in subclasses with specific item types
         items = []
         for item_data in data.get("items", []):

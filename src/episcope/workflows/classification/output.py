@@ -91,7 +91,9 @@ class ClassificationTrainingRecord:
         completion: Optional[str] = None,
         record_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        sample = self.to_json_validity_sft_sample(completion=completion, record_id=record_id)
+        sample = self.to_json_validity_sft_sample(
+            completion=completion, record_id=record_id
+        )
         if sample is None:
             return None
         sample["label"] = self.result.classification
@@ -112,7 +114,9 @@ class ClassificationTrainingRecord:
 
     def to_dpo_pair(self) -> Optional[Dict[str, Any]]:
         chosen = next((sample for sample in self.all_samples if sample.parsed_ok), None)
-        rejected = next((sample for sample in self.all_samples if not sample.parsed_ok), None)
+        rejected = next(
+            (sample for sample in self.all_samples if not sample.parsed_ok), None
+        )
         if not chosen or not rejected:
             return None
         return {

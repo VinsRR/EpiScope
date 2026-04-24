@@ -11,7 +11,11 @@ from episcope.rag.retrieval.candidates import (
     SemanticCandidateRetriever,
     SparseCandidateRetriever,
 )
-from episcope.rag.retrieval.components import CandidateRetriever, FusionStrategy, QueryTransformer
+from episcope.rag.retrieval.components import (
+    CandidateRetriever,
+    FusionStrategy,
+    QueryTransformer,
+)
 from episcope.rag.retrieval.fusion import RRFFusion
 from episcope.rag.retrieval.rerankers import LateInteractionReranker
 from episcope.rag.retrieval.transforms import HyDEQueryTransformer
@@ -49,10 +53,16 @@ class Retriever(BaseRetriever):
 
         self.query_transformers = list(query_transformers or [])
         if hyde:
-            self.query_transformers.append(HyDEQueryTransformer(hyde=True, llm_client=llm_client))
+            self.query_transformers.append(
+                HyDEQueryTransformer(hyde=True, llm_client=llm_client)
+            )
 
-        self.candidate_retrievers = list(candidate_retrievers or self._build_default_candidate_retrievers())
-        self.fusion = fusion or (RRFFusion(k=rrf_k) if len(self.candidate_retrievers) > 1 else None)
+        self.candidate_retrievers = list(
+            candidate_retrievers or self._build_default_candidate_retrievers()
+        )
+        self.fusion = fusion or (
+            RRFFusion(k=rrf_k) if len(self.candidate_retrievers) > 1 else None
+        )
         self.late_reranker = late_reranker or self._build_default_late_reranker()
 
     @property
@@ -64,19 +74,27 @@ class Retriever(BaseRetriever):
         retrievers: List[CandidateRetriever] = []
 
         if caps.get("dense") and caps.get("sparse"):
-            retrievers.append(HybridCandidateRetriever(self.vectordb, prefetch_k=self.prefetch_k))
+            retrievers.append(
+                HybridCandidateRetriever(self.vectordb, prefetch_k=self.prefetch_k)
+            )
         elif caps.get("dense"):
             retrievers.append(SemanticCandidateRetriever(self.vectordb))
         elif caps.get("sparse"):
             retrievers.append(SparseCandidateRetriever(self.vectordb))
         if not retrievers:
-            raise ValueError("No usable retrieval modality is available in the collection.")
+            raise ValueError(
+                "No usable retrieval modality is available in the collection."
+            )
 
         return retrievers
 
     def _build_default_late_reranker(self) -> Optional[LateInteractionReranker]:
         caps = self.vectordb.capabilities()
-        if not self.use_rerank or self.cross_encoder is not None or not caps.get("late", False):
+        if (
+            not self.use_rerank
+            or self.cross_encoder is not None
+            or not caps.get("late", False)
+        ):
             return None
         return LateInteractionReranker(self.vectordb)
 

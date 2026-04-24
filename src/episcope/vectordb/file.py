@@ -3,9 +3,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
-import logging
 
 from .base import AbstractVectorDB
+
 
 class FileDB(AbstractVectorDB):
     """A file-based vector database for storing paper-specific indexes."""
@@ -27,7 +27,6 @@ class FileDB(AbstractVectorDB):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.save()
-
 
     def _load(self):
         try:
@@ -82,13 +81,17 @@ class FileDB(AbstractVectorDB):
                 self._chunking_config = chunking_config
                 self._dirty = True
             elif self._chunking_config != chunking_config:
-                raise ValueError(f"Inconsistent chunking config. DB uses '{self._chunking_config}', but upsert was called with '{chunking_config}'.")
+                raise ValueError(
+                    f"Inconsistent chunking config. DB uses '{self._chunking_config}', but upsert was called with '{chunking_config}'."
+                )
 
         points_list = list(points)
         if not points_list:
             return
 
-        if not self._loaded:  # if this is the first instantiation create the payload keys
+        if (
+            not self._loaded
+        ):  # if this is the first instantiation create the payload keys
             for p in points_list:
                 payload = p.setdefault("payload", {})
                 if namespace:
@@ -111,7 +114,9 @@ class FileDB(AbstractVectorDB):
         if not updated_points:
             return
 
-        self._embeddings = np.array([p["vector"] for p in updated_points], dtype="float32")
+        self._embeddings = np.array(
+            [p["vector"] for p in updated_points], dtype="float32"
+        )
         self._metadata = [p["payload"] for p in updated_points]
         self._dirty = True
 
@@ -132,7 +137,8 @@ class FileDB(AbstractVectorDB):
         indices_to_search = list(range(len(metadata)))
         if combined_filter:
             indices_to_search = [
-                i for i, meta in enumerate(metadata)
+                i
+                for i, meta in enumerate(metadata)
                 if all(meta.get(key) == value for key, value in combined_filter.items())
             ]
             if not indices_to_search:
@@ -155,7 +161,9 @@ class FileDB(AbstractVectorDB):
             results.append({**meta, "score": float(sims[idx_local])})
         return results
 
-    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(
+        self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None
+    ) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
         combined_filter = dict(filter or {})
         if namespace:
@@ -165,7 +173,8 @@ class FileDB(AbstractVectorDB):
             return self._metadata
 
         return [
-            point for point in self._metadata
+            point
+            for point in self._metadata
             if all(point.get(key) == value for key, value in combined_filter.items())
         ]
 
@@ -203,7 +212,7 @@ class FileDB(AbstractVectorDB):
         config = {
             "embed_model": self._model,
             "chunking_config": self._chunking_config,
-            "payload_keys": list(self._payload_keys)
+            "payload_keys": list(self._payload_keys),
         }
         with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)

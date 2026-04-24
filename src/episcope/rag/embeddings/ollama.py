@@ -2,6 +2,7 @@ from typing import Iterable, List
 from .base import Embedder
 from episcope.clients import OllamaClient
 
+
 class OllamaEmbedder(Embedder):
     def __init__(self, model: str, client: OllamaClient = None):
         self._model = model

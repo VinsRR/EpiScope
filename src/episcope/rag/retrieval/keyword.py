@@ -1,11 +1,12 @@
 import logging
-from typing import Any, Dict, List, Sequence, Optional
+from typing import Any, Dict, Sequence, Optional
 
 from episcope.rag.retrieval.base import BaseRetriever
 from episcope.vectordb.base import AbstractVectorDB
 from episcope.schemas import SearchResult
 
 logger = logging.getLogger(__name__)
+
 
 class KeywordRetriever(BaseRetriever):
     """Performs keyword-based search over documents in a VectorDB."""
@@ -16,7 +17,7 @@ class KeywordRetriever(BaseRetriever):
 
     def retrieve(
         self,
-        query: str, # space-separated keywords
+        query: str,  # space-separated keywords
         *,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
@@ -35,7 +36,9 @@ class KeywordRetriever(BaseRetriever):
 
         try:
             # this line gets all chunks for the paper_id (if namespace is paper-scoped)....
-            chunks = self.vectordb.get_points(namespace=namespace, filter=final_filter if final_filter else None)
+            chunks = self.vectordb.get_points(
+                namespace=namespace, filter=final_filter if final_filter else None
+            )
 
             hits = []
             for chunk in chunks:

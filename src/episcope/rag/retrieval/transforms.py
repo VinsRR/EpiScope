@@ -22,7 +22,9 @@ class HyDEQueryTransformer(QueryTransformer):
         self.num_docs = num_docs
 
         if hyde is True:
-            self.hyde: Optional[HYDE] = HYDE(client=llm_client if llm_client else OllamaClient())
+            self.hyde: Optional[HYDE] = HYDE(
+                client=llm_client if llm_client else OllamaClient()
+            )
         elif isinstance(hyde, HYDE):
             self.hyde = hyde
         else:
@@ -33,7 +35,9 @@ class HyDEQueryTransformer(QueryTransformer):
             return query
 
         hypothetical_docs = self.hyde.generate_multiple(query, num_docs=self.num_docs)
-        valid_docs = [doc for doc in hypothetical_docs if doc and "failed" not in doc.lower()]
+        valid_docs = [
+            doc for doc in hypothetical_docs if doc and "failed" not in doc.lower()
+        ]
         if not valid_docs:
             return query
 

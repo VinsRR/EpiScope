@@ -1,4 +1,3 @@
-import dataclasses
 from typing import TYPE_CHECKING, List, Optional
 
 from episcope.db.academic_db import AcademicDB
@@ -6,8 +5,13 @@ from episcope.rag.generation.base import Generator
 from episcope.schemas import PaperMetadata, SearchResult
 from episcope.rag.retrieval.base import BaseRetriever
 from episcope.workflows.base import AbstractRAG
-from episcope.workflows.classification.config import BaseClassifierConfig, PaperTypeClassifierConfig
-from episcope.workflows.classification.evidence_selection import ClassificationEvidenceSelector
+from episcope.workflows.classification.config import (
+    BaseClassifierConfig,
+    PaperTypeClassifierConfig,
+)
+from episcope.workflows.classification.evidence_selection import (
+    ClassificationEvidenceSelector,
+)
 from episcope.workflows.classification.evidence_reranking import (
     EvidenceRerankingStrategy,
     GlobalCrossEncoderReranker,
@@ -35,6 +39,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Classifier
 # ---------------------------------------------------------------------------
+
 
 class PaperClassifier(AbstractRAG):
     """Multi-modal paper classification using RAG and semantic similarity."""
@@ -129,8 +134,6 @@ class PaperClassifier(AbstractRAG):
         )
         self.training_capture_sink = training_capture_sink
 
-
-
     def run(
         self,
         paper_id: str,
@@ -194,10 +197,10 @@ class PaperClassifier(AbstractRAG):
         if self.academic_db:
             return self.academic_db.get_paper_metadata(paper_id, self.strategy_name)
         if metadata is None:
-            raise ValueError("metadata must be provided when academic_db is not available.")
+            raise ValueError(
+                "metadata must be provided when academic_db is not available."
+            )
         return metadata
-
-
 
     def get_relevant_chunks(
         self,

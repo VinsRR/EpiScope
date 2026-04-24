@@ -15,4 +15,6 @@ class PrecisionMinerResponseParser:
 
     @staticmethod
     def fallback(error: Exception) -> ExtractionResult:
-        return ExtractionResult(description=f"Parsing/validation failed: {error}", items=[])
+        return ExtractionResult(
+            description=f"Parsing/validation failed: {error}", items=[]
+        )

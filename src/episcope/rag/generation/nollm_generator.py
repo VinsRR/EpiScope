@@ -33,13 +33,15 @@ class NoLLMGenerator(AbstractGenerator):
             answer_parts.append(content)
             paper_id = ctx.paper_id
             section = ctx.section_type
-            evidences.append(Evidence(
-                paper_id=paper_id,
-                snippet=content,
-                section=section,
-                index_version=None,
-                model_id="simple-generator",
-                prompt_id="concatenate",
-            ))
+            evidences.append(
+                Evidence(
+                    paper_id=paper_id,
+                    snippet=content,
+                    section=section,
+                    index_version=None,
+                    model_id="simple-generator",
+                    prompt_id="concatenate",
+                )
+            )
         full_answer = "\n\n".join(answer_parts).strip()
         return Provenance(answer=full_answer, evidences=evidences)

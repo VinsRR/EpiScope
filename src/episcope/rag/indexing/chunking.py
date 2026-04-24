@@ -37,14 +37,12 @@ class Chunker(ABC):
         return {}
 
 
-
-
-
 def _split_into_sentences(text: str) -> List[str]:
     """Very light sentence splitter (period/exclamation/question)."""
     sentence_endings = re.compile(r"(?<=[.!?])\s+")
     parts = sentence_endings.split(text.strip())
     return [p.strip() for p in parts if p and p.strip()]
+
 
 def chunk_paper(
     chunker: Chunker,
@@ -89,15 +87,11 @@ def chunk_paper(
     return chunks
 
 
-
-
-
 class NoChunker(Chunker):
     """Treats each input text as a single chunk."""
 
     def chunk(self, text: str) -> List[str]:
         return [text]
-
 
 
 class SentenceChunker(Chunker):
@@ -201,11 +195,6 @@ class RecursiveChunker(Chunker):
         return sub_chunks
 
 
-
-
-
-
-
 class SemanticChunker(Chunker):
     """Groups sentences into chunks based on semantic similarity (cosine).
 
@@ -269,8 +258,9 @@ class SemanticChunker(Chunker):
         # default: "chunk"
         return self._chunk_by_compare_to_chunk(sentences, embs)
 
-
-    def _chunk_by_compare_to_chunk(self, sentences: List[str], embs: np.ndarray) -> List[str]:
+    def _chunk_by_compare_to_chunk(
+        self, sentences: List[str], embs: np.ndarray
+    ) -> List[str]:
         """Strategy 1 (default): compare to the *whole chunk*.
 
         Useful when you want each chunk to remain *globally coherent*. We maintain
@@ -312,7 +302,9 @@ class SemanticChunker(Chunker):
 
         return chunks
 
-    def _chunk_by_compare_to_last(self, sentences: List[str], embs: np.ndarray) -> List[str]:
+    def _chunk_by_compare_to_last(
+        self, sentences: List[str], embs: np.ndarray
+    ) -> List[str]:
         """Strategy 2: compare to the *last sentence only*.
 
         Useful when you prioritize *simplicity and speed* and your documents are

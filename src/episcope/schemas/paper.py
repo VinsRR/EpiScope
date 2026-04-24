@@ -3,9 +3,11 @@ from dataclasses import asdict, dataclass, field
 
 from .serialization import Serializable, SerializableList
 
+
 @dataclass
 class StructuredSection(Serializable):
     """Represents a structured section from GROBID parsing."""
+
     title: str = ""
     content: str = ""
     section_type: str = "Other"
@@ -16,19 +18,20 @@ class StructuredSection(Serializable):
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'StructuredSection':
+    def from_dict(cls, data: Dict[str, Any]) -> "StructuredSection":
         return cls(
             title=data.get("title", ""),
             content=data.get("content", ""),
             section_type=data.get("section_type", "Other"),
             references_cited=data.get("references_cited", []),
-            page_number=data.get("page_number")
+            page_number=data.get("page_number"),
         )
 
 
 @dataclass
 class Reference(Serializable):
     """Represents a bibliographic reference."""
+
     raw_text: str = ""
     is_data_source: bool = False
     title: str = ""
@@ -42,7 +45,7 @@ class Reference(Serializable):
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Reference':
+    def from_dict(cls, data: Dict[str, Any]) -> "Reference":
         return cls(
             raw_text=data.get("raw_text", ""),
             is_data_source=data.get("is_data_source", False),
@@ -51,12 +54,14 @@ class Reference(Serializable):
             year=data.get("year"),
             journal=data.get("journal", ""),
             doi=data.get("doi", ""),
-            url=data.get("url", "")
+            url=data.get("url", ""),
         )
+
 
 @dataclass
 class PaperMetadata(Serializable):
     """Represents metadata for an academic paper."""
+
     title: str = ""
     abstract: str = ""
     authors: List[str] = field(default_factory=list)
@@ -71,7 +76,7 @@ class PaperMetadata(Serializable):
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'PaperMetadata':
+    def from_dict(cls, data: Dict[str, Any]) -> "PaperMetadata":
         return cls(
             title=data.get("title", ""),
             abstract=data.get("abstract", ""),
@@ -81,7 +86,7 @@ class PaperMetadata(Serializable):
             doi=data.get("doi", ""),
             keywords=data.get("keywords", []),
             first_author=data.get("first_author", ""),
-            file_path=data.get("file_path")
+            file_path=data.get("file_path"),
         )
 
 

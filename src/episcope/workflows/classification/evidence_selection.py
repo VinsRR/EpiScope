@@ -27,7 +27,9 @@ class ClassificationEvidenceSelector:
     ) -> None:
         self.retriever = retriever
         self.config = config
-        self.evidence_reranker = (evidence_reranker or NoOpEvidenceReranker()).configure(config)
+        self.evidence_reranker = (
+            evidence_reranker or NoOpEvidenceReranker()
+        ).configure(config)
 
     def select(self, paper_id: str, *, top_k: int) -> List[SearchResult]:
         category_results = self._collect_retrieved_candidates(paper_id, top_k=top_k)
@@ -43,7 +45,9 @@ class ClassificationEvidenceSelector:
         category_results: DefaultDict[str, Dict[str, SearchResult]] = defaultdict(dict)
         for category, queries in self.config.template_paragraphs.items():
             for query in queries:
-                retrieved = self.retriever.retrieve_by_paper(query, paper_id, top_k=top_k)
+                retrieved = self.retriever.retrieve_by_paper(
+                    query, paper_id, top_k=top_k
+                )
                 self._merge_category_results(category_results[category], retrieved)
         return dict(category_results)
 
@@ -57,7 +61,9 @@ class ClassificationEvidenceSelector:
         ranked.sort(key=result_score, reverse=True)
         return ranked[:top_k]
 
-    def _best_labeled_chunks(self, category_results: CategoryResults) -> List[SearchResult]:
+    def _best_labeled_chunks(
+        self, category_results: CategoryResults
+    ) -> List[SearchResult]:
         winners: Dict[str, tuple[str, SearchResult]] = {}
         for category, chunks_by_text in category_results.items():
             for text, chunk in chunks_by_text.items():

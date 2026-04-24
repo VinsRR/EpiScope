@@ -29,7 +29,9 @@ class RRFFusion(FusionStrategy):
                 doc_id = str(doc_id)
                 if doc_id not in items:
                     items[doc_id] = dict(item)
-                fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + 1.0 / (self.k + rank + 1)
+                fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + 1.0 / (
+                    self.k + rank + 1
+                )
 
         sorted_docs = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 

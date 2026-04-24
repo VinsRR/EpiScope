@@ -45,14 +45,20 @@ class QdrantDB(AbstractVectorDB):
         late_as_reranker: bool = True,
     ) -> None:
         if QdrantClient is None:
-            raise ImportError("qdrant-client is not installed. Please install it with 'pip install qdrant-client'")
+            raise ImportError(
+                "qdrant-client is not installed. Please install it with 'pip install qdrant-client'"
+            )
 
         if not any([use_dense, use_sparse, use_late]):
-            raise ValueError("At least one modality must be enabled: dense, sparse, or late.")
+            raise ValueError(
+                "At least one modality must be enabled: dense, sparse, or late."
+            )
 
         self.collection = collection
         self.batch_size = batch_size
-        self.client = QdrantClient(url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc)
+        self.client = QdrantClient(
+            url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc
+        )
 
         self.use_dense = use_dense
         self.use_sparse = use_sparse
@@ -70,11 +76,15 @@ class QdrantDB(AbstractVectorDB):
         self._payload_keys: Optional[set[str]] = None
 
         try:
-            collection_info = self.client.get_collection(collection_name=self.collection)
+            collection_info = self.client.get_collection(
+                collection_name=self.collection
+            )
 
             # Existing collection: inspect capabilities
             vectors_config = collection_info.config.params.vectors
-            sparse_vectors_config = getattr(collection_info.config.params, "sparse_vectors", None)
+            sparse_vectors_config = getattr(
+                collection_info.config.params, "sparse_vectors", None
+            )
 
             if isinstance(vectors_config, dict):
                 self.use_dense = self.dense_vector_name in vectors_config
@@ -82,7 +92,9 @@ class QdrantDB(AbstractVectorDB):
 
                 if self.use_dense:
                     self.dense_dim = vectors_config[self.dense_vector_name].size
-                    self.dense_distance = vectors_config[self.dense_vector_name].distance
+                    self.dense_distance = vectors_config[
+                        self.dense_vector_name
+                    ].distance
 
                 if self.use_late:
                     self.late_dim = vectors_config[self.late_vector_name].size
@@ -93,7 +105,10 @@ class QdrantDB(AbstractVectorDB):
                     "Please migrate or recreate it."
                 )
 
-            self.use_sparse = bool(sparse_vectors_config and self.sparse_vector_name in sparse_vectors_config)
+            self.use_sparse = bool(
+                sparse_vectors_config
+                and self.sparse_vector_name in sparse_vectors_config
+            )
 
         except Exception:
             vectors_config: Dict[str, Any] = {}
@@ -101,7 +116,9 @@ class QdrantDB(AbstractVectorDB):
 
             if use_dense:
                 if dense_dim is None:
-                    raise ValueError("dense_dim must be provided when creating a collection with dense vectors.")
+                    raise ValueError(
+                        "dense_dim must be provided when creating a collection with dense vectors."
+                    )
                 vectors_config[self.dense_vector_name] = models.VectorParams(
                     size=dense_dim,
                     distance=self.dense_distance,
@@ -109,7 +126,9 @@ class QdrantDB(AbstractVectorDB):
 
             if use_late:
                 if late_dim is None:
-                    raise ValueError("late_dim must be provided when creating a collection with late-interaction vectors.")
+                    raise ValueError(
+                        "late_dim must be provided when creating a collection with late-interaction vectors."
+                    )
                 late_kwargs: Dict[str, Any] = {
                     "size": late_dim,
                     "distance": self.late_distance,
@@ -119,14 +138,21 @@ class QdrantDB(AbstractVectorDB):
                 }
                 if late_as_reranker:
                     late_kwargs["hnsw_config"] = models.HnswConfigDiff(m=0)
-                vectors_config[self.late_vector_name] = models.VectorParams(**late_kwargs)
+                vectors_config[self.late_vector_name] = models.VectorParams(
+                    **late_kwargs
+                )
 
             if use_sparse:
-                sparse_vectors_config[self.sparse_vector_name] = models.SparseVectorParams()
+                sparse_vectors_config[self.sparse_vector_name] = (
+                    models.SparseVectorParams()
+                )
 
             logger.info(
                 "Creating collection '%s' with modalities: dense=%s sparse=%s late=%s",
-                self.collection, use_dense, use_sparse, use_late
+                self.collection,
+                use_dense,
+                use_sparse,
+                use_late,
             )
 
             self.client.recreate_collection(
@@ -230,7 +256,9 @@ class QdrantDB(AbstractVectorDB):
 
         if namespace:
             must_conditions.append(
-                models.FieldCondition(key="paper_id", match=models.MatchValue(value=namespace))
+                models.FieldCondition(
+                    key="paper_id", match=models.MatchValue(value=namespace)
+                )
             )
 
         if filter:
@@ -240,9 +268,7 @@ class QdrantDB(AbstractVectorDB):
                 )
 
         if ids:
-            must_conditions.append(
-                models.HasIdCondition(has_id=ids)
-            )
+            must_conditions.append(models.HasIdCondition(has_id=ids))
 
         return models.Filter(must=must_conditions) if must_conditions else None
 
@@ -254,18 +280,24 @@ class QdrantDB(AbstractVectorDB):
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
         if not self.use_dense:
-            raise ValueError("Dense search requested, but this collection has no dense vectors.")
+            raise ValueError(
+                "Dense search requested, but this collection has no dense vectors."
+            )
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
         results = self.client.search(
             collection_name=self.collection,
-            query_vector=models.NamedVector(name=self.dense_vector_name, vector=query_vector),
+            query_vector=models.NamedVector(
+                name=self.dense_vector_name, vector=query_vector
+            ),
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
         )
-        return [{**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results]
+        return [
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+        ]
 
     def search_sparse(
         self,
@@ -275,7 +307,9 @@ class QdrantDB(AbstractVectorDB):
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
         if not self.use_sparse:
-            raise ValueError("Sparse search requested, but this collection has no sparse vectors.")
+            raise ValueError(
+                "Sparse search requested, but this collection has no sparse vectors."
+            )
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
@@ -292,11 +326,17 @@ class QdrantDB(AbstractVectorDB):
             with_payload=True,
             query_filter=query_filter,
         )
-        return [{**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results]
+        return [
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+        ]
 
-    def search_hybrid(self, dense_query, sparse_query, top_k, prefetch_k, namespace=None, filter=None):
+    def search_hybrid(
+        self, dense_query, sparse_query, top_k, prefetch_k, namespace=None, filter=None
+    ):
         if not self.has_dense or not self.has_sparse:
-            raise ValueError("Hybrid search requires both dense and sparse vectors in the collection.")
+            raise ValueError(
+                "Hybrid search requires both dense and sparse vectors in the collection."
+            )
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
@@ -325,8 +365,9 @@ class QdrantDB(AbstractVectorDB):
         )
 
         points = getattr(results, "points", results)
-        return [{**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points]
-
+        return [
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
+        ]
 
     # def search_hybrid(
     #     self,
@@ -377,9 +418,13 @@ class QdrantDB(AbstractVectorDB):
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
         if not self.use_late:
-            raise ValueError("Late-interaction reranking requested, but this collection has no late vectors.")
+            raise ValueError(
+                "Late-interaction reranking requested, but this collection has no late vectors."
+            )
 
-        query_filter = self._build_filter(namespace=namespace, filter=filter, ids=candidate_ids)
+        query_filter = self._build_filter(
+            namespace=namespace, filter=filter, ids=candidate_ids
+        )
 
         # Depending on client version, `query_points` may accept multivector query directly through `using=...`.
         results = self.client.query_points(
@@ -391,7 +436,9 @@ class QdrantDB(AbstractVectorDB):
             with_payload=True,
         )
         points = getattr(results, "points", results)
-        return [{**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points]
+        return [
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
+        ]
 
     # Compatibility alias: old code keeps working as dense retrieval.
     def search(
@@ -409,7 +456,9 @@ class QdrantDB(AbstractVectorDB):
             filter=filter,
         )
 
-    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(
+        self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None
+    ) -> Sequence[Dict[str, Any]]:
         query_filter = self._build_filter(namespace=namespace, filter=filter)
         points, _ = self.client.scroll(
             collection_name=self.collection,
@@ -419,7 +468,6 @@ class QdrantDB(AbstractVectorDB):
             with_vectors=False,
         )
         return [p.payload for p in points if p.payload is not None]
-
 
     # def get_embedding_model(self) -> Optional[str]:
     #     """Get the name of the embedding model used for the database."""
@@ -441,7 +489,7 @@ class QdrantDB(AbstractVectorDB):
             collection_name=self.collection,
             limit=1,
             with_payload=True,
-            with_vectors=False
+            with_vectors=False,
         )
         if points and points[0].payload:
             if "embed_models" in points[0].payload:
@@ -449,18 +497,18 @@ class QdrantDB(AbstractVectorDB):
             elif "embed_model" in points[0].payload:
                 return points[0].payload.get("embed_model")
             else:
-                assert False, "No 'embed_model' or 'embed_models' key found in payload. Payload keys: " + ", ".join(points[0].payload.keys())
+                assert False, (
+                    "No 'embed_model' or 'embed_models' key found in payload. Payload keys: "
+                    + ", ".join(points[0].payload.keys())
+                )
         return {}
-
-
-
 
     def get_chunking_config(self) -> Optional[Dict[str, Any]]:
         points, _ = self.client.scroll(
             collection_name=self.collection,
             limit=1,
             with_payload=True,
-            with_vectors=False
+            with_vectors=False,
         )
         if points and points[0].payload:
             return points[0].payload.get("chunking_config")
@@ -474,7 +522,7 @@ class QdrantDB(AbstractVectorDB):
             collection_name=self.collection,
             limit=100,
             with_payload=True,
-            with_vectors=False
+            with_vectors=False,
         )
         keys = set()
         for point in points:

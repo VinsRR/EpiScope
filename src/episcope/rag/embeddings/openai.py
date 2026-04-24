@@ -2,6 +2,7 @@ from typing import Iterable, List
 from .base import Embedder
 from episcope.clients import OpenAIClient
 
+
 class OpenAIEmbedder(Embedder):
     def __init__(self, model: str, client: OpenAIClient = None):
         self._model = model

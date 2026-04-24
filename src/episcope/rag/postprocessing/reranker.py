@@ -19,8 +19,9 @@ class Reranker(ABC):
     """
 
     @abstractmethod
-    def rerank(self, query: str, results: List[SearchResult], top_k: int) -> List[SearchResult]:
-        ...
+    def rerank(
+        self, query: str, results: List[SearchResult], top_k: int
+    ) -> List[SearchResult]: ...
 
 
 # # ---------------------------------------------------------------------------
@@ -61,12 +62,10 @@ class Reranker(ABC):
 #         return list(seen.values())
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Neural cross-encoder reranker
 # ---------------------------------------------------------------------------
+
 
 class CrossEncoderReranker(Reranker):
     """Neural reranker using a cross-encoder model (e.g. Jina, BGE, Cohere).
@@ -94,7 +93,9 @@ class CrossEncoderReranker(Reranker):
         self.model = model
         self.batch_size = batch_size
 
-    def rerank(self, query: str, results: List[SearchResult], top_k: int) -> List[SearchResult]:
+    def rerank(
+        self, query: str, results: List[SearchResult], top_k: int
+    ) -> List[SearchResult]:
         if not results:
             return []
 
@@ -118,7 +119,9 @@ class CrossEncoderReranker(Reranker):
         # Results come back sorted; we re-align to original order by corpus_id.
         if hasattr(self.model, "rank"):
             ranked = self.model.rank(query, passages, batch_size=self.batch_size)
-            score_map: Dict[int, float] = {item["corpus_id"]: item["score"] for item in ranked}
+            score_map: Dict[int, float] = {
+                item["corpus_id"]: item["score"] for item in ranked
+            }
             return [score_map.get(i, 0.0) for i in range(len(passages))]
 
         raise TypeError(
@@ -126,16 +129,20 @@ class CrossEncoderReranker(Reranker):
             "Wrap it in a thin adapter that exposes one of these methods."
         )
 
-
     @classmethod
-    def from_huggingface(cls, model_name: str, device: Optional[str] = None, **kwargs) -> "CrossEncoderReranker":
+    def from_huggingface(
+        cls, model_name: str, device: Optional[str] = None, **kwargs
+    ) -> "CrossEncoderReranker":
         from sentence_transformers import CrossEncoder
+
         model = CrossEncoder(model_name, device=device)
         return cls(model, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Cascade reranker
 # ---------------------------------------------------------------------------
+
 
 class CascadeReranker(Reranker):
     """Runs rerankers in sequence, each operating on the previous stage's output.
@@ -158,7 +165,9 @@ class CascadeReranker(Reranker):
             raise ValueError("CascadeReranker requires at least one stage.")
         self.stages = stages
 
-    def rerank(self, query: str, results: List[SearchResult], top_k: int) -> List[SearchResult]:
+    def rerank(
+        self, query: str, results: List[SearchResult], top_k: int
+    ) -> List[SearchResult]:
         current = results
         for i, (reranker, stage_k) in enumerate(self.stages):
             is_last = i == len(self.stages) - 1

@@ -55,7 +55,9 @@ class BaseRetriever(ABC):
         filter: Optional[Dict[str, Any]],
     ) -> Tuple[Optional[str], Dict[str, Any]]:
         final_filter = dict(filter or {})
-        namespace = final_filter.pop("paper_id", None) or final_filter.pop("namespace", None)
+        namespace = final_filter.pop("paper_id", None) or final_filter.pop(
+            "namespace", None
+        )
 
         if self._allowed_filter_keys:
             invalid_keys = sorted(set(final_filter) - self._allowed_filter_keys)
@@ -97,7 +99,9 @@ class BaseRetriever(ABC):
             similarity_score=score,
             rank_score=score if rank_score is None else float(rank_score),
             source=source or self.default_source,
-            artifacts={key: value for key, value in chunk.items() if key not in known_keys},
+            artifacts={
+                key: value for key, value in chunk.items() if key not in known_keys
+            },
         )
 
     def _to_search_results(

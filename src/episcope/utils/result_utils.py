@@ -1,11 +1,21 @@
 import json
 from typing import Any, Dict
 
-def create_result_dict(paper_id: str, pdf_path: str, metadata, sections, references, analysis_type: str, extraction_result, confidence_scores) -> Dict[str, Any]:
+
+def create_result_dict(
+    paper_id: str,
+    pdf_path: str,
+    metadata,
+    sections,
+    references,
+    analysis_type: str,
+    extraction_result,
+    confidence_scores,
+) -> Dict[str, Any]:
     references_list = []
     if extraction_result and hasattr(extraction_result, "references"):
         for r in extraction_result.references:
-            if hasattr(r, 'model_dump'):
+            if hasattr(r, "model_dump"):
                 references_list.append(r.model_dump())
             elif isinstance(r, dict):
                 references_list.append(r)
@@ -14,7 +24,7 @@ def create_result_dict(paper_id: str, pdf_path: str, metadata, sections, referen
     data_sources_list = []
     if extraction_result and hasattr(extraction_result, "data_sources"):
         for ds in extraction_result.data_sources:
-            if hasattr(ds, 'model_dump'):
+            if hasattr(ds, "model_dump"):
                 data_sources_list.append(ds.model_dump())
             elif isinstance(ds, dict):
                 data_sources_list.append(ds)
@@ -31,12 +41,20 @@ def create_result_dict(paper_id: str, pdf_path: str, metadata, sections, referen
         "analysis_type": analysis_type,
         "num_sections": len(sections),
         "num_references": len(references),
-        "data_source_references": sum(1 for r in references if getattr(r, "is_data_source", False)),
+        "data_source_references": sum(
+            1 for r in references if getattr(r, "is_data_source", False)
+        ),
         "references": json.dumps(references_list),
-        "data_sources_description": getattr(extraction_result, "data_sources_description", "---") if extraction_result else "---",
+        "data_sources_description": getattr(
+            extraction_result, "data_sources_description", "---"
+        )
+        if extraction_result
+        else "---",
         "data_sources": json.dumps(data_sources_list),
         "pdf_path": pdf_path,
-        "confidence_scores": json.dumps(confidence_scores) if confidence_scores else None,
+        "confidence_scores": json.dumps(confidence_scores)
+        if confidence_scores
+        else None,
     }
 
 
@@ -48,7 +66,7 @@ def create_result_markdown(
     references,
     analysis_type: str,
     extraction_result,
-    confidence_scores
+    confidence_scores,
 ) -> str:
     """Create a markdown summary of the extraction result."""
     md = []
@@ -81,7 +99,7 @@ def create_result_markdown(
                 url = ds.get("url", "N/A")
                 explanation = ds.get("explanation", "N/A")
                 section_found = ds.get("section_found", "N/A")
-            else: # e.g., DataSource object
+            else:  # e.g., DataSource object
                 source_name = getattr(ds, "source_name", "N/A")
                 url = getattr(ds, "url", "N/A")
                 explanation = getattr(ds, "explanation", "N/A")
@@ -95,7 +113,11 @@ def create_result_markdown(
 
     md.append("\n---\n")
     md.append("## Data Sources Description\n")
-    description = getattr(extraction_result, "data_sources_description", "N/A") if extraction_result else "N/A"
+    description = (
+        getattr(extraction_result, "data_sources_description", "N/A")
+        if extraction_result
+        else "N/A"
+    )
     md.append(f"{description}\n")
 
     if confidence_scores:
@@ -103,7 +125,6 @@ def create_result_markdown(
         md.append("## Confidence Scores\n")
         for key, score in confidence_scores.items():
             md.append(f"- **{key}:** {score}\n\n")
-
 
     if extraction_result and hasattr(extraction_result, "matched_dois"):
         md.append("\n---\n")

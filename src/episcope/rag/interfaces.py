@@ -23,7 +23,9 @@ class AbstractIndexer(ABC):
     """
 
     @abstractmethod
-    def index_documents(self, docs: Iterable[Dict[str, Any]], *, namespace: Optional[str] = None) -> None:
+    def index_documents(
+        self, docs: Iterable[Dict[str, Any]], *, namespace: Optional[str] = None
+    ) -> None:
         """Index the given documents.
 
         Each document is a mapping with at least a ``content`` field
@@ -41,6 +43,7 @@ class AbstractIndexer(ABC):
                 ignore this parameter.
         """
 
+
 class AbstractGenerator(ABC):
     """Abstract base class for answer generation.
 
@@ -51,7 +54,9 @@ class AbstractGenerator(ABC):
     """
 
     @abstractmethod
-    def generate(self, question: str, contexts: Sequence[Dict[str, Any]], **kwargs: Any) -> Any:
+    def generate(
+        self, question: str, contexts: Sequence[Dict[str, Any]], **kwargs: Any
+    ) -> Any:
         """Generate an answer given a question and supporting contexts.
 
         Args:

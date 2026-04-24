@@ -31,8 +31,10 @@ except ImportError:  # pragma: no cover - exercised in environments without the 
 
 # Provider-agnostic interface
 
+
 class LLMClient(Protocol):
     """Minimal interface to support multiple LLM providers."""
+
     def chat(
         self,
         messages: Sequence[Mapping[str, str]],
@@ -118,6 +120,7 @@ class UsageTrackingMixin:
 
 # Provider-specific implementations
 
+
 @dataclass
 class OllamaClient(UsageTrackingMixin, LLMClient):
     """
@@ -128,7 +131,10 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
 
     Example models: 'llama3.1', 'qwen2.5:14b', 'mistral:instruct'
     """
-    base_url: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+
+    base_url: str = field(
+        default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    )
     timeout_s: int = 600
     # If you prefer non-streaming responses; we stitch streamed chunks anyway.
     stream: bool = True
@@ -149,9 +155,20 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
         # See: https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
         SUPPORTED_TOP_LEVEL_KWARGS = {"format", "keep_alive", "template"}
         SUPPORTED_OPTIONS_KWARGS = {
-            "mirostat", "mirostat_eta", "mirostat_tau", "num_ctx", "num_gqa",
-            "num_gpu", "num_thread", "repeat_last_n", "repeat_penalty",
-            "seed", "stop", "tfs_z", "top_k", "top_p",
+            "mirostat",
+            "mirostat_eta",
+            "mirostat_tau",
+            "num_ctx",
+            "num_gqa",
+            "num_gpu",
+            "num_thread",
+            "repeat_last_n",
+            "repeat_penalty",
+            "seed",
+            "stop",
+            "tfs_z",
+            "top_k",
+            "top_p",
         }
 
         url = f"{self.base_url}/api/chat"
@@ -172,7 +189,9 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
                 payload["options"][key] = value
 
         # POST and handle (possibly streaming) response
-        with requests.post(url, json=payload, timeout=self.timeout_s, stream=self.stream) as r:
+        with requests.post(
+            url, json=payload, timeout=self.timeout_s, stream=self.stream
+        ) as r:
             r.raise_for_status()
             if not self.stream:
                 data = r.json()
@@ -233,6 +252,7 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
     - `api_key` can be passed explicitly to override env var.
     - `site_url` and `app_title` can be passed for analytics headers.
     """
+
     api_key: Optional[str] = field(default=None, repr=False)
     site_url: str = "http://localhost:8501"  # Default for local Streamlit
     app_title: str = "EpiScope"
@@ -246,7 +266,9 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
             )
         key = self.api_key or os.environ.get("OPENROUTER_API_KEY")
         if not key:
-            raise ValueError("`api_key` not provided and `OPENROUTER_API_KEY` env var not set.")
+            raise ValueError(
+                "`api_key` not provided and `OPENROUTER_API_KEY` env var not set."
+            )
 
         self._client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
@@ -254,7 +276,7 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
             default_headers={
                 "HTTP-Referer": self.site_url,
                 "X-Title": self.app_title,
-            }
+            },
         )
 
     def chat(
@@ -281,8 +303,14 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
-            reasoning_tokens=getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None),
-            cached_tokens=getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None),
+            reasoning_tokens=getattr(
+                getattr(usage, "completion_tokens_details", None),
+                "reasoning_tokens",
+                None,
+            ),
+            cached_tokens=getattr(
+                getattr(usage, "prompt_tokens_details", None), "cached_tokens", None
+            ),
         )
         return response.choices[0].message.content or ""
 
@@ -313,6 +341,7 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
     - Reads `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` from environment.
     - `api_key` and `base_url` can be passed explicitly to override env vars.
     """
+
     api_key: Optional[str] = field(default=None, repr=False)
     base_url: Optional[str] = field(default=None)
     _client: Any = field(init=False, repr=False)
@@ -325,7 +354,9 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
             )
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
-            raise ValueError("`api_key` not provided and `OPENAI_API_KEY` env var not set.")
+            raise ValueError(
+                "`api_key` not provided and `OPENAI_API_KEY` env var not set."
+            )
         url = self.base_url or os.environ.get("OPENAI_BASE_URL")
         self._client = OpenAI(api_key=key, base_url=url)
 
@@ -353,8 +384,14 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
-            reasoning_tokens=getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None),
-            cached_tokens=getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None),
+            reasoning_tokens=getattr(
+                getattr(usage, "completion_tokens_details", None),
+                "reasoning_tokens",
+                None,
+            ),
+            cached_tokens=getattr(
+                getattr(usage, "prompt_tokens_details", None), "cached_tokens", None
+            ),
         )
         return response.choices[0].message.content or ""
 
@@ -381,6 +418,7 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
     - Reads `GEMINI_API_KEY` from the environment.
     - `api_key` can be passed explicitly to override env var.
     """
+
     api_key: Optional[str] = field(default=None, repr=False)
     _client: Any = field(init=False, repr=False)
 
@@ -392,7 +430,9 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
             )
         key = self.api_key or os.environ.get("GEMINI_API_KEY")
         if not key:
-            raise ValueError("`api_key` not provided and `GEMINI_API_KEY` env var not set.")
+            raise ValueError(
+                "`api_key` not provided and `GEMINI_API_KEY` env var not set."
+            )
         self._client = genai.Client(api_key=key)
 
     def chat(
@@ -405,9 +445,7 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
         **kwargs: Any,
     ) -> str:
         """Call the Gemini API."""
-        full_prompt = "\n".join(
-            f"{m['role']}: {m['content']}" for m in messages
-        )
+        full_prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
         generation_config = genai_types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,

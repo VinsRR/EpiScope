@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .repository import TrainingRepository
-from .schemas import CapturedTraceRecord, ReviewDecision, ReviewStatus, TaskBucket
+from .schemas import ReviewDecision, ReviewStatus, TaskBucket
 
 
 def _label_names(value: Any) -> list[str]:
@@ -18,7 +18,9 @@ def _label_names(value: Any) -> list[str]:
 class TraceReviewer:
     """Small helper for manually vetting captured traces."""
 
-    def __init__(self, repository: TrainingRepository, *, reviewer: Optional[str] = None) -> None:
+    def __init__(
+        self, repository: TrainingRepository, *, reviewer: Optional[str] = None
+    ) -> None:
         self.repository = repository
         self.reviewer = reviewer
 
@@ -42,10 +44,14 @@ class TraceReviewer:
             "paper_id": record.paper_id,
             "classifier_kind": record.classifier_kind,
             "predicted_labels": _label_names(
-                record.decision.result.classification if record.decision is not None else []
+                record.decision.result.classification
+                if record.decision is not None
+                else []
             ),
             "gold_label": _label_names(record.gold_label),
-            "raw_completion": record.trace.raw_llm_response if record.trace is not None else None,
+            "raw_completion": record.trace.raw_llm_response
+            if record.trace is not None
+            else None,
             "reasoning": (
                 record.decision.result.evidence.get("reasoning")
                 if record.decision is not None

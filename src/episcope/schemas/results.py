@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+
 @dataclass
 class SearchResult:
     """Represents a search result chunk with metadata."""
+
     id: str
     paper_id: str
     text: str

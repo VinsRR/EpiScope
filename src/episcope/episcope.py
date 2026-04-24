@@ -224,7 +224,12 @@ def _build_metadata_db(
 
 def _build_generator(provider: LLMProvider, model: Optional[str], temperature: float):
     from episcope.rag.generation.llm_generator import LLMGenerator
-    from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
+    from episcope.clients import (
+        GeminiClient,
+        OllamaClient,
+        OpenAIClient,
+        OpenRouterClient,
+    )
 
     if provider == LLMProvider.nollm:
         return NoLLMGenerator()
@@ -234,7 +239,8 @@ def _build_generator(provider: LLMProvider, model: Optional[str], temperature: f
         if provider == LLMProvider.gemini:
             resolved_model = (
                 _SETTINGS.llm_model
-                if _SETTINGS.llm_provider == LLMProvider.gemini.value and _SETTINGS.llm_model
+                if _SETTINGS.llm_provider == LLMProvider.gemini.value
+                and _SETTINGS.llm_model
                 else _DEFAULT_GEMINI_MODEL
             )
         else:
@@ -367,7 +373,9 @@ def _iter_supported_files(path: Path) -> Iterable[Path]:
             yield child
 
 
-def _load_paper(path: Path, *, loader_kind: LoaderKind, paper_id: Optional[str] = None) -> LoadedPaper:
+def _load_paper(
+    path: Path, *, loader_kind: LoaderKind, paper_id: Optional[str] = None
+) -> LoadedPaper:
     loader = _loader_for(loader_kind)
     sections, metadata, references = loader.load(path)
     if not metadata.title:
@@ -855,7 +863,9 @@ def explore(
     try:
         if path is not None:
             if retrieval_mode != RetrievalMode.dense_only:
-                raise ValueError("--path mode only supports --retrieval-mode dense-only.")
+                raise ValueError(
+                    "--path mode only supports --retrieval-mode dense-only."
+                )
             tempdir, papers, retriever = _transient_retriever_for_path(
                 path,
                 loader_kind=loader,
@@ -865,8 +875,12 @@ def explore(
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
             )
-            if paper_id is not None and paper_id not in {paper.paper_id for paper in papers}:
-                raise ValueError(f"Paper {paper_id!r} was not found under transient --path input.")
+            if paper_id is not None and paper_id not in {
+                paper.paper_id for paper in papers
+            }:
+                raise ValueError(
+                    f"Paper {paper_id!r} was not found under transient --path input."
+                )
         else:
             vectordb = _build_vector_db(
                 index_backend,
@@ -942,7 +956,9 @@ def classify(
     index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
     index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
     qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
-    qdrant_collection: str = typer.Option(_SETTINGS.qdrant_collection, "--qdrant-collection"),
+    qdrant_collection: str = typer.Option(
+        _SETTINGS.qdrant_collection, "--qdrant-collection"
+    ),
     metadata_backend: MetadataBackend = typer.Option(
         MetadataBackend.memory,
         "--metadata-backend",
@@ -1052,7 +1068,9 @@ def precision_miner(
     index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
     index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
     qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
-    qdrant_collection: str = typer.Option(_SETTINGS.qdrant_collection, "--qdrant-collection"),
+    qdrant_collection: str = typer.Option(
+        _SETTINGS.qdrant_collection, "--qdrant-collection"
+    ),
     metadata_backend: MetadataBackend = typer.Option(
         MetadataBackend.memory,
         "--metadata-backend",

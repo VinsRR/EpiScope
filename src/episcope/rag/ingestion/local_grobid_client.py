@@ -15,42 +15,56 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from episcope.schemas import (
-    StructuredSection,
-    PaperMetadata,
-    Reference
-)
+from episcope.schemas import StructuredSection, PaperMetadata, Reference
 
 # at module load time
 SECTION_KEYWORDS = {
-    'introduction': [r'\bintroduction\b', r'\bbackground\b', r'\boverview\b',
-                     r'\babstract\b', r'\bsummary\b',],
-    'methods': [
-        r'\bmethod(?:s)?\b', r'\bmaterial(?:s)?\b', r'\bapproach\b',
-        r'\bexperiment(?:al)?\b', r'\bprocedure\b', r'\bdesign\b', r'\bmethodology\b'
+    "introduction": [
+        r"\bintroduction\b",
+        r"\bbackground\b",
+        r"\boverview\b",
+        r"\babstract\b",
+        r"\bsummary\b",
     ],
-    'results': [r'\bresult(?:s)?\b', r'\bfinding(?:s)?\b', r'\bobservation(?:s)?\b'],
-    'discussion': [
-        r'\bdiscussion\b', r'\bconclusion(?:s)?\b', r'\blimitation(?:s)?\b',
-        r'\bfuture work\b', r'\bimplication(?:s)?\b'
+    "methods": [
+        r"\bmethod(?:s)?\b",
+        r"\bmaterial(?:s)?\b",
+        r"\bapproach\b",
+        r"\bexperiment(?:al)?\b",
+        r"\bprocedure\b",
+        r"\bdesign\b",
+        r"\bmethodology\b",
     ],
-    'declarations': [
-        r'\backnowledg(?:ement|ments)\b', r'\bfunding\b',
-        r'\bethic(?:s|al)\b', r'\bcompeting interest\b', r'\bconflict of interest\b'
+    "results": [r"\bresult(?:s)?\b", r"\bfinding(?:s)?\b", r"\bobservation(?:s)?\b"],
+    "discussion": [
+        r"\bdiscussion\b",
+        r"\bconclusion(?:s)?\b",
+        r"\blimitation(?:s)?\b",
+        r"\bfuture work\b",
+        r"\bimplication(?:s)?\b",
     ],
-    'references': [r'\breference(?:s)?\b', r'\bbibliography\b', r'\bworks cited\b'],
-    'appendices': [
-        r'\bappendix\b', r'\bannex\b',
-        r'\bsupplementary\b', r'\bsupplemental\b',
-
+    "declarations": [
+        r"\backnowledg(?:ement|ments)\b",
+        r"\bfunding\b",
+        r"\bethic(?:s|al)\b",
+        r"\bcompeting interest\b",
+        r"\bconflict of interest\b",
     ],
-    'data': [
-        r'\bdata\b', r'\bdataset\b', r'\bsurvey\b', r'\bcensus\b',
+    "references": [r"\breference(?:s)?\b", r"\bbibliography\b", r"\bworks cited\b"],
+    "appendices": [
+        r"\bappendix\b",
+        r"\bannex\b",
+        r"\bsupplementary\b",
+        r"\bsupplemental\b",
     ],
-    'code': [
-        r'\bcode\b', r'\bsoftware\b'
+    "data": [
+        r"\bdata\b",
+        r"\bdataset\b",
+        r"\bsurvey\b",
+        r"\bcensus\b",
     ],
-    'untitled': [r'\buntitled\b']
+    "code": [r"\bcode\b", r"\bsoftware\b"],
+    "untitled": [r"\buntitled\b"],
 }
 COMPILED_PATTERNS = {
     bucket: [re.compile(pat) for pat in pats]
@@ -60,20 +74,28 @@ COMPILED_PATTERNS = {
 logger = logging.getLogger(__name__)
 
 from grobid_client.grobid_client import GrobidClient as PyClient
-class GrobidClient:
-    """ GROBID client that fully utilizes structured output"""
 
-    def __init__(self, grobid_server: str = "http://localhost:8070", timeout: int = 3600):
+
+class GrobidClient:
+    """GROBID client that fully utilizes structured output"""
+
+    def __init__(
+        self, grobid_server: str = "http://localhost:8070", timeout: int = 3600
+    ):
         self.grobid_server = grobid_server
         self.timeout = timeout
         try:
             self.client = PyClient(grobid_server, timeout=timeout)
             logger.info(f" GROBID client initialized with server: {grobid_server}")
         except ImportError:
-            logger.error("grobid_client_python not installed. Install with: pip install grobid_client_python")
+            logger.error(
+                "grobid_client_python not installed. Install with: pip install grobid_client_python"
+            )
             raise
 
-    def process_fulltext(self, pdf_path: str) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
+    def process_fulltext(
+        self, pdf_path: str
+    ) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
         """Process full document with GROBID and extract all structured information"""
         try:
             # Process the full document
@@ -87,7 +109,7 @@ class GrobidClient:
                 include_raw_citations=True,
                 include_raw_affiliations=True,
                 tei_coordinates=True,
-                segment_sentences=True
+                segment_sentences=True,
             )
 
             # Handle different return formats
@@ -99,7 +121,7 @@ class GrobidClient:
                 logger.warning(f"Unexpected result format from GROBID: {type(result)}")
                 return self._create_fallback_data(pdf_path)
 
-            if not xml_content or not xml_content.strip().startswith('<'):
+            if not xml_content or not xml_content.strip().startswith("<"):
                 logger.warning(f"No valid XML returned for {pdf_path}")
                 return self._create_fallback_data(pdf_path)
 
@@ -109,15 +131,17 @@ class GrobidClient:
             logger.error(f"GROBID fulltext processing failed for {pdf_path}: {e}")
             return self._create_fallback_data(pdf_path)
 
-    def _parse_fulltext_tei(self, xml_content: str, pdf_path: str) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
+    def _parse_fulltext_tei(
+        self, xml_content: str, pdf_path: str
+    ) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
         """Parse full TEI XML to extract comprehensive structured information"""
         try:
             root = etree.fromstring(xml_content.encode())
 
             # Handle namespaces
             nsmap = root.nsmap
-            tei_ns = nsmap.get(None) or 'http://www.tei-c.org/ns/1.0'
-            ns = {'tei': tei_ns}
+            tei_ns = nsmap.get(None) or "http://www.tei-c.org/ns/1.0"
+            ns = {"tei": tei_ns}
 
             # Extract metadata
             metadata = self._extract__metadata(root, ns, pdf_path)
@@ -128,26 +152,34 @@ class GrobidClient:
             # Extract references
             references = self._extract_references(root, ns)
 
-            logger.info(f"Extracted {len(sections)} sections and {len(references)} references from {pdf_path}")
+            logger.info(
+                f"Extracted {len(sections)} sections and {len(references)} references from {pdf_path}"
+            )
             return metadata, sections, references
 
         except Exception as e:
             logger.error(f"Failed to parse fulltext TEI XML for {pdf_path}: {e}")
             return self._create_fallback_data(pdf_path)
 
-    def _extract__metadata(self, root, ns: Dict[str, str], pdf_path: str) -> PaperMetadata:
+    def _extract__metadata(
+        self, root, ns: Dict[str, str], pdf_path: str
+    ) -> PaperMetadata:
         """Extract comprehensive metadata from TEI header"""
         # Extract title
         title_elem = root.find('.//tei:title[@level="a"]', namespaces=ns)
         if title_elem is None:
-            title_elem = root.find('.//tei:title', namespaces=ns)
+            title_elem = root.find(".//tei:title", namespaces=ns)
         title = self._get_element_text(title_elem) or Path(pdf_path).stem
 
         # Extract authors
         authors = []
-        for person in root.findall('.//tei:author//tei:persName', namespaces=ns):
-            forename = self._get_element_text(person.find('.//tei:forename', namespaces=ns))
-            surname = self._get_element_text(person.find('.//tei:surname', namespaces=ns))
+        for person in root.findall(".//tei:author//tei:persName", namespaces=ns):
+            forename = self._get_element_text(
+                person.find(".//tei:forename", namespaces=ns)
+            )
+            surname = self._get_element_text(
+                person.find(".//tei:surname", namespaces=ns)
+            )
             if forename or surname:
                 full_name = f"{forename} {surname}".strip()
                 if full_name:
@@ -157,10 +189,10 @@ class GrobidClient:
         year = None
         date_elem = root.find('.//tei:date[@type="published"]', namespaces=ns)
         if date_elem is None:
-            date_elem = root.find('.//tei:date', namespaces=ns)
+            date_elem = root.find(".//tei:date", namespaces=ns)
 
         if date_elem is not None:
-            when_attr = date_elem.get('when')
+            when_attr = date_elem.get("when")
             if when_attr:
                 try:
                     year = int(when_attr[:4])
@@ -178,9 +210,9 @@ class GrobidClient:
         # Extract abstract
         abstract = None
         abstract_paths = [
-            './/tei:teiHeader//tei:abstract',
-            './/tei:profileDesc//tei:abstract',
-            './/tei:abstract'
+            ".//tei:teiHeader//tei:abstract",
+            ".//tei:profileDesc//tei:abstract",
+            ".//tei:abstract",
         ]
 
         for xpath in abstract_paths:
@@ -192,7 +224,7 @@ class GrobidClient:
                 # If that fails, try extracting from paragraph children
                 if not abstract or len(abstract.strip()) < 50:
                     p_texts = []
-                    for p in abstract_elem.findall('.//tei:p', namespaces=ns):
+                    for p in abstract_elem.findall(".//tei:p", namespaces=ns):
                         p_text = self._get_element_text(p)
                         if p_text:
                             p_texts.append(p_text)
@@ -209,7 +241,7 @@ class GrobidClient:
 
         # Extract keywords
         keywords = []
-        for keyword_elem in root.findall('.//tei:term', namespaces=ns):
+        for keyword_elem in root.findall(".//tei:term", namespaces=ns):
             keyword = self._get_element_text(keyword_elem)
             if keyword:
                 keywords.append(keyword)
@@ -221,39 +253,40 @@ class GrobidClient:
             doi=doi,
             journal=journal,
             abstract=abstract,
-            keywords=keywords
+            keywords=keywords,
         )
 
-    def _extract_structured_sections(self, root, ns: Dict[str, str]) -> List[StructuredSection]:
+    def _extract_structured_sections(
+        self, root, ns: Dict[str, str]
+    ) -> List[StructuredSection]:
         """Extract structured sections from TEI body"""
         sections = []
 
         # Find main body
-        body = root.find('.//tei:body', namespaces=ns)
+        body = root.find(".//tei:body", namespaces=ns)
         if body is None:
             return sections
 
         # Extract main sections
-        for div in body.findall('.//tei:div', namespaces=ns):
+        for div in body.findall(".//tei:div", namespaces=ns):
             section = self._parse_section(div, ns)
             if section:
                 sections.append(section)
 
         # Extract back matter sections (funding, data availability, etc.)
-        back = root.find('.//tei:back', namespaces=ns)
+        back = root.find(".//tei:back", namespaces=ns)
         if back is not None:
-            for div in back.findall('.//tei:div', namespaces=ns):
+            for div in back.findall(".//tei:div", namespaces=ns):
                 section = self._parse_section(div, ns)
                 if section:
                     sections.append(section)
 
         # Also check for any top-level divs outside body/back
-        for div in root.findall('.//tei:div', namespaces=ns):
+        for div in root.findall(".//tei:div", namespaces=ns):
             # Skip if already processed (in body or back)
-            if (
-                (div.getparent() is not None and
-                 (div.getparent().tag.endswith('}body') or
-                  div.getparent().tag.endswith('}back')))
+            if div.getparent() is not None and (
+                div.getparent().tag.endswith("}body")
+                or div.getparent().tag.endswith("}back")
             ):
                 continue
 
@@ -265,24 +298,30 @@ class GrobidClient:
         seen_content = set()
         unique_sections = []
         for section in sections:
-            content = getattr(section, 'content', None)
+            content = getattr(section, "content", None)
             if not isinstance(content, str):
                 continue
-            normalized_content = ' '.join(content.split())
+            normalized_content = " ".join(content.split())
             if normalized_content not in seen_content:
                 seen_content.add(normalized_content)
                 unique_sections.append(section)
         return unique_sections
 
-    def _parse_section(self, div_elem, ns: Dict[str, str]) -> Optional[StructuredSection]:
+    def _parse_section(
+        self, div_elem, ns: Dict[str, str]
+    ) -> Optional[StructuredSection]:
         """Parse a single section/div element"""
-        head_elem = div_elem.find('./tei:head', namespaces=ns)
-        title = self._get_element_text(head_elem) if head_elem is not None else "Untitled Section"
+        head_elem = div_elem.find("./tei:head", namespaces=ns)
+        title = (
+            self._get_element_text(head_elem)
+            if head_elem is not None
+            else "Untitled Section"
+        )
 
         section_type = self._classify_section_type(title)
 
         content_parts = []
-        for p in div_elem.findall('.//tei:p', namespaces=ns):
+        for p in div_elem.findall(".//tei:p", namespaces=ns):
             p_text = self._get_element_text(p)
             if p_text:
                 content_parts.append(p_text)
@@ -294,7 +333,7 @@ class GrobidClient:
 
         references_cited = []
         for ref in div_elem.findall('.//tei:ref[@type="bibr"]', namespaces=ns):
-            ref_target = ref.get('target')
+            ref_target = ref.get("target")
             if ref_target:
                 references_cited.append(ref_target)
 
@@ -302,7 +341,7 @@ class GrobidClient:
             section_type=section_type,
             title=title,
             content=content,
-            references_cited=references_cited
+            references_cited=references_cited,
         )
 
     def _classify_section_type(self, title: str) -> str:
@@ -310,20 +349,20 @@ class GrobidClient:
         for bucket, patterns in COMPILED_PATTERNS.items():
             if any(p.search(title_clean) for p in patterns):
                 return bucket
-        return 'other'
+        return "other"
 
     def _extract_references(self, root, ns: Dict[str, str]) -> List[Reference]:
         """Extract structured references from bibliography"""
         references = []
 
         for div in root.findall('.//tei:div[@type="references"]', namespaces=ns):
-            for bibl in div.findall('.//tei:biblStruct', namespaces=ns):
+            for bibl in div.findall(".//tei:biblStruct", namespaces=ns):
                 ref = self._parse_reference(bibl, ns)
                 if ref:
                     references.append(ref)
 
-        for list_bibl in root.findall('.//tei:listBibl', namespaces=ns):
-            for bibl in list_bibl.findall('.//tei:biblStruct', namespaces=ns):
+        for list_bibl in root.findall(".//tei:listBibl", namespaces=ns):
+            for bibl in list_bibl.findall(".//tei:biblStruct", namespaces=ns):
                 ref = self._parse_reference(bibl, ns)
                 if ref:
                     references.append(ref)
@@ -334,13 +373,19 @@ class GrobidClient:
         """Parse a single reference from biblStruct"""
         title_elem = bibl_elem.find('.//tei:title[@level="a"]', namespaces=ns)
         if title_elem is None:
-            title_elem = bibl_elem.find('.//tei:title', namespaces=ns)
+            title_elem = bibl_elem.find(".//tei:title", namespaces=ns)
         title = self._get_element_text(title_elem)
 
         authors = []
-        for person in bibl_elem.findall('.//tei:analytic/tei:author/tei:persName', namespaces=ns):
-            forename = self._get_element_text(person.find('.//tei:forename', namespaces=ns))
-            surname = self._get_element_text(person.find('.//tei:surname', namespaces=ns))
+        for person in bibl_elem.findall(
+            ".//tei:analytic/tei:author/tei:persName", namespaces=ns
+        ):
+            forename = self._get_element_text(
+                person.find(".//tei:forename", namespaces=ns)
+            )
+            surname = self._get_element_text(
+                person.find(".//tei:surname", namespaces=ns)
+            )
             if forename or surname:
                 full_name = f"{forename} {surname}".strip()
                 if full_name:
@@ -350,9 +395,9 @@ class GrobidClient:
         journal = self._get_element_text(journal_elem)
 
         year = None
-        date_elem = bibl_elem.find('.//tei:date', namespaces=ns)
+        date_elem = bibl_elem.find(".//tei:date", namespaces=ns)
         if date_elem is not None:
-            when_attr = date_elem.get('when')
+            when_attr = date_elem.get("when")
             if when_attr:
                 try:
                     year = int(when_attr[:4])
@@ -362,8 +407,8 @@ class GrobidClient:
         doi_elem = bibl_elem.find('.//tei:idno[@type="DOI"]', namespaces=ns)
         doi = self._get_element_text(doi_elem)
 
-        url_elem = bibl_elem.find('.//tei:ptr', namespaces=ns)
-        url = url_elem.get('target') if url_elem is not None else None
+        url_elem = bibl_elem.find(".//tei:ptr", namespaces=ns)
+        url = url_elem.get("target") if url_elem is not None else None
 
         raw_parts = []
         if authors:
@@ -397,15 +442,17 @@ class GrobidClient:
             if element.text:
                 parts.append(element.text.strip())
             for child in element:
-                if child.tag.endswith('}ptr'):
-                    target = child.get('target')
+                if child.tag.endswith("}ptr"):
+                    target = child.get("target")
                     if target:
                         parts.append(target)
-                elif child.tag.endswith('}ref'):
-                    target = child.get('target')
+                elif child.tag.endswith("}ref"):
+                    target = child.get("target")
                     child_text = extract_text_with_links(child)
                     if target:
-                        parts.append(f"{child_text} ({target})") if child_text else target
+                        parts.append(
+                            f"{child_text} ({target})"
+                        ) if child_text else target
                     elif child_text:
                         parts.append(child_text)
                 else:
@@ -414,23 +461,22 @@ class GrobidClient:
                         parts.append(child_text)
                 if child.tail:
                     parts.append(child.tail.strip())
-            return ' '.join(parts).strip()
+            return " ".join(parts).strip()
 
         text = extract_text_with_links(elem)
 
         if text:
-            text = re.sub(r'\s+', ' ', text.strip())
+            text = re.sub(r"\s+", " ", text.strip())
             return text if text else None
 
         return None
 
-    def _create_fallback_data(self, pdf_path: str) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
+    def _create_fallback_data(
+        self, pdf_path: str
+    ) -> Tuple[PaperMetadata, List[StructuredSection], List[Reference]]:
         """Create fallback data when GROBID fails"""
         logger.warning(f"Creating fallback data for {pdf_path}")
         metadata = PaperMetadata(
-            title=Path(pdf_path).stem,
-            authors=[],
-            publication_year=None,
-            doi=None
+            title=Path(pdf_path).stem, authors=[], publication_year=None, doi=None
         )
         return metadata, [], []

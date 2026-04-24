@@ -71,7 +71,9 @@ class ClassificationRunner:
             try:
                 result = self.response_parser.parse(last_raw)
                 samples.append(
-                    CompletionSample(messages=list(messages), completion=last_raw, parsed_ok=True)
+                    CompletionSample(
+                        messages=list(messages), completion=last_raw, parsed_ok=True
+                    )
                 )
                 return LLMAttemptResult(
                     result=result,
@@ -88,7 +90,9 @@ class ClassificationRunner:
                 )
                 logger.debug("Raw response:\n%s", last_raw)
                 samples.append(
-                    CompletionSample(messages=list(messages), completion=last_raw, parsed_ok=False)
+                    CompletionSample(
+                        messages=list(messages), completion=last_raw, parsed_ok=False
+                    )
                 )
                 if attempt < self.config.max_validation_retries:
                     messages = self._append_correction_turn(messages, last_raw, exc)

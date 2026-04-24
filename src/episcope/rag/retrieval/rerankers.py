@@ -24,7 +24,9 @@ class LateInteractionReranker(CandidateReranker):
             self.late_embedder = late_embedder
         else:
             if not model_name:
-                raise ValueError("VectorDB does not have a late interaction model configured.")
+                raise ValueError(
+                    "VectorDB does not have a late interaction model configured."
+                )
             self.late_embedder = EmbedderFactory.get_late_embedder(model_name)
 
     def rerank_candidates(

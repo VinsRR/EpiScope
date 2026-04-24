@@ -9,8 +9,14 @@ from episcope.rag.provenance import Provenance
 from episcope.rag.retrieval.base import BaseRetriever
 from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.base import AbstractRAG
-from episcope.workflows.precision_miner.config import FindDataSourcesConfig, PrecisionMinerConfig
-from episcope.workflows.precision_miner.output import DetailedExtractionResult, ExtractionTrace
+from episcope.workflows.precision_miner.config import (
+    FindDataSourcesConfig,
+    PrecisionMinerConfig,
+)
+from episcope.workflows.precision_miner.output import (
+    DetailedExtractionResult,
+    ExtractionTrace,
+)
 from episcope.workflows.precision_miner.parsing import PrecisionMinerResponseParser
 from episcope.workflows.precision_miner.prompting import PrecisionMinerPromptBuilder
 from episcope.workflows.precision_miner.schemas import ExtractionResult
@@ -89,7 +95,9 @@ class PrecisionMiner(AbstractRAG):
         if self.academic_db:
             return self.academic_db.get_paper_metadata(paper_id, self.strategy_name)
         if metadata is None:
-            raise ValueError("metadata must be provided when academic_db is not available.")
+            raise ValueError(
+                "metadata must be provided when academic_db is not available."
+            )
         return metadata
 
     def retrieve_chunks(self, paper_id: str) -> List[SearchResult]:

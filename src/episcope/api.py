@@ -6,7 +6,13 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from episcope.clients import GeminiClient, LLMClient, OllamaClient, OpenAIClient, OpenRouterClient
+from episcope.clients import (
+    GeminiClient,
+    LLMClient,
+    OllamaClient,
+    OpenAIClient,
+    OpenRouterClient,
+)
 from episcope.db.mongo_academic_db import MongoAcademicDB
 from episcope.rag.generation.llm_generator import LLMGenerator
 from episcope.rag.retrieval.candidates import (
@@ -43,7 +49,10 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return {str(key): _json_ready(item) for key, item in value.model_dump().items()}
     if is_dataclass(value):
-        return {field.name: _json_ready(getattr(value, field.name)) for field in fields(value)}
+        return {
+            field.name: _json_ready(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, dict):
         return {str(key): _json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -58,29 +67,41 @@ class BackendConfig(BaseModel):
     mongo_uri: Optional[str] = Field(default_factory=lambda: _settings().mongo_uri)
     mongo_db_name: str = Field(default_factory=lambda: _settings().mongo_db_name)
     qdrant_url: str = Field(default_factory=lambda: _settings().qdrant_url)
-    qdrant_collection: str = Field(default_factory=lambda: _settings().qdrant_collection)
+    qdrant_collection: str = Field(
+        default_factory=lambda: _settings().qdrant_collection
+    )
     llm_provider: Literal["gemini", "openai", "openrouter", "ollama"] = Field(
         default_factory=lambda: _settings().llm_provider
     )
     llm_model: str = Field(default_factory=lambda: _settings().llm_model)
     llm_temperature: float = 0.0
     workflow_top_k: int = 10
-    retrieval_mode: Literal["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"] = "hybrid"
-    evidence_reranker_kind: Literal["none", "global_cross_encoder", "within_label_cross_encoder"] = "none"
-    cross_encoder_model: Optional[str] = Field(default_factory=lambda: _settings().cross_encoder_model)
+    retrieval_mode: Literal[
+        "dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"
+    ] = "hybrid"
+    evidence_reranker_kind: Literal[
+        "none", "global_cross_encoder", "within_label_cross_encoder"
+    ] = "none"
+    cross_encoder_model: Optional[str] = Field(
+        default_factory=lambda: _settings().cross_encoder_model
+    )
     cross_encoder_top_k: Optional[int] = 15
 
 
 class ClassificationRequest(BaseModel):
     paper_id: str
-    classifier_kind: Literal["paper_type", "data_accessibility", "data_type", "geo"] = "data_accessibility"
+    classifier_kind: Literal["paper_type", "data_accessibility", "data_type", "geo"] = (
+        "data_accessibility"
+    )
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
 
 class PrecisionMinerRequest(BaseModel):
     paper_id: str
-    miner_kind: Literal["find_data_sources", "find_supplementary_links", "identify_key_references"] = "find_data_sources"
+    miner_kind: Literal[
+        "find_data_sources", "find_supplementary_links", "identify_key_references"
+    ] = "find_data_sources"
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
@@ -202,7 +223,9 @@ def _evidence_reranker(config: BackendConfig):
     if config.evidence_reranker_kind == "none":
         return None
     if not config.cross_encoder_model:
-        raise ValueError("cross_encoder_model must be set when evidence_reranker_kind is not 'none'.")
+        raise ValueError(
+            "cross_encoder_model must be set when evidence_reranker_kind is not 'none'."
+        )
     if config.evidence_reranker_kind == "global_cross_encoder":
         return GlobalCrossEncoderReranker.from_huggingface(
             model_name=config.cross_encoder_model,
@@ -213,7 +236,9 @@ def _evidence_reranker(config: BackendConfig):
             model_name=config.cross_encoder_model,
             top_k=config.cross_encoder_top_k,
         )
-    raise ValueError(f"Unsupported evidence_reranker_kind={config.evidence_reranker_kind!r}")
+    raise ValueError(
+        f"Unsupported evidence_reranker_kind={config.evidence_reranker_kind!r}"
+    )
 
 
 @app.get("/health")
@@ -236,7 +261,9 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
             generator=_build_generator(request.config),
             strategy_name=request.config.strategy_name,
             academic_db=db,
-            config=_classifier_config(request.classifier_kind, request.config.workflow_top_k),
+            config=_classifier_config(
+                request.classifier_kind, request.config.workflow_top_k
+            ),
             evidence_reranker=_evidence_reranker(request.config),
         )
         if request.detailed:
@@ -247,7 +274,9 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Classification failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Classification failed: {exc}"
+        ) from exc
 
 
 @app.post("/precision-miner")
@@ -259,7 +288,9 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
             generator=_build_generator(request.config),
             strategy_name=request.config.strategy_name,
             academic_db=db,
-            config=_precision_miner_config(request.miner_kind, request.config.workflow_top_k),
+            config=_precision_miner_config(
+                request.miner_kind, request.config.workflow_top_k
+            ),
         )
         if request.detailed:
             result = miner.run_detailed(request.paper_id)
@@ -269,7 +300,9 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Precision miner failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Precision miner failed: {exc}"
+        ) from exc
 
 
 @app.post("/explore")

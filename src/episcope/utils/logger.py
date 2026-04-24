@@ -5,6 +5,7 @@ Configure a standard logger for the EpiScope project.  This module
 centralises logging configuration so that all parts of the system
 produce consistent and informative log messages.
 """
+
 import logging
 from episcope.settings import AppSettings
 

@@ -55,6 +55,8 @@ class ClassificationPromptBuilder:
         for category, cat_chunks in by_category.items():
             avg = np.mean([result_score(chunk) for chunk in cat_chunks])
             lines = [f"\n{category.upper()} (avg {avg:.3f}):"]
-            lines += [f"  • {result_score(chunk):.3f}: {chunk.text}" for chunk in cat_chunks]
+            lines += [
+                f"  • {result_score(chunk):.3f}: {chunk.text}" for chunk in cat_chunks
+            ]
             parts.append("\n".join(lines))
         return "\n".join(parts)

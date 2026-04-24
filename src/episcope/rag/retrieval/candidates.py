@@ -5,7 +5,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from episcope.rag.embeddings.factory import EmbedderFactory
 from episcope.rag.retrieval.base import BaseRetriever
-from episcope.rag.retrieval.components import CandidateRetriever, FusionStrategy, QueryTransformer
+from episcope.rag.retrieval.components import (
+    CandidateRetriever,
+    FusionStrategy,
+    QueryTransformer,
+)
 from episcope.rag.retrieval.fusion import RRFFusion
 from episcope.schemas import SearchResult
 from episcope.vectordb.base import AbstractVectorDB
@@ -49,7 +53,9 @@ class SemanticCandidateRetriever(BaseRetriever, CandidateRetriever):
             self.dense_embedder = dense_embedder
         else:
             if not model_name:
-                raise ValueError("VectorDB does not have a dense embedding model configured.")
+                raise ValueError(
+                    "VectorDB does not have a dense embedding model configured."
+                )
             model_name = _normalize_dense_model_name(model_name)
             logger.info("Auto-loading dense embedder: %s", model_name)
             self.dense_embedder = EmbedderFactory.get_embedder(model_name)
@@ -130,7 +136,9 @@ class SparseCandidateRetriever(BaseRetriever, CandidateRetriever):
             self.sparse_embedder = sparse_embedder
         else:
             if not model_name:
-                raise ValueError("VectorDB does not have a sparse embedding model configured.")
+                raise ValueError(
+                    "VectorDB does not have a sparse embedding model configured."
+                )
             logger.info("Auto-loading sparse embedder: %s", model_name)
             self.sparse_embedder = EmbedderFactory.get_sparse_embedder(model_name)
 
@@ -202,7 +210,9 @@ class HybridCandidateRetriever(BaseRetriever, CandidateRetriever):
     ) -> None:
         super().__init__(vectordb)
         self.prefetch_k = prefetch_k
-        self.semantic_retriever = semantic_retriever or SemanticCandidateRetriever(vectordb)
+        self.semantic_retriever = semantic_retriever or SemanticCandidateRetriever(
+            vectordb
+        )
         self.sparse_retriever = sparse_retriever or SparseCandidateRetriever(vectordb)
         self.fusion = fusion or RRFFusion()
 
@@ -214,7 +224,9 @@ class HybridCandidateRetriever(BaseRetriever, CandidateRetriever):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        if self.vectordb.capabilities().get("dense") and self.vectordb.capabilities().get("sparse"):
+        if self.vectordb.capabilities().get(
+            "dense"
+        ) and self.vectordb.capabilities().get("sparse"):
             try:
                 dense_query = self.semantic_retriever.dense_embedder.embed_text(query)
                 sparse_query = self.sparse_retriever.sparse_embedder.embed_text(query)

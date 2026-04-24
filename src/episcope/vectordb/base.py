@@ -1,8 +1,10 @@
 """
 Abstract interface for a Vector Database.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+
 
 class AbstractVectorDB(ABC):
     """Abstract base class for a vector database."""
@@ -30,7 +32,9 @@ class AbstractVectorDB(ABC):
         pass
 
     @abstractmethod
-    def get_points(self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None) -> Sequence[Dict[str, Any]]:
+    def get_points(
+        self, namespace: Optional[str] = None, filter: Optional[Dict[str, Any]] = None
+    ) -> Sequence[Dict[str, Any]]:
         """Retrieve points from a given namespace, with an optional filter."""
         pass
 
@@ -83,7 +87,9 @@ class AbstractVectorDB(ABC):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
-        raise NotImplementedError("This vector database does not support sparse search.")
+        raise NotImplementedError(
+            "This vector database does not support sparse search."
+        )
 
     def search_hybrid(
         self,
@@ -94,7 +100,9 @@ class AbstractVectorDB(ABC):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
-        raise NotImplementedError("This vector database does not support hybrid search.")
+        raise NotImplementedError(
+            "This vector database does not support hybrid search."
+        )
 
     def rerank_late(
         self,
@@ -104,4 +112,6 @@ class AbstractVectorDB(ABC):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> Sequence[Dict[str, Any]]:
-        raise NotImplementedError("This vector database does not support late-interaction reranking.")
+        raise NotImplementedError(
+            "This vector database does not support late-interaction reranking."
+        )

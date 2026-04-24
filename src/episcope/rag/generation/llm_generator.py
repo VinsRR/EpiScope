@@ -16,9 +16,7 @@ Implements the :class:`AbstractGenerator` interface.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Callable
-from dataclasses import dataclass, field
-import json
+from typing import Any, Dict, List, Sequence, Optional, Mapping, Callable
 import time
 
 from episcope.rag.interfaces import AbstractGenerator
@@ -27,12 +25,12 @@ from episcope.clients import LLMClient, OllamaClient
 
 # Utility: safe context access
 
+
 def _get(ctx: Any, key: str, default: Any = None) -> Any:
     """Support both dict-like and attr-like contexts."""
     if isinstance(ctx, dict):
         return ctx.get(key, default)
     return getattr(ctx, key, default)
-
 
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -41,6 +39,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "lack information, say so explicitly. Do not include citations in the text; "
     "the caller will attach provenance separately."
 )
+
 
 def build_messages_from_contexts(
     contexts: Sequence[Dict[str, Any] | Any],
@@ -54,23 +53,20 @@ def build_messages_from_contexts(
         text = _get(ctx, "text", "") or _get(ctx, "content", "") or ""
         paper_id = _get(ctx, "paper_id", "")
         section = _get(ctx, "section_type", "") or _get(ctx, "section", "")
-        header = f"[Context {idx+1}{f' | paper_id={paper_id}' if paper_id else ''}{f' | section={section}' if section else ''}]"
+        header = f"[Context {idx + 1}{f' | paper_id={paper_id}' if paper_id else ''}{f' | section={section}' if section else ''}]"
         blocks.append(f"{header}\n{text}")
 
     corpus = joiner.join(blocks).strip()
     # Compose user instruction
-    question = (user_question or "Synthesize the best possible answer from the contexts above.").strip()
-    user_prompt = (
-        f"{question}\n\n"
-        "Contexts:\n"
-        f"{corpus}"
-    )
+    question = (
+        user_question or "Synthesize the best possible answer from the contexts above."
+    ).strip()
+    user_prompt = f"{question}\n\nContexts:\n{corpus}"
 
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-
 
 
 class LLMGenerator(AbstractGenerator):
@@ -169,7 +165,8 @@ class LLMGenerator(AbstractGenerator):
                 Evidence(
                     paper_id=_get(ctx, "paper_id", None),
                     snippet=content,
-                    section=_get(ctx, "section_type", None) or _get(ctx, "section", None),
+                    section=_get(ctx, "section_type", None)
+                    or _get(ctx, "section", None),
                     index_version=None,
                     model_id=self.model_id_tag,
                     prompt_id=self.prompt_id_tag,

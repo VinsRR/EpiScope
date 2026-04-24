@@ -8,7 +8,9 @@ from .repository import TrainingRepository
 from .schemas import CapturedTraceRecord, ReviewDecision, TaskBucket
 
 
-def _assistant_completion(record: CapturedTraceRecord, review: ReviewDecision) -> Optional[str]:
+def _assistant_completion(
+    record: CapturedTraceRecord, review: ReviewDecision
+) -> Optional[str]:
     if review.edited_completion:
         return review.edited_completion
     if record.training is not None and record.training.raw_llm_response is not None:
@@ -36,7 +38,9 @@ class SFTExporter:
 
     def export_json_validity(self, output_path: str | Path) -> Path:
         samples: List[Dict[str, Any]] = []
-        for record, review in self.repository.iter_approved(bucket=TaskBucket.JSON_VALIDITY):
+        for record, review in self.repository.iter_approved(
+            bucket=TaskBucket.JSON_VALIDITY
+        ):
             sample = self._json_validity_sample(record, review)
             if sample is not None:
                 samples.append(sample)
@@ -44,7 +48,9 @@ class SFTExporter:
 
     def export_classification_core(self, output_path: str | Path) -> Path:
         samples: List[Dict[str, Any]] = []
-        for record, review in self.repository.iter_approved(bucket=TaskBucket.CLASSIFICATION_CORE):
+        for record, review in self.repository.iter_approved(
+            bucket=TaskBucket.CLASSIFICATION_CORE
+        ):
             sample = self._classification_core_sample(record, review)
             if sample is not None:
                 samples.append(sample)

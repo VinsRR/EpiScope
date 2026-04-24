@@ -1,5 +1,11 @@
 from .serialization import Serializable, SerializableList
-from .paper import StructuredSection, Reference, PaperMetadata, SectionList, ReferenceList
+from .paper import (
+    StructuredSection,
+    Reference,
+    PaperMetadata,
+    SectionList,
+    ReferenceList,
+)
 from .results import SearchResult
 from .common import Chunk
 

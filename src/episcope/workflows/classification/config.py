@@ -5,10 +5,15 @@ from typing import Any, Dict, List
 
 from .schemas import (
     # Enums
-    PaperType, DataAccessibility, GeoRegion, DataType,
+    PaperType,
+    DataAccessibility,
+    GeoRegion,
+    DataType,
     # Output schemas
-    BaseClassificationSchema, PaperTypeClassificationOutput,
-    DataAccessibilityClassificationOutput, GeoClassificationOutput,
+    BaseClassificationSchema,
+    PaperTypeClassificationOutput,
+    DataAccessibilityClassificationOutput,
+    GeoClassificationOutput,
     DataTypeClassificationOutput,
 )
 
@@ -29,6 +34,7 @@ IMPORTANT:
 @dataclass
 class BaseClassifierConfig:
     """Base configuration for a paper classifier."""
+
     similarity_threshold: float = 0.75
     top_k: int = 10
 
@@ -48,7 +54,6 @@ class BaseClassifierConfig:
 
     # Extra output fields (legacy; prefer Pydantic schema fields).
     extra_output_fields: Dict[str, Any] = field(default_factory=dict)
-
 
 
 # -----------------------------------------------------------------------------
@@ -140,75 +145,84 @@ class BaseClassifierConfig:
 # Data Availability
 # -----------------------------------------------------------------------------
 
-from .schemas import DATA_ACCESS_CODE_TO_ENUM, DATA_ACCESS_CODE_LABELS, DATA_ACCESS_CODE_DEFINITIONS
+from .schemas import (
+    DATA_ACCESS_CODE_TO_ENUM,
+    DATA_ACCESS_CODE_LABELS,
+    DATA_ACCESS_CODE_DEFINITIONS,
+)
+
 
 @dataclass
 class DataAccessibilityClassifierConfig(BaseClassifierConfig):
     """Configuration for classifying data availability (DAVAIL)."""
 
-    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        # OPEN
-        "open": [
-            "All data used in this study are available in a public repository (DOI/URL provided).",
-            "The dataset is deposited on Zenodo under DOI: 10.xxxx/zenodo.xxxxx.",
-            "De-identified data and analysis code are provided as supplementary CSV files.",
-            # Paper-as-release (protocol: still OPEN)
-            "We report a line list of confirmed cases and provide the full dataset in Table S1.",
-        ],
-        # REPORTED
-        "reported": [
-            "We provide stratified case counts by age group and week in Table 2, but do not release the underlying dataset.",
-            "Table S3 reports detailed frequency tables that allow recomputation of key rates, but no repository link is provided.",
-            "The manuscript includes partial time-series points sufficient to re-aggregate trends, without providing the full dataset.",
-        ],
-        # AVAILABLE_UPON_REQUEST
-        "upon_request": [
-            "Data are available from the corresponding author upon reasonable request.",
-            "Access requires signing a data use agreement and approval by the data custodian.",
-            "Researchers may apply to the institutional data access committee for permission.",
-        ],
-        # REFERENCED
-        "referenced": [
-            "We used case counts reported by the Ministry of Health, but provide no stable link or retrieval instructions.",
-            "Data were taken from a named public dashboard, but the paper provides only derived metrics and no downloadable dataset or stable identifier.",
-            "We extracted summary statistics from Smith et al. (#b12) without providing re-aggregatable tables or a stable access path to the underlying data.",
-        ],
-        # CLOSED
-        "closed": [
-            "The data cannot be shared due to legal and ethical restrictions.",
-            "Patient-level data are confidential and not available for public release.",
-            "The dataset is proprietary and cannot be made available.",
-        ],
-        # # NOT_STATED
-        # "not_stated": [
-        # ],
-    })
+    template_paragraphs: Dict[str, List[str]] = field(
+        default_factory=lambda: {
+            # OPEN
+            "open": [
+                "All data used in this study are available in a public repository (DOI/URL provided).",
+                "The dataset is deposited on Zenodo under DOI: 10.xxxx/zenodo.xxxxx.",
+                "De-identified data and analysis code are provided as supplementary CSV files.",
+                # Paper-as-release (protocol: still OPEN)
+                "We report a line list of confirmed cases and provide the full dataset in Table S1.",
+            ],
+            # REPORTED
+            "reported": [
+                "We provide stratified case counts by age group and week in Table 2, but do not release the underlying dataset.",
+                "Table S3 reports detailed frequency tables that allow recomputation of key rates, but no repository link is provided.",
+                "The manuscript includes partial time-series points sufficient to re-aggregate trends, without providing the full dataset.",
+            ],
+            # AVAILABLE_UPON_REQUEST
+            "upon_request": [
+                "Data are available from the corresponding author upon reasonable request.",
+                "Access requires signing a data use agreement and approval by the data custodian.",
+                "Researchers may apply to the institutional data access committee for permission.",
+            ],
+            # REFERENCED
+            "referenced": [
+                "We used case counts reported by the Ministry of Health, but provide no stable link or retrieval instructions.",
+                "Data were taken from a named public dashboard, but the paper provides only derived metrics and no downloadable dataset or stable identifier.",
+                "We extracted summary statistics from Smith et al. (#b12) without providing re-aggregatable tables or a stable access path to the underlying data.",
+            ],
+            # CLOSED
+            "closed": [
+                "The data cannot be shared due to legal and ethical restrictions.",
+                "Patient-level data are confidential and not available for public release.",
+                "The dataset is proprietary and cannot be made available.",
+            ],
+            # # NOT_STATED
+            # "not_stated": [
+            # ],
+        }
+    )
 
-    cr_template_sentences: Dict[str, List[str]] = field(default_factory=lambda: { # prototypical evidence sentences
-        # OPEN
-        "open": [
-            "The data are publicly available in a repository, supplement, paper package, or the full dataset is published in the paper itself."
-        ],
-        # REPORTED
-        "reported": [
-            "We report detailed counts or tables that allow the main results to be recomputed, but we do not release the full dataset."
-        ],
-        # AVAILABLE_UPON_REQUEST
-        "upon_request": [
-            "The data are available only on request, by author contact, committee approval, or an institutional access process."
-        ],
-        # REFERENCED
-        "referenced": [
+    cr_template_sentences: Dict[str, List[str]] = field(
+        default_factory=lambda: {  # prototypical evidence sentences
+            # OPEN
+            "open": [
+                "The data are publicly available in a repository, supplement, paper package, or the full dataset is published in the paper itself."
+            ],
+            # REPORTED
+            "reported": [
+                "We report detailed counts or tables that allow the main results to be recomputed, but we do not release the full dataset."
+            ],
+            # AVAILABLE_UPON_REQUEST
+            "upon_request": [
+                "The data are available only on request, by author contact, committee approval, or an institutional access process."
+            ],
+            # REFERENCED
+            "referenced": [
                 "We used data reported by a previous study or made available by a public health authority."
-        ],
-        # CLOSED
-        "closed": [
-            "The data cannot be shared because of legal, ethical, confidentiality, or licensing restrictions."
-        ],
-        # # NOT_STATED
-        # "not_stated": [
-        # ],
-    })
+            ],
+            # CLOSED
+            "closed": [
+                "The data cannot be shared because of legal, ethical, confidentiality, or licensing restrictions."
+            ],
+            # # NOT_STATED
+            # "not_stated": [
+            # ],
+        }
+    )
 
     classification_mapping: Dict[str, DataAccessibility] = field(
         default_factory=lambda: DATA_ACCESS_CODE_TO_ENUM.copy()
@@ -266,15 +280,18 @@ Keywords: {keywords}
 {schema}
 """
 
-    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
-        "definitions": "\n".join([f"- **{k} – {v}**" for k, v in DATA_ACCESS_CODE_DEFINITIONS.items()])
-    })
+    extra_output_fields: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "definitions": "\n".join(
+                [f"- **{k} – {v}**" for k, v in DATA_ACCESS_CODE_DEFINITIONS.items()]
+            )
+        }
+    )
 
     output_schema: Any = DataAccessibilityClassificationOutput
-    default_classification: Any = field(default_factory=lambda: [DataAccessibility.UNCLEAR])
-
-
-
+    default_classification: Any = field(
+        default_factory=lambda: [DataAccessibility.UNCLEAR]
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -288,49 +305,53 @@ from .schemas import PAPER_TYPE_DEFINITIONS
 class PaperTypeClassifierConfig(BaseClassifierConfig):
     """Configuration for the parameter-estimation focused PAPER_TYPE classifier."""
 
-    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "EMPIRICAL": [
-            "We report a prospective cohort study of exposed contacts and estimate the incubation period from observed symptom onset times.",
-            "Using contact tracing line-list data collected during the outbreak, we estimate the secondary attack rate and serial interval.",
-            "We describe a new surveillance dataset and analyze observed case notifications to estimate age-specific case fatality risk.",
-        ],
-        "INFERENCE": [
-            "We fit a renewal model to incidence data to infer time-varying R_t under alternative reporting assumptions.",
-            "An SEIR model was calibrated to hospitalization and death time series to estimate R_0 via maximum likelihood and Bayesian inference.",
-            "We use phylodynamic modeling of viral sequences to reconstruct infection dynamics and estimate the effective population size over time.",
-        ],
-        "FORECAST": [
-            "We project epidemic trajectories under alternative intervention scenarios and compare expected hospital demand over the next 12 weeks.",
-            "We generate short-term forecasts of incident cases and evaluate predictive performance across multiple regions.",
-            "We perform counterfactual simulations to quantify the expected impact of school closures on future transmission.",
-        ],
-        "SYNTHESIS": [
-            "We conducted a systematic review (PRISMA) and meta-analysis to obtain pooled estimates of the serial interval across studies.",
-            "We systematically searched the literature and synthesized published estimates of the infection fatality ratio using random-effects models.",
-            "We appraised study quality and summarized parameter estimates across prior outbreaks using predefined inclusion criteria.",
-        ],
-        "METHODOLOGICAL": [
-            "We propose a new estimator for generation time that corrects right truncation and assess identifiability under different sampling schemes.",
-            "We develop an inference framework with bias/uncertainty quantification and provide open-source software to estimate R_t from incidence.",
-            "We derive theoretical results about epidemic thresholds on networks and validate the method with illustrative simulations.",
-        ],
-        "COMMENTARY": [
-            "We discuss challenges in interpreting early R_0 estimates and provide recommendations for reporting uncertainty and assumptions.",
-            "This perspective reviews common pitfalls in parameter estimation and offers guidance for public health decision-making.",
-            "We provide a narrative overview of evidence on transmission dynamics without presenting new quantitative estimates.",
-        ],
-        "OTHER": [
-            "This paper focuses on virology and laboratory assays without estimating epidemiological parameters or proposing parameter-estimation methods.",
-            "The work is primarily clinical case management guidance and does not include parameter estimation, forecasting, or evidence synthesis.",
-        ],
-    })
+    template_paragraphs: Dict[str, List[str]] = field(
+        default_factory=lambda: {
+            "EMPIRICAL": [
+                "We report a prospective cohort study of exposed contacts and estimate the incubation period from observed symptom onset times.",
+                "Using contact tracing line-list data collected during the outbreak, we estimate the secondary attack rate and serial interval.",
+                "We describe a new surveillance dataset and analyze observed case notifications to estimate age-specific case fatality risk.",
+            ],
+            "INFERENCE": [
+                "We fit a renewal model to incidence data to infer time-varying R_t under alternative reporting assumptions.",
+                "An SEIR model was calibrated to hospitalization and death time series to estimate R_0 via maximum likelihood and Bayesian inference.",
+                "We use phylodynamic modeling of viral sequences to reconstruct infection dynamics and estimate the effective population size over time.",
+            ],
+            "FORECAST": [
+                "We project epidemic trajectories under alternative intervention scenarios and compare expected hospital demand over the next 12 weeks.",
+                "We generate short-term forecasts of incident cases and evaluate predictive performance across multiple regions.",
+                "We perform counterfactual simulations to quantify the expected impact of school closures on future transmission.",
+            ],
+            "SYNTHESIS": [
+                "We conducted a systematic review (PRISMA) and meta-analysis to obtain pooled estimates of the serial interval across studies.",
+                "We systematically searched the literature and synthesized published estimates of the infection fatality ratio using random-effects models.",
+                "We appraised study quality and summarized parameter estimates across prior outbreaks using predefined inclusion criteria.",
+            ],
+            "METHODOLOGICAL": [
+                "We propose a new estimator for generation time that corrects right truncation and assess identifiability under different sampling schemes.",
+                "We develop an inference framework with bias/uncertainty quantification and provide open-source software to estimate R_t from incidence.",
+                "We derive theoretical results about epidemic thresholds on networks and validate the method with illustrative simulations.",
+            ],
+            "COMMENTARY": [
+                "We discuss challenges in interpreting early R_0 estimates and provide recommendations for reporting uncertainty and assumptions.",
+                "This perspective reviews common pitfalls in parameter estimation and offers guidance for public health decision-making.",
+                "We provide a narrative overview of evidence on transmission dynamics without presenting new quantitative estimates.",
+            ],
+            "OTHER": [
+                "This paper focuses on virology and laboratory assays without estimating epidemiological parameters or proposing parameter-estimation methods.",
+                "The work is primarily clinical case management guidance and does not include parameter estimation, forecasting, or evidence synthesis.",
+            ],
+        }
+    )
 
     classification_mapping: Dict[str, PaperType] = field(
         default_factory=lambda: {pt.value: pt for pt in PaperType}
     )
 
     category_labels: Dict[str, str] = field(
-        default_factory=lambda: {pt.value: pt.value for pt in PaperType if pt != PaperType.UNCLEAR}
+        default_factory=lambda: {
+            pt.value: pt.value for pt in PaperType if pt != PaperType.UNCLEAR
+        }
     )
 
     system_prompt: str = (
@@ -369,24 +390,31 @@ Keywords: {keywords}
 """
 
     # Prompt-time helper: definitions are injected by the caller when formatting user_prompt_template.
-    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
-        "definitions": "\n".join(
-            [f"- {k}: {v}" for k, v in PAPER_TYPE_DEFINITIONS.items() if k not in {"UNCLEAR"}]
-        )
-    })
+    extra_output_fields: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "definitions": "\n".join(
+                [
+                    f"- {k}: {v}"
+                    for k, v in PAPER_TYPE_DEFINITIONS.items()
+                    if k not in {"UNCLEAR"}
+                ]
+            )
+        }
+    )
 
     output_schema: Any = PaperTypeClassificationOutput
     default_classification: Any = field(default_factory=lambda: [PaperType.UNCLEAR])
-
-
-
 
 
 # -----------------------------------------------------------------------------
 # DTYPE (Data Type) – protocol-aligned
 # -----------------------------------------------------------------------------
 
-from .schemas import DATA_TYPE_CODE_TO_ENUM, DATA_TYPE_CODE_LABELS, DATA_TYPE_CODE_DEFINITIONS
+from .schemas import (
+    DATA_TYPE_CODE_TO_ENUM,
+    DATA_TYPE_CODE_LABELS,
+    DATA_TYPE_CODE_DEFINITIONS,
+)
 
 
 @dataclass
@@ -402,46 +430,52 @@ class DataTypeClassifierConfig(BaseClassifierConfig):
     - NO_EMPIRICAL_DATA
     """
 
-    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "traditional": [
-            "We analyzed routinely collected case notifications from the national surveillance system.",
-            "Hospital admissions and deaths were extracted from administrative health records.",
-            "We used PCR-confirmed test line lists reported by regional health authorities.",
-        ],
-        "non_traditional_health": [
-            "Self-reported symptoms were collected using a mobile application deployed at national scale.",
-            "Wastewater samples were analyzed to quantify viral load as a proxy for community spread.",
-            "Wearable-device heart rate data were used to detect anomalous physiological patterns.",
-            "Digital patient data from a large-scale EHR-based research network were harmonized for analysis.",
-        ],
-        "non_traditional_mobility": [
-            "Anonymized mobile phone call detail records were used to estimate population movements.",
-            "GPS traces from a smartphone application were used to reconstruct mobility networks.",
-            "Bluetooth-based proximity signals from digital contact tracing were used to infer contact patterns.",
-        ],
-        "non_traditional_sentiment": [
-            "We collected tweets and analyzed content to assess public risk perception.",
-            "Survey panel data tracked attitudes and behaviors in response to interventions.",
-            "Crowdsourced reports of symptoms and perceptions were used to monitor behavioral changes.",
-        ],
-        "non_traditional_economic": [
-            "Aggregated credit and debit card transaction data were used as a proxy for local economic activity.",
-            "Supply-chain shipment data were analyzed to assess the impact of COVID-19 on the distribution "
-            "of essential goods.",
-            "Open contracting data on emergency procurement were used to analyze government spending patterns.",
-        ],
-        "synthetic": [
-            "We simulated epidemic trajectories to evaluate policy scenarios and support the main conclusions.",
-            "An agent-based model generated simulated outcomes used as evidence for intervention effects.",
-        ],
-        "no_empirical_data": [
-            "We present a conceptual framework without analyzing empirical data.",
-            "This paper provides a theoretical derivation and does not fit to data.",
-        ],
-    })
+    template_paragraphs: Dict[str, List[str]] = field(
+        default_factory=lambda: {
+            "traditional": [
+                "We analyzed routinely collected case notifications from the national surveillance system.",
+                "Hospital admissions and deaths were extracted from administrative health records.",
+                "We used PCR-confirmed test line lists reported by regional health authorities.",
+            ],
+            "non_traditional_health": [
+                "Self-reported symptoms were collected using a mobile application deployed at national scale.",
+                "Wastewater samples were analyzed to quantify viral load as a proxy for community spread.",
+                "Wearable-device heart rate data were used to detect anomalous physiological patterns.",
+                "Digital patient data from a large-scale EHR-based research network were harmonized for analysis.",
+            ],
+            "non_traditional_mobility": [
+                "Anonymized mobile phone call detail records were used to estimate population movements.",
+                "GPS traces from a smartphone application were used to reconstruct mobility networks.",
+                "Bluetooth-based proximity signals from digital contact tracing were used to infer contact patterns.",
+            ],
+            "non_traditional_sentiment": [
+                "We collected tweets and analyzed content to assess public risk perception.",
+                "Survey panel data tracked attitudes and behaviors in response to interventions.",
+                "Crowdsourced reports of symptoms and perceptions were used to monitor behavioral changes.",
+            ],
+            "non_traditional_economic": [
+                "Aggregated credit and debit card transaction data were used as a proxy for local economic activity.",
+                "Supply-chain shipment data were analyzed to assess the impact of COVID-19 on the distribution "
+                "of essential goods.",
+                "Open contracting data on emergency procurement were used to analyze government spending patterns.",
+            ],
+            "synthetic": [
+                "We simulated epidemic trajectories to evaluate policy scenarios and support the main conclusions.",
+                "An agent-based model generated simulated outcomes used as evidence for intervention effects.",
+            ],
+            "no_empirical_data": [
+                "We present a conceptual framework without analyzing empirical data.",
+                "This paper provides a theoretical derivation and does not fit to data.",
+            ],
+        }
+    )
 
-    classification_mapping: Dict[str, DataType] = field(default_factory=lambda: DATA_TYPE_CODE_TO_ENUM.copy())
-    category_labels: Dict[str, str] = field(default_factory=lambda: DATA_TYPE_CODE_LABELS.copy())
+    classification_mapping: Dict[str, DataType] = field(
+        default_factory=lambda: DATA_TYPE_CODE_TO_ENUM.copy()
+    )
+    category_labels: Dict[str, str] = field(
+        default_factory=lambda: DATA_TYPE_CODE_LABELS.copy()
+    )
 
     system_prompt: str = (
         "You are an epidemiologist classifying papers by the type(s) of data used as evidence (DTYPE). "
@@ -488,9 +522,13 @@ Keywords: {keywords}
 # Carefully populate at least all compulsory fields and as many optional fields as possible. Do not leave any field blank or null if you have information to populate it. Return a single JSON object matching the schema above. Do NOT add extra text.
 """
 
-    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
-        "definitions": "\n".join([f'- **{k} – {v}**' for k, v in DATA_TYPE_CODE_DEFINITIONS.items()])
-    })
+    extra_output_fields: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "definitions": "\n".join(
+                [f"- **{k} – {v}**" for k, v in DATA_TYPE_CODE_DEFINITIONS.items()]
+            )
+        }
+    )
 
     output_schema: Any = DataTypeClassificationOutput
     default_classification: Any = field(default_factory=lambda: [DataType.UNCLEAR])
@@ -500,7 +538,7 @@ Keywords: {keywords}
 # GEO (Geography) – protocol-aligned
 # -----------------------------------------------------------------------------
 
-from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS, GEO_CODE_DEFINITIONS
+from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS
 
 
 @dataclass
@@ -517,20 +555,26 @@ class GeoClassifierConfig(BaseClassifierConfig):
     - extras.cities
     """
 
-    template_paragraphs: Dict[str, List[str]] = field(default_factory=lambda: {
-        "geo_evidence": [
-            "Cases were detected in Germany among travelers infected in Turkey.",
-            "We analyzed an outbreak in hospitals in Italy and cases reported in Spain.",
-            "The study used surveillance data from Brazil, Argentina, and Chile.",
-            "Samples were collected in a controlled laboratory setting using laboratory-bred animals.",
-            "This study provides a global overview using data from multiple continents.",
-            "We analyzed data from Moscow and Saint Petersburg.",
-            "Participants were recruited from Cairo and Alexandria.",
-        ],
-    })
+    template_paragraphs: Dict[str, List[str]] = field(
+        default_factory=lambda: {
+            "geo_evidence": [
+                "Cases were detected in Germany among travelers infected in Turkey.",
+                "We analyzed an outbreak in hospitals in Italy and cases reported in Spain.",
+                "The study used surveillance data from Brazil, Argentina, and Chile.",
+                "Samples were collected in a controlled laboratory setting using laboratory-bred animals.",
+                "This study provides a global overview using data from multiple continents.",
+                "We analyzed data from Moscow and Saint Petersburg.",
+                "Participants were recruited from Cairo and Alexandria.",
+            ],
+        }
+    )
 
-    classification_mapping: Dict[str, GeoRegion] = field(default_factory=lambda: GEO_CODE_TO_ENUM.copy())
-    category_labels: Dict[str, str] = field(default_factory=lambda: GEO_CODE_LABELS.copy())
+    classification_mapping: Dict[str, GeoRegion] = field(
+        default_factory=lambda: GEO_CODE_TO_ENUM.copy()
+    )
+    category_labels: Dict[str, str] = field(
+        default_factory=lambda: GEO_CODE_LABELS.copy()
+    )
 
     system_prompt: str = (
         "You are a research analyst assigning continent-level geographic labels (GEO) to epidemiological papers. "
@@ -594,18 +638,22 @@ Keywords: {keywords}
 {schema}
 """
 
-    extra_output_fields: Dict[str, Any] = field(default_factory=lambda: {
-        "definitions": "\n".join([
-            "- Russia → Europe (C)",
-            "- Turkey → Asia (B)",
-            "- Egypt → Africa (A)",
-            "- Kazakhstan → Asia (B)",
-            "- Azerbaijan → Asia (B)",
-            "- Georgia → Asia (B)",
-            "- Cyprus → Asia (B)",
-            "- Armenia → Asia (B)",
-        ])
-    })
+    extra_output_fields: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "definitions": "\n".join(
+                [
+                    "- Russia → Europe (C)",
+                    "- Turkey → Asia (B)",
+                    "- Egypt → Africa (A)",
+                    "- Kazakhstan → Asia (B)",
+                    "- Azerbaijan → Asia (B)",
+                    "- Georgia → Asia (B)",
+                    "- Cyprus → Asia (B)",
+                    "- Armenia → Asia (B)",
+                ]
+            )
+        }
+    )
 
     output_schema: Any = GeoClassificationOutput
     default_classification: Any = field(default_factory=lambda: [GeoRegion.UNCLEAR])

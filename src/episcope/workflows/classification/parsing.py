@@ -27,7 +27,9 @@ class ClassificationResponseParser:
         extras = self._extract_extras(parsed)
         return ClassificationResult(
             classification=classification,
-            confidence=float(parsed.confidence) if getattr(parsed, "confidence", None) is not None else 0.0,
+            confidence=float(parsed.confidence)
+            if getattr(parsed, "confidence", None) is not None
+            else 0.0,
             class_probabilities=parsed.class_probabilities or {},
             evidence={"reasoning": parsed.reasoning},
             extras=extras,
@@ -39,7 +41,9 @@ class ClassificationResponseParser:
         return ClassificationResult(
             classification=self.config.default_classification,
             confidence=0.0,
-            class_probabilities={label: uniform for label in self.config.category_labels.values()},
+            class_probabilities={
+                label: uniform for label in self.config.category_labels.values()
+            },
             evidence={"reasoning": "Classification failed; defaulting to unclear."},
             extras={},
         )
@@ -57,14 +61,20 @@ class ClassificationResponseParser:
         try:
             json.loads(candidate)
         except json.JSONDecodeError as exc:
-            raise ClassificationParseError(f"Extracted JSON is not valid JSON: {exc}") from exc
+            raise ClassificationParseError(
+                f"Extracted JSON is not valid JSON: {exc}"
+            ) from exc
 
         try:
             return self.config.output_schema.model_validate_json(candidate)
         except ValidationError as exc:
-            raise ClassificationParseError(f"JSON does not match schema: {exc}") from exc
+            raise ClassificationParseError(
+                f"JSON does not match schema: {exc}"
+            ) from exc
         except Exception as exc:
-            raise ClassificationParseError(f"Unexpected validation error: {exc}") from exc
+            raise ClassificationParseError(
+                f"Unexpected validation error: {exc}"
+            ) from exc
 
     @staticmethod
     def _extract_json_candidate(text: str) -> Optional[str]:
@@ -108,7 +118,9 @@ class ClassificationResponseParser:
                 return mapped or self.config.default_classification
 
             mapped = self.config.classification_mapping.get(raw_cls)
-            return [mapped] if mapped is not None else self.config.default_classification
+            return (
+                [mapped] if mapped is not None else self.config.default_classification
+            )
 
         if hasattr(parsed, "primary_label"):
             return [parsed.primary_label]

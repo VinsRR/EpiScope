@@ -45,7 +45,9 @@ class BaseCrossEncoderEvidenceReranker(EvidenceRerankingStrategy, ABC):
         self.config = config
         self.top_k = top_k
 
-    def configure(self, config: BaseClassifierConfig) -> "BaseCrossEncoderEvidenceReranker":
+    def configure(
+        self, config: BaseClassifierConfig
+    ) -> "BaseCrossEncoderEvidenceReranker":
         if self.config is None:
             self.config = config
         return self
@@ -75,19 +77,27 @@ class BaseCrossEncoderEvidenceReranker(EvidenceRerankingStrategy, ABC):
         ranked = sorted(chunks, key=result_score, reverse=True)
         if self.top_k is None:
             return list(ranked)
-        return ranked[:self.top_k]
+        return ranked[: self.top_k]
 
     def _cross_encoder_query(self, category: str) -> str:
         if self.config is None:
-            raise ValueError("Cross-encoder evidence reranker requires a classifier config before use.")
-        templates = self.config.cr_template_sentences.get(category) or self.config.template_paragraphs.get(category)
+            raise ValueError(
+                "Cross-encoder evidence reranker requires a classifier config before use."
+            )
+        templates = self.config.cr_template_sentences.get(
+            category
+        ) or self.config.template_paragraphs.get(category)
         if not templates:
-            raise ValueError(f"No retrieval or cross-encoder templates configured for category {category!r}.")
+            raise ValueError(
+                f"No retrieval or cross-encoder templates configured for category {category!r}."
+            )
         return templates[0]
 
     def _categories(self) -> List[str]:
         if self.config is None:
-            raise ValueError("Cross-encoder evidence reranker requires a classifier config before use.")
+            raise ValueError(
+                "Cross-encoder evidence reranker requires a classifier config before use."
+            )
         categories = list(self.config.cr_template_sentences.keys())
         if categories:
             return categories
@@ -140,7 +150,9 @@ class GlobalCrossEncoderReranker(BaseCrossEncoderEvidenceReranker):
     """Rerank one shared candidate pool against each label/category query."""
 
     def rerank(self, category_results: CategoryResults) -> CategoryResults:
-        shared_candidates = self._truncate(self._best_unique_chunks(category_results).values())
+        shared_candidates = self._truncate(
+            self._best_unique_chunks(category_results).values()
+        )
         if not shared_candidates:
             return {}
 
@@ -156,7 +168,9 @@ class GlobalCrossEncoderReranker(BaseCrossEncoderEvidenceReranker):
         return reranked
 
     @staticmethod
-    def _best_unique_chunks(category_results: CategoryResults) -> Dict[str, SearchResult]:
+    def _best_unique_chunks(
+        category_results: CategoryResults,
+    ) -> Dict[str, SearchResult]:
         unique: Dict[str, SearchResult] = {}
         for chunks_by_text in category_results.values():
             for text, chunk in chunks_by_text.items():

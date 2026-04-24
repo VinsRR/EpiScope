@@ -12,6 +12,7 @@ Notes
 - Letter codes (A, B, …) are kept for prompt compatibility, while enums provide
   stable semantic labels for downstream use.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,9 +26,13 @@ from pydantic import BaseModel, Field, model_validator
 # Base output schema (shared by all classifiers)
 # -----------------------------------------------------------------------------
 
+
 class BaseClassificationSchema(BaseModel):
     """Base output schema returned by an LLM classifier."""
-    reasoning: str = Field(..., description="Short 1–3 sentence explanation grounded in the provided text.")
+
+    reasoning: str = Field(
+        ..., description="Short 1–3 sentence explanation grounded in the provided text."
+    )
     confidence: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -107,6 +112,7 @@ class BaseClassificationSchema(BaseModel):
 # PAPER_TYPE (Epidemiological parameter-estimation paper taxonomy)
 # -----------------------------------------------------------------------------
 
+
 class PaperType(str, Enum):
     """Epidemiological parameter-estimation paper taxonomy (PAPER_TYPE).
 
@@ -168,7 +174,6 @@ PAPER_TYPE_DEFINITIONS: Dict[str, str] = {
 }
 
 
-
 class PaperTypeClassificationOutput(BaseClassificationSchema):
     """Primary + secondary output for PAPER_TYPE.
 
@@ -207,7 +212,9 @@ class PaperTypeClassificationOutput(BaseClassificationSchema):
                 seen.append(lbl)
 
         # Drop primary and UNCLEAR from secondary list
-        canonical = [lbl for lbl in seen if lbl not in {self.primary_label, PaperType.UNCLEAR}]
+        canonical = [
+            lbl for lbl in seen if lbl not in {self.primary_label, PaperType.UNCLEAR}
+        ]
 
         # OTHER should be exclusive: if any substantive label exists, drop OTHER from secondary
         canonical = [lbl for lbl in canonical if lbl != PaperType.OTHER]
@@ -216,12 +223,10 @@ class PaperTypeClassificationOutput(BaseClassificationSchema):
         return self
 
 
-
-
-
 # -----------------------------------------------------------------------------
 # DAVAIL (Data Availability) – protocol-aligned taxonomy
 # -----------------------------------------------------------------------------
+
 
 class DataAccessibility(str, Enum):
     """
@@ -232,6 +237,7 @@ class DataAccessibility(str, Enum):
     - There is no external verification of links or repositories.
     - `UNCLEAR` is reserved as an internal fallback and should not be emitted by the LLM.
     """
+
     OPEN = "open"
     REPORTED = "reported"
     AVAILABLE_UPON_REQUEST = "available_upon_request"
@@ -280,7 +286,7 @@ DATA_ACCESS_CODE_DEFINITIONS: Dict[DataAccessibilityCode, str] = {
         "The data are attributed to a specifically identifiable third-party source (e.g., public health authority, institutional database, emergency dashboard, "
         "named public source, or other paper), but the paper provides neither a stable retrieval path for the source data nor sufficient detail to re-aggregate "
         "the data (i.e., it fails the REPORTED re-aggregation criterion). Reporting is data-thin—typically limited to derived outputs such as effect sizes, "
-        "coefficients, or fitted model curves—preventing independent verification of the underlying counts. Vague attributions (e.g., \"government data\") "
+        'coefficients, or fitted model curves—preventing independent verification of the underlying counts. Vague attributions (e.g., "government data") '
         "do not qualify."
     ),
     "D": (
@@ -307,6 +313,7 @@ class DataAccessibilityClassificationOutput(BaseClassificationSchema):
     availability mechanisms. If the paper is itself the primary data release,
     treat this case as OPEN if the raw dataset can be reconstructed from reported tables/appendices.
     """
+
     classification: List[DataAccessibilityCode] = Field(
         ...,
         min_length=1,
@@ -341,10 +348,10 @@ class DataAccessibilityClassificationOutput(BaseClassificationSchema):
         return self
 
 
-
 # -----------------------------------------------------------------------------
 # GEO (Geography) – protocol-aligned taxonomy (continent-level + IRRELEVANT/UNCLEAR)
 # -----------------------------------------------------------------------------
+
 
 class GeoRegion(str, Enum):
     AFRICA = "africa"
@@ -355,7 +362,7 @@ class GeoRegion(str, Enum):
     OCEANIA = "oceania"
 
     IRRELEVANT = "irrelevant"  # e.g., strictly controlled laboratory setting, or purely synthetic/no-geo data
-    UNCLEAR = "unclear"        # not enough stated information
+    UNCLEAR = "unclear"  # not enough stated information
 
 
 GeoCode = Literal["A", "B", "C", "D", "E", "F", "G", "H"]
@@ -397,11 +404,11 @@ GEO_CODE_DEFINITIONS: Dict[GeoCode, str] = {
 class GeoExtras(BaseModel):
     countries: List[str] = Field(
         default_factory=list,
-        description="Country names explicitly tied to the epidemiological evidence/data used in the paper."
+        description="Country names explicitly tied to the epidemiological evidence/data used in the paper.",
     )
     cities: List[str] = Field(
         default_factory=list,
-        description="City/region/state/province names explicitly tied to the epidemiological evidence/data used in the paper."
+        description="City/region/state/province names explicitly tied to the epidemiological evidence/data used in the paper.",
     )
 
     @model_validator(mode="after")
@@ -434,9 +441,11 @@ class GeoClassificationOutput(BaseClassificationSchema):
     )
     primary_label: Optional[GeoCode] = Field(
         default=None,
-        description="Dominant continent if one clearly dominates; otherwise null."
+        description="Dominant continent if one clearly dominates; otherwise null.",
     )
-    extras: GeoExtras = Field(default_factory=GeoExtras, description="Extracted geographic locations.")
+    extras: GeoExtras = Field(
+        default_factory=GeoExtras, description="Extracted geographic locations."
+    )
 
     @model_validator(mode="after")
     def _normalize_and_validate(self) -> "GeoClassificationOutput":
@@ -470,8 +479,10 @@ class GeoClassificationOutput(BaseClassificationSchema):
 # DTYPE (Data Type) – protocol-aligned taxonomy (#Data4COVID19 families + synthetic/no data)
 # -----------------------------------------------------------------------------
 
+
 class DataType(str, Enum):
     """Protocol-aligned data type categories (DTYPE)."""
+
     TRADITIONAL = "traditional"
     NON_TRADITIONAL_HEALTH = "non_traditional_health"
     NON_TRADITIONAL_MOBILITY = "non_traditional_mobility"
@@ -517,13 +528,12 @@ DATA_TYPE_CODE_DEFINITIONS: Dict[DataTypeCode, str] = {
     "F": "Synthetic – simulated data used as evidence supporting claims (e.g., scenario projections, counterfactuals).",
     "G": "No Empirical Data – conceptual/theoretical/methodological work with no empirical dataset analyzed.",
     "H": "Unclear / Not specified",
-
-
 }
 
 
 class DataTypeClassificationOutput(BaseClassificationSchema):
     """Multi-label output for DTYPE."""
+
     classification: List[DataTypeCode] = Field(
         ...,
         min_length=1,
@@ -535,7 +545,7 @@ class DataTypeClassificationOutput(BaseClassificationSchema):
     )
     primary_label: Optional[DataTypeCode] = Field(
         default=None,
-        description="Optional dominant label if one clearly dominates; otherwise null."
+        description="Optional dominant label if one clearly dominates; otherwise null.",
     )
 
     @model_validator(mode="after")
@@ -570,6 +580,7 @@ class DataTypeClassificationOutput(BaseClassificationSchema):
 # -----------------------------------------------------------------------------
 # Final workflow internal result object (used outside Pydantic boundary)
 # -----------------------------------------------------------------------------
+
 
 @dataclass
 class ClassificationResult:
