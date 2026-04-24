@@ -23,9 +23,9 @@ dotenv.load_dotenv()
 class Settings:
     strategy_name: str = "grobid"
     paper_source: str = "csv_subset" # one of ["all_db", "csv_subset"]
-    subset_papers_csv_path: Optional[str] = "../sampled_papers_full.csv" # None
+    subset_papers_csv_path: Optional[str] = "sampled_papers_full.csv" # None
     subset_papers_csv_sep: str = "\t"
-    ground_truth_csv_path: Optional[str] = "../sampled_papers_full.csv"
+    ground_truth_csv_path: Optional[str] = "sampled_papers_full.csv"
     ground_truth_csv_sep: str = "\t"
     mongo_uri_or_env: str = "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF@cluster0.s82lhln.mongodb.net/"
     mongo_db_name: str = "episcope_academic_db"
@@ -1215,10 +1215,10 @@ def main():
 
     # Grid
     CLASSIFIER_KINDS = [
-        # "paper_type",
+        "paper_type",
         "data_accessibility",
-        # "data_type",
-        # "geo"
+        "data_type",
+        "geo"
         ]
     LLM_PROVIDERS = [
         base.llm_provider,
