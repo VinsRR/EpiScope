@@ -74,15 +74,30 @@ class BaseRetriever(ABC):
         rank_score: Optional[float] = None,
     ) -> SearchResult:
         score = float(chunk.get("score", 0.0))
+        known_keys = {
+            "id",
+            "paper_id",
+            "text",
+            "section_type",
+            "section_title",
+            "title",
+            "is_metadata",
+            "score",
+            "rrf_score",
+            "rank_score",
+        }
         return SearchResult(
             id=str(chunk.get("id", "")),
             paper_id=chunk.get("paper_id", ""),
             text=chunk.get("text", ""),
             section_type=chunk.get("section_type", "other"),
-            title=chunk.get("title", ""),
+            section_title=chunk.get("section_title", chunk.get("title", "")),
+            title=chunk.get("title", chunk.get("section_title", "")),
+            is_metadata=bool(chunk.get("is_metadata", False)),
             similarity_score=score,
             rank_score=score if rank_score is None else float(rank_score),
             source=source or self.default_source,
+            artifacts={key: value for key, value in chunk.items() if key not in known_keys},
         )
 
     def _to_search_results(
