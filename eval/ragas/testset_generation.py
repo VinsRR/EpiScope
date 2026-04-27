@@ -233,6 +233,7 @@ def _build_query_distribution(
 
 # Added this due to mix of RAGAS issue with using existing chunks and summary generation (that are here removed from the transforms)
 # DISCREPANCY FROM THE STANDARD PIPELINE: no "summary generation" and no "chunk filtering"... might want tu substitute them at some point
+# https://github.com/vibrantlabsai/ragas/issues/2680
 from ragas.testset.transforms.engine import Parallel
 from ragas.testset.transforms.extractors import EmbeddingExtractor
 from ragas.testset.transforms.extractors.llm_based import ThemesExtractor, NERExtractor
