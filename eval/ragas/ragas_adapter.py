@@ -7,6 +7,9 @@ import pandas as pd
 
 from .models import RagCaseRunResult, RagasEvaluatorConfig
 
+from google import genai
+from google.genai import types  # Import types for configuration
+import httpx
 
 def _require_ragas():
     try:
@@ -54,75 +57,121 @@ def _metric_classes():
         }
 
 
+def _normalize_provider_alias(provider: str | None) -> str | None:
+    if provider is None:
+        return None
+    normalized = provider.strip().lower()
+    if normalized == "gemini":
+        return "google"
+    return normalized
+
+
 def _prepare_google_env(config: RagasEvaluatorConfig) -> None:
-    if config.llm_provider == "google" and config.api_key:
+    llm_provider = _normalize_provider_alias(config.llm_provider)
+    embedding_provider = _normalize_provider_alias(config.embedding_provider)
+    if llm_provider == "google" and config.api_key:
         os.environ.setdefault("GOOGLE_API_KEY", config.api_key)
-    if config.embedding_provider == "google" and config.api_key:
+    if embedding_provider == "google" and config.api_key:
         os.environ.setdefault("GOOGLE_API_KEY", config.api_key)
     if "GOOGLE_API_KEY" not in os.environ and "GEMINI_API_KEY" in os.environ:
         os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
 
 
+def _build_ragas_client(provider: str, config: RagasEvaluatorConfig):
+    if provider == "google":
+        api_key = config.api_key or os.environ.get("GOOGLE_API_KEY")
+
+        # 1. Define your granular httpx settings
+        timeout_config = httpx.Timeout(
+            connect=10.0,
+            read=30.0,
+            write=10.0,
+            pool=10.0,
+        )
+        limits_config = httpx.Limits(
+            max_keepalive_connections=5,
+            max_connections=10,
+        )
+
+        # 2. Wrap them in HttpOptions
+        # Note: 'timeout' in HttpOptions is usually a single float (ms),
+        # but 'client_args' allows passing the full httpx.Timeout object.
+        http_options = types.HttpOptions(
+            api_version=config.api_version, # Set api_version here if needed
+            base_url=config.base_url or config.api_base, # Set base_url here
+            client_args={
+                "timeout": timeout_config,
+                "limits": limits_config,
+            },
+            async_client_args={
+                "timeout": timeout_config,
+                "limits": limits_config,
+            }
+        )
+
+        # 3. Initialize the Client with http_options
+        return genai.Client(
+            api_key=api_key,
+            http_options=http_options
+        )
+
+
 def _build_evaluator_llm(config: RagasEvaluatorConfig):
     from ragas.llms import llm_factory
 
-    provider = config.llm_provider
+    provider = _normalize_provider_alias(config.llm_provider)
     model = config.llm_model
     if not provider or not model:
         return None
 
     _prepare_google_env(config)
+    client = _build_ragas_client(provider, config)
 
     kwargs: dict[str, Any] = {}
-    if config.api_key:
-        kwargs["api_key"] = config.api_key
-    if config.api_base:
-        kwargs["api_base"] = config.api_base
-    if config.base_url:
-        kwargs["base_url"] = config.base_url
     if config.api_version:
         kwargs["api_version"] = config.api_version
+    if config.base_url and provider not in {"openai"}:
+        kwargs["base_url"] = config.base_url
+    elif config.api_base and provider not in {"openai"}:
+        kwargs["base_url"] = config.api_base
 
-    return llm_factory(model, provider=provider, **kwargs)
+    if client is not None:
+        return llm_factory(model, provider=provider, client=client, **kwargs)
+
+    if provider in {"litellm", "ollama", "openai_compatible"}:
+        raise ValueError(
+            f"Unsupported evaluator LLM provider {provider!r} with the installed ragas version. "
+            "Please use openai or gemini/google, or extend _build_ragas_client()."
+        )
+
+    raise ValueError(
+        f"Unsupported evaluator LLM provider {provider!r}. "
+        "Use one of: openai, gemini, google."
+    )
 
 
 def _build_evaluator_embeddings(config: RagasEvaluatorConfig):
-    provider = config.embedding_provider
+    from ragas.embeddings.base import embedding_factory
+
+    provider = _normalize_provider_alias(config.embedding_provider)
     model = config.embedding_model
     if not provider or not model:
         return None
 
     _prepare_google_env(config)
+    client = _build_ragas_client(provider, config)
 
-    if provider == "openai":
-        from openai import OpenAI
-        from ragas.embeddings import OpenAIEmbeddings
-
-        client = OpenAI(api_key=config.api_key) if config.api_key else OpenAI()
-        return OpenAIEmbeddings(client=client, model=model)
-
-    if provider == "google":
-        from ragas.embeddings import GoogleEmbeddings
-
-        return GoogleEmbeddings(model=model)
-
-    if provider in {"litellm", "ollama", "openai_compatible"}:
-        from ragas.embeddings import LiteLLMEmbeddings
-
+    if provider in {"openai", "google"}:
         kwargs: dict[str, Any] = {}
-        if config.api_key:
-            kwargs["api_key"] = config.api_key
-        if config.api_base:
-            kwargs["api_base"] = config.api_base
-        if config.base_url:
-            kwargs["api_base"] = config.base_url
-        if config.api_version:
-            kwargs["api_version"] = config.api_version
-        return LiteLLMEmbeddings(model=model, **kwargs)
+        if config.base_url and provider != "openai":
+            kwargs["base_url"] = config.base_url
+        elif config.api_base and provider != "openai":
+            kwargs["base_url"] = config.api_base
+        return embedding_factory(provider=provider, model=model, client=client, **kwargs)
 
     raise ValueError(
         f"Unsupported evaluator embedding provider {provider!r}. "
-        "Use one of: openai, google, litellm, ollama, openai_compatible."
+        "Use one of: openai, gemini, google."
     )
 
 

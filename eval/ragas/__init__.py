@@ -14,7 +14,7 @@ from .precision_miner_eval import (
 )
 from .pipeline import run_cases
 from .ragas_adapter import evaluate_case_runs
-from .testset_generation import generate_testset_candidates
+from .testset_generation import generate_explorer_testset, generate_testset_candidates
 
 __all__ = [
     "GeneratedQueryReviewRecord",
@@ -23,6 +23,7 @@ __all__ = [
     "RagasEvaluatorConfig",
     "SimpleRagQaCase",
     "evaluate_case_runs",
+    "generate_explorer_testset",
     "generate_testset_candidates",
     "load_precision_miner_cases",
     "load_simple_rag_qa_cases",

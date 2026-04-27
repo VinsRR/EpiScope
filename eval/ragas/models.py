@@ -107,10 +107,11 @@ class GeneratedQueryReviewRecord:
     schema_version: str
     query_id: str
     source_kind: str
-    paper_path: str
     user_input: str
     reference: str
     status: str
+    paper_path: Optional[str] = None
+    paper_id: Optional[str] = None
     origin_case_id: Optional[str] = None
     reference_contexts: list[str] = field(default_factory=list)
     persona_name: Optional[str] = None
