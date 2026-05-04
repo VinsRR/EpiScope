@@ -7,9 +7,12 @@ from .base import AbstractVectorDB
 
 try:
     from qdrant_client import QdrantClient, models
+    from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 except ImportError:
     QdrantClient = None
     models = None
+    ResponseHandlingException = None
+    UnexpectedResponse = None
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,18 @@ def _batch_iterate(iterable: Iterable[Any], batch_size: int) -> Iterable[List[An
             batch = []
     if batch:
         yield batch
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    if ResponseHandlingException is not None and isinstance(exc, ResponseHandlingException):
+        return True
+    return False
+
+
+def _is_missing_collection_error(exc: Exception) -> bool:
+    if UnexpectedResponse is not None and isinstance(exc, UnexpectedResponse):
+        return exc.status_code == 404
+    return False
 
 
 class QdrantDB(AbstractVectorDB):
@@ -75,49 +90,60 @@ class QdrantDB(AbstractVectorDB):
         self.late_dim = late_dim
         self._payload_keys: Optional[set[str]] = None
 
+        collection_info = None
         try:
             collection_info = self.client.get_collection(
                 collection_name=self.collection
             )
+        except Exception as exc:
+            if _is_connection_error(exc):
+                raise ValueError(
+                    f"Could not connect to Qdrant at {url} while opening collection "
+                    f"{self.collection!r}. Make sure the Qdrant service is running and the "
+                    "URL is correct."
+                ) from exc
+            if not _is_missing_collection_error(exc):
+                raise
 
+        if collection_info is not None:
             # Existing collection: inspect capabilities
             vectors_config = collection_info.config.params.vectors
             sparse_vectors_config = getattr(
                 collection_info.config.params, "sparse_vectors", None
             )
 
-            if isinstance(vectors_config, dict):
-                self.use_dense = self.dense_vector_name in vectors_config
-                self.use_late = self.late_vector_name in vectors_config
-
-                if self.use_dense:
-                    self.dense_dim = vectors_config[self.dense_vector_name].size
-                    self.dense_distance = vectors_config[
-                        self.dense_vector_name
-                    ].distance
-
-                if self.use_late:
-                    self.late_dim = vectors_config[self.late_vector_name].size
-                    self.late_distance = vectors_config[self.late_vector_name].distance
-            else:
+            if not isinstance(vectors_config, dict):
                 raise ValueError(
                     f"Collection '{self.collection}' is not in named-vector mode. "
                     "Please migrate or recreate it."
                 )
 
+            self.use_dense = self.dense_vector_name in vectors_config
+            self.use_late = self.late_vector_name in vectors_config
+
+            if self.use_dense:
+                self.dense_dim = vectors_config[self.dense_vector_name].size
+                self.dense_distance = vectors_config[
+                    self.dense_vector_name
+                ].distance
+
+            if self.use_late:
+                self.late_dim = vectors_config[self.late_vector_name].size
+                self.late_distance = vectors_config[self.late_vector_name].distance
+
             self.use_sparse = bool(
                 sparse_vectors_config
                 and self.sparse_vector_name in sparse_vectors_config
             )
-
-        except Exception:
+        else:
             vectors_config: Dict[str, Any] = {}
             sparse_vectors_config: Dict[str, Any] = {}
 
             if use_dense:
                 if dense_dim is None:
                     raise ValueError(
-                        "dense_dim must be provided when creating a collection with dense vectors."
+                        f"Qdrant collection {self.collection!r} was not found at {url}, "
+                        "and dense_dim was not provided to create it."
                     )
                 vectors_config[self.dense_vector_name] = models.VectorParams(
                     size=dense_dim,

@@ -8,6 +8,7 @@ import numpy as np
 from eval.ragas.io import load_simple_rag_qa_cases
 from eval.ragas.models import RagPipelineConfig, SimpleRagQaCase
 from eval.ragas.pipeline import run_case, run_cases
+from eval.ragas.ragas_adapter import _normalize_provider_alias, _resolve_gemini_openai_base_url
 
 
 class _FakeEmbedder:
@@ -106,3 +107,21 @@ def test_run_cases_captures_errors_when_continue_on_error(tmp_path: Path) -> Non
 
     assert len(results) == 1
     assert results[0].run_error is not None
+
+
+def test_normalize_provider_alias_accepts_gemini() -> None:
+    assert _normalize_provider_alias("gemini") == "google"
+    assert _normalize_provider_alias("google") == "google"
+
+
+def test_resolve_gemini_openai_base_url_prefers_explicit_override() -> None:
+    from eval.ragas.models import RagasEvaluatorConfig
+
+    config = RagasEvaluatorConfig(base_url="https://example.test/openai/")
+    assert _resolve_gemini_openai_base_url(config) == "https://example.test/openai/"
+
+    config = RagasEvaluatorConfig(api_base="https://example.test/api/")
+    assert _resolve_gemini_openai_base_url(config) == "https://example.test/api/"
+
+    config = RagasEvaluatorConfig()
+    assert _resolve_gemini_openai_base_url(config) == "https://generativelanguage.googleapis.com/v1beta/openai/"

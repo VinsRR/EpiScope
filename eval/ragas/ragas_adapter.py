@@ -7,9 +7,7 @@ import pandas as pd
 
 from .models import RagCaseRunResult, RagasEvaluatorConfig
 
-from google import genai
-from google.genai import types  # Import types for configuration
-import httpx
+_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 def _require_ragas():
     try:
@@ -77,11 +75,30 @@ def _prepare_google_env(config: RagasEvaluatorConfig) -> None:
         os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
 
 
+def _resolve_gemini_openai_base_url(config: RagasEvaluatorConfig) -> str:
+    return config.base_url or config.api_base or _GEMINI_OPENAI_BASE_URL
+
+
 def _build_ragas_client(provider: str, config: RagasEvaluatorConfig):
+    if provider == "openai":
+        from openai import OpenAI
+
+        kwargs: dict[str, Any] = {}
+        if config.api_key:
+            kwargs["api_key"] = config.api_key
+        if config.base_url:
+            kwargs["base_url"] = config.base_url
+        elif config.api_base:
+            kwargs["base_url"] = config.api_base
+        return OpenAI(**kwargs)
+
     if provider == "google":
+        from google import genai
+        from google.genai import types
+        import httpx
+
         api_key = config.api_key or os.environ.get("GOOGLE_API_KEY")
 
-        # 1. Define your granular httpx settings
         timeout_config = httpx.Timeout(
             connect=10.0,
             read=30.0,
@@ -93,12 +110,9 @@ def _build_ragas_client(provider: str, config: RagasEvaluatorConfig):
             max_connections=10,
         )
 
-        # 2. Wrap them in HttpOptions
-        # Note: 'timeout' in HttpOptions is usually a single float (ms),
-        # but 'client_args' allows passing the full httpx.Timeout object.
         http_options = types.HttpOptions(
-            api_version=config.api_version, # Set api_version here if needed
-            base_url=config.base_url or config.api_base, # Set base_url here
+            api_version=config.api_version,
+            base_url=config.base_url or config.api_base,
             client_args={
                 "timeout": timeout_config,
                 "limits": limits_config,
@@ -109,11 +123,30 @@ def _build_ragas_client(provider: str, config: RagasEvaluatorConfig):
             }
         )
 
-        # 3. Initialize the Client with http_options
         return genai.Client(
             api_key=api_key,
             http_options=http_options
         )
+
+    return None
+
+
+def _build_ragas_llm_client_and_provider(
+    provider: str,
+    config: RagasEvaluatorConfig,
+) -> tuple[Any | None, str]:
+    if provider == "google":
+        from openai import OpenAI
+
+        api_key = config.api_key or os.environ.get("GOOGLE_API_KEY")
+        kwargs: dict[str, Any] = {
+            "base_url": _resolve_gemini_openai_base_url(config),
+        }
+        if api_key:
+            kwargs["api_key"] = api_key
+        return OpenAI(**kwargs), "openai"
+
+    return _build_ragas_client(provider, config), provider
 
 
 def _build_evaluator_llm(config: RagasEvaluatorConfig):
@@ -125,20 +158,24 @@ def _build_evaluator_llm(config: RagasEvaluatorConfig):
         return None
 
     _prepare_google_env(config)
-    client = _build_ragas_client(provider, config)
+    client, ragas_provider = _build_ragas_llm_client_and_provider(provider, config)
 
     kwargs: dict[str, Any] = {}
-    if config.api_version:
+    if config.api_version and ragas_provider != "openai":
         kwargs["api_version"] = config.api_version
-    if config.base_url and provider not in {"openai"}:
+    if config.base_url and ragas_provider not in {"openai"}:
         kwargs["base_url"] = config.base_url
-    elif config.api_base and provider not in {"openai"}:
+    elif config.api_base and ragas_provider not in {"openai"}:
         kwargs["base_url"] = config.api_base
+    if config.max_tokens is not None:
+        kwargs["max_tokens"] = config.max_tokens
+    if config.reasoning_effort:
+        kwargs["reasoning_effort"] = config.reasoning_effort
 
     if client is not None:
-        return llm_factory(model, provider=provider, client=client, **kwargs)
+        return llm_factory(model, provider=ragas_provider, client=client, **kwargs)
 
-    if provider in {"litellm", "ollama", "openai_compatible"}:
+    if ragas_provider in {"litellm", "ollama", "openai_compatible"}:
         raise ValueError(
             f"Unsupported evaluator LLM provider {provider!r} with the installed ragas version. "
             "Please use openai or gemini/google, or extend _build_ragas_client()."

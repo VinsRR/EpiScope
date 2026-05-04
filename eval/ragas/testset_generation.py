@@ -118,9 +118,32 @@ def _build_testset_models(
     embedding_model: str,
     api_key: str | None = None,
     api_base: str | None = None,
+    generator_max_tokens: int | None = None,
+    generator_reasoning_effort: str | None = None,
 ) -> tuple[Any, Any, Any | None]:
     from .ragas_adapter import _build_evaluator_embeddings, _build_evaluator_llm
     from .models import RagasEvaluatorConfig
+
+    resolved_generator_max_tokens = (
+        generator_max_tokens
+        if generator_max_tokens is not None
+        else _default_testset_max_tokens(llm_provider, llm_model)
+    )
+    resolved_generator_reasoning_effort = (
+        generator_reasoning_effort
+        if generator_reasoning_effort is not None
+        else _default_testset_reasoning_effort(llm_provider, llm_model)
+    )
+    resolved_critic_max_tokens = (
+        generator_max_tokens
+        if generator_max_tokens is not None
+        else _default_testset_max_tokens(critic_llm_provider, critic_llm_model)
+    )
+    resolved_critic_reasoning_effort = (
+        generator_reasoning_effort
+        if generator_reasoning_effort is not None
+        else _default_testset_reasoning_effort(critic_llm_provider, critic_llm_model)
+    )
 
     generator_config = RagasEvaluatorConfig(
         metric_names=[],
@@ -131,6 +154,8 @@ def _build_testset_models(
         api_key=api_key,
         api_base=api_base,
         base_url=api_base,
+        max_tokens=resolved_generator_max_tokens,
+        reasoning_effort=resolved_generator_reasoning_effort,
     )
     critic_config = RagasEvaluatorConfig(
         metric_names=[],
@@ -139,14 +164,46 @@ def _build_testset_models(
         api_key=api_key,
         api_base=api_base,
         base_url=api_base,
+        max_tokens=resolved_critic_max_tokens,
+        reasoning_effort=resolved_critic_reasoning_effort,
     )
 
     llm = _build_evaluator_llm(generator_config)
-    critic_llm = _build_evaluator_llm(critic_config) if critic_llm_provider and critic_llm_model else None
+    critic_llm = (
+        _build_evaluator_llm(critic_config)
+        if critic_llm_provider and critic_llm_model
+        else None
+    )
     embeddings = _build_evaluator_embeddings(generator_config)
     if llm is None or embeddings is None:
-        raise ValueError("Both generator LLM and embeddings must be configured for testset generation.")
+        raise ValueError(
+            "Both generator LLM and embeddings must be configured for testset generation."
+        )
     return llm, embeddings, critic_llm
+
+
+def _is_google_provider(provider: str | None) -> bool:
+    return (provider or "").strip().lower() in {"gemini", "google"}
+
+
+def _default_testset_max_tokens(provider: str | None, model: str | None) -> int | None:
+    if _is_google_provider(provider) and model:
+        return 8192
+    return None
+
+
+def _default_testset_reasoning_effort(
+    provider: str | None,
+    model: str | None,
+) -> str | None:
+    model_name = (model or "").strip().lower()
+    if (
+        _is_google_provider(provider)
+        and model_name.startswith("gemini-2.5")
+        and "pro" not in model_name
+    ):
+        return "none"
+    return None
 
 
 def _require_default_query_distribution():
@@ -229,34 +286,110 @@ def _build_query_distribution(
     }
 
 
+def _query_types_from_ratios(
+    *,
+    simple_ratio: float | None,
+    reasoning_ratio: float | None,
+    multi_context_ratio: float | None,
+) -> set[str]:
+    ratios = {
+        "simple": simple_ratio,
+        "reasoning": reasoning_ratio,
+        "multi_context": multi_context_ratio,
+    }
+    if all(value is None for value in ratios.values()):
+        return set(ratios)
+    return {name for name, value in ratios.items() if float(value or 0.0) > 0.0}
 
 
-# Added this due to mix of RAGAS issue with using existing chunks and summary generation (that are here removed from the transforms)
-# DISCREPANCY FROM THE STANDARD PIPELINE: no "summary generation" and no "chunk filtering"... might want tu substitute them at some point
-# https://github.com/vibrantlabsai/ragas/issues/2680
-from ragas.testset.transforms.engine import Parallel
-from ragas.testset.transforms.extractors import EmbeddingExtractor
-from ragas.testset.transforms.extractors.llm_based import ThemesExtractor, NERExtractor
-from ragas.testset.transforms.relationship_builders import (
-    CosineSimilarityBuilder,
-    OverlapScoreBuilder,
-)
+def build_transforms(
+    llm,
+    embeddings,
+    *,
+    query_types: set[str] | None = None,
+    max_num_entities: int = 10,
+    max_num_themes: int = 10,
+):
+    # Custom pre-chunked transforms: preserve the summary + summary_embedding fields
+    # that later RAGAS persona generation relies on, while skipping CustomNodeFilter
+    # due to the upstream pre-chunked-summary bug tracked in ragas#2680.
+    from ragas.testset.graph import NodeType
+    from ragas.testset.transforms.engine import Parallel
+    from ragas.testset.transforms.extractors import EmbeddingExtractor, SummaryExtractor
+    from ragas.testset.transforms.extractors.llm_based import ThemesExtractor, NERExtractor
+    from ragas.testset.transforms.relationship_builders import (
+        CosineSimilarityBuilder,
+        OverlapScoreBuilder,
+    )
 
-def build_transforms(llm, embeddings):
-    return [
-        Parallel(
-            EmbeddingExtractor(embedding_model=embeddings),
-            ThemesExtractor(llm=llm),
-            NERExtractor(llm=llm),
-        ),
-        Parallel(
-            CosineSimilarityBuilder(),
-            OverlapScoreBuilder(),
-        ),
+    def filter_chunks(node):
+        return node.type == NodeType.CHUNK
+
+    query_types = query_types or {"simple", "reasoning", "multi_context"}
+    include_entities = "simple" in query_types or "multi_context" in query_types
+    include_themes = "reasoning" in query_types
+    include_similarity = "reasoning" in query_types
+    include_overlap = "multi_context" in query_types
+
+    extractors = [
+        EmbeddingExtractor(
+            embedding_model=embeddings,
+            property_name="summary_embedding",
+            embed_property_name="summary",
+            filter_nodes=filter_chunks,
+        )
+    ]
+    if include_themes:
+        extractors.append(
+            ThemesExtractor(
+                llm=llm,
+                filter_nodes=filter_chunks,
+                max_num_themes=max_num_themes,
+            )
+        )
+    if include_entities:
+        extractors.append(
+            NERExtractor(
+                llm=llm,
+                filter_nodes=filter_chunks,
+                max_num_entities=max_num_entities,
+            )
+        )
+
+    transforms: list[Any] = [
+        SummaryExtractor(llm=llm, filter_nodes=filter_chunks),
+        Parallel(*extractors),
     ]
 
+    relationship_builders = []
+    if include_similarity:
+        relationship_builders.append(
+            CosineSimilarityBuilder(
+                property_name="summary_embedding",
+                new_property_name="summary_similarity",
+                threshold=0.7,
+                filter_nodes=filter_chunks,
+            )
+        )
+    if include_overlap:
+        relationship_builders.append(
+            OverlapScoreBuilder(threshold=0.01, filter_nodes=filter_chunks)
+        )
+    if relationship_builders:
+        if len(relationship_builders) == 1:
+            transforms.append(relationship_builders[0])
+        else:
+            transforms.append(Parallel(*relationship_builders))
+
+    return transforms
 
 
+def _limit_chunk_docs(chunk_docs: list[Any], max_chunks: int | None) -> list[Any]:
+    if max_chunks is None:
+        return chunk_docs
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be greater than 0 when provided.")
+    return chunk_docs[:max_chunks]
 
 @dataclass
 class GeneratedExplorerTestset:
@@ -348,6 +481,11 @@ def generate_explorer_testset(
     out_csv: str | Path | None = None,
     api_key: str | None = None,
     api_base: str | None = None,
+    generator_max_tokens: int | None = None,
+    generator_reasoning_effort: str | None = None,
+    max_chunks: int | None = None,
+    max_entities_per_chunk: int = 10,
+    max_themes_per_chunk: int = 10,
     simple_ratio: float | None = None,
     reasoning_ratio: float | None = None,
     multi_context_ratio: float | None = None,
@@ -359,6 +497,7 @@ def generate_explorer_testset(
         chunk_docs = _load_stored_chunk_documents(doc_id, pipeline_config)
     else:
         chunk_docs = _load_chunk_documents(path, pipeline_config)
+    chunk_docs = _limit_chunk_docs(chunk_docs, max_chunks)
     llm, embeddings, critic_llm = _build_testset_models(
         llm_provider=llm_provider,
         llm_model=llm_model,
@@ -368,6 +507,8 @@ def generate_explorer_testset(
         embedding_model=embedding_model,
         api_key=api_key,
         api_base=api_base,
+        generator_max_tokens=generator_max_tokens,
+        generator_reasoning_effort=generator_reasoning_effort,
     )
 
     generator = TestsetGenerator(llm=llm, embedding_model=embeddings)
@@ -405,6 +546,13 @@ def generate_explorer_testset(
         generate_kwargs["transforms"] = build_transforms(
             llm=critic_llm or llm,
             embeddings=embeddings,
+            query_types=_query_types_from_ratios(
+                simple_ratio=simple_ratio,
+                reasoning_ratio=reasoning_ratio,
+                multi_context_ratio=multi_context_ratio,
+            ),
+            max_num_entities=max_entities_per_chunk,
+            max_num_themes=max_themes_per_chunk,
         )
     elif critic_llm is not None and "transforms_llm" in signature.parameters:
         generate_kwargs["transforms_llm"] = critic_llm
@@ -456,6 +604,11 @@ def generate_testset_candidates(
     out_csv: str | Path | None = None,
     api_key: str | None = None,
     api_base: str | None = None,
+    generator_max_tokens: int | None = None,
+    generator_reasoning_effort: str | None = None,
+    max_chunks: int | None = None,
+    max_entities_per_chunk: int = 10,
+    max_themes_per_chunk: int = 10,
     simple_ratio: float | None = None,
     reasoning_ratio: float | None = None,
     multi_context_ratio: float | None = None,
@@ -476,6 +629,11 @@ def generate_testset_candidates(
         out_csv=out_csv,
         api_key=api_key,
         api_base=api_base,
+        generator_max_tokens=generator_max_tokens,
+        generator_reasoning_effort=generator_reasoning_effort,
+        max_chunks=max_chunks,
+        max_entities_per_chunk=max_entities_per_chunk,
+        max_themes_per_chunk=max_themes_per_chunk,
         simple_ratio=simple_ratio,
         reasoning_ratio=reasoning_ratio,
         multi_context_ratio=multi_context_ratio,

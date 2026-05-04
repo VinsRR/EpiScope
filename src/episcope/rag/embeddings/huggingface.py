@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Dict, Iterable, List, Literal, Optional
 from tqdm import tqdm
 import torch
@@ -55,6 +56,7 @@ class HuggingFaceEmbedder(Embedder):
         default_prompt_name: Optional[str] = None,
         truncate_dim: Optional[int] = None,
         model_kwargs: Optional[Dict[str, Any]] = None,
+        processor_kwargs: Optional[Dict[str, Any]] = None,
         tokenizer_kwargs: Optional[Dict[str, Any]] = None,
         config_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -69,18 +71,29 @@ class HuggingFaceEmbedder(Embedder):
         self._normalize = normalize
         self._precision = precision
         self._truncate_dim = truncate_dim
-
-        self._encoder = SentenceTransformer(
-            model_name_or_path=model,
-            device=device,
-            trust_remote_code=trust_remote_code,
-            prompts=prompts,
-            default_prompt_name=default_prompt_name,
-            truncate_dim=truncate_dim,
-            model_kwargs=model_kwargs or {},
-            tokenizer_kwargs=tokenizer_kwargs or {},
-            config_kwargs=config_kwargs or {},
+        resolved_processor_kwargs = (
+            processor_kwargs if processor_kwargs is not None else tokenizer_kwargs or {}
         )
+
+        encoder_kwargs: Dict[str, Any] = {
+            "model_name_or_path": model,
+            "device": device,
+            "trust_remote_code": trust_remote_code,
+            "prompts": prompts,
+            "default_prompt_name": default_prompt_name,
+            "truncate_dim": truncate_dim,
+            "model_kwargs": model_kwargs or {},
+            "config_kwargs": config_kwargs or {},
+        }
+        sentence_transformer_params = inspect.signature(
+            SentenceTransformer.__init__
+        ).parameters
+        if "processor_kwargs" in sentence_transformer_params:
+            encoder_kwargs["processor_kwargs"] = resolved_processor_kwargs
+        else:
+            encoder_kwargs["tokenizer_kwargs"] = resolved_processor_kwargs
+
+        self._encoder = SentenceTransformer(**encoder_kwargs)
 
         if max_length is not None:
             self._encoder.max_seq_length = max_length

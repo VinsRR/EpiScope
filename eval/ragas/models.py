@@ -99,6 +99,8 @@ class RagasEvaluatorConfig:
     api_base: Optional[str] = None
     api_version: Optional[str] = None
     base_url: Optional[str] = None
+    max_tokens: Optional[int] = None
+    reasoning_effort: Optional[str] = None
     raise_exceptions: bool = False
 
 

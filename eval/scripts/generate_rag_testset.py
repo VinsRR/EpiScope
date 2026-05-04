@@ -32,6 +32,11 @@ def build_parser() -> ArgumentParser:
     )
     parser.add_argument("--out-csv", help="Optional raw CSV export from RAGAS.")
     parser.add_argument("--testset-size", type=int, default=10)
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        help="Optional cap on source chunks before RAGAS transforms. Useful for fast smoke tests.",
+    )
 
     parser.add_argument("--loader", default="unstructured")
     parser.add_argument("--chunker", default="paragraph")
@@ -51,6 +56,14 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--generator-embedding-model")
     parser.add_argument("--generator-api-key")
     parser.add_argument("--generator-api-base")
+    parser.add_argument("--generator-max-tokens", type=int)
+    parser.add_argument(
+        "--generator-reasoning-effort",
+        choices=["none", "minimal", "low", "medium", "high"],
+        help="Reasoning effort passed through to OpenAI-compatible generator calls.",
+    )
+    parser.add_argument("--max-entities-per-chunk", type=int, default=10)
+    parser.add_argument("--max-themes-per-chunk", type=int, default=10)
     parser.add_argument("--simple-ratio", type=float, default=0.5)
     parser.add_argument("--reasoning-ratio", type=float, default=0.25)
     parser.add_argument("--multi-context-ratio", type=float, default=0.25)
@@ -116,6 +129,11 @@ def main() -> None:
         out_csv=args.out_csv,
         api_key=args.generator_api_key,
         api_base=args.generator_api_base,
+        generator_max_tokens=args.generator_max_tokens,
+        generator_reasoning_effort=args.generator_reasoning_effort,
+        max_chunks=args.max_chunks,
+        max_entities_per_chunk=args.max_entities_per_chunk,
+        max_themes_per_chunk=args.max_themes_per_chunk,
         simple_ratio=args.simple_ratio,
         reasoning_ratio=args.reasoning_ratio,
         multi_context_ratio=args.multi_context_ratio,

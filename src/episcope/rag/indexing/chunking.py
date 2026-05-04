@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import re
 import uuid
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 
@@ -212,7 +212,7 @@ class SemanticChunker(Chunker):
 
     def __init__(
         self,
-        embedder: Embedder = HuggingFaceEmbedder(),
+        embedder: Optional[Embedder] = None,
         similarity_threshold: float = 0.5,
         compare_mode: Literal["chunk", "last"] = "chunk",
     ):
@@ -224,7 +224,7 @@ class SemanticChunker(Chunker):
                 - "chunk": (Strategy 1, default) compare to the whole chunk embedding.
                 - "last":  (Strategy 2) compare only to the last sentence embedding.
         """
-        self.embedder = embedder
+        self.embedder = embedder or HuggingFaceEmbedder()
         self.similarity_threshold = float(similarity_threshold)
         self.compare_mode = compare_mode
 
