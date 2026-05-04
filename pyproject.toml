@@ -30,6 +30,34 @@ dependencies = [
     "pymongo",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "streamlit",
+]
+eval = [
+    "ragas",
+]
+table-extraction = [
+    "gmft",
+    "pymupdf",
+    "layoutparser",
+    "img2table",
+    "effdet",
+]
+dev = [
+    "pytest",
+]
+all = [
+    "streamlit",
+    "ragas",
+    "gmft",
+    "pymupdf",
+    "layoutparser",
+    "img2table",
+    "effdet",
+    "pytest",
+]
+
 [project.scripts]
 episcope = "episcope.episcope:main"
 

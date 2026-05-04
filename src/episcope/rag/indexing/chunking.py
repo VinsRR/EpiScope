@@ -169,11 +169,11 @@ class RecursiveChunker(Chunker):
     def _config(self) -> Dict[str, Any]:
         return {
             "max_chunk_size": self.max_chunk_size,
-            "inner_chunker": self.chunker.config,
+            "inner_chunker": self._inner_chunker.config,
         }
 
     def chunk(self, text: str) -> List[str]:
-        initial_chunks = self.chunker.chunk(text)
+        initial_chunks = self._inner_chunker.chunk(text)
         final_chunks: List[str] = []
         for chunk_text in initial_chunks:
             if len(chunk_text) > self.max_chunk_size:

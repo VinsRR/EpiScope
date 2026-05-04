@@ -38,7 +38,7 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--testset-size", type=int, default=10)
 
     parser.add_argument("--loader", default="unstructured")
-    parser.add_argument("--embed-model", default="gemini-embedding-001")
+    parser.add_argument("--embed-model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--chunker", default="paragraph")
     parser.add_argument("--min-chunk-size", type=int, default=20)
     parser.add_argument("--chunk-size", type=int, default=600)

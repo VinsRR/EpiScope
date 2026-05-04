@@ -46,6 +46,11 @@ class _FakeClassifierGenerator:
         )
 
 
+class _FakeAnswerGenerator:
+    def generate(self, contexts, **kwargs):
+        return Provenance(answer="The paper says the data are on Zenodo.", evidences=[])
+
+
 def test_inspect_command_reads_text_file(tmp_path) -> None:
     paper = tmp_path / "paper.txt"
     paper.write_text(
@@ -138,6 +143,38 @@ def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None
     assert payload["answer"] is None
     assert payload["retrieval_count"] >= 1
     assert any("Zenodo" in chunk["text"] for chunk in payload["retrieved_chunks"])
+
+
+def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeAnswerGenerator(),
+    )
+
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ask",
+            "Where are the data?",
+            "--path",
+            str(paper),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["answer"] == "The paper says the data are on Zenodo."
+    assert payload["source_count"] >= 1
 
 
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:

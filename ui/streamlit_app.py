@@ -209,15 +209,9 @@ with st.sidebar:
         st.error(f"API not reachable: {exc}")
         st.stop()
 
-    st.header("Runtime Configuration")
+    st.header("Model")
     defaults = (health or {}).get("defaults", {})
     default_mongo_uri = defaults.get("mongo_uri")
-    strategy_name = st.text_input("Strategy Name", value=defaults.get("strategy_name", "grobid"))
-    mongo_uri_placeholder = "******** (loaded from backend env)" if default_mongo_uri else ""
-    mongo_uri = st.text_input("Mongo URI", value="", type="password", placeholder=mongo_uri_placeholder)
-    mongo_db_name = st.text_input("Mongo DB Name", value=defaults.get("mongo_db_name", "episcope_academic_db"))
-    qdrant_url = st.text_input("Qdrant URL", value=defaults.get("qdrant_url", "http://qdrant:6333"))
-    qdrant_collection = st.text_input("Qdrant Collection", value=defaults.get("qdrant_collection", "episcope_academic"))
     provider_options = ["gemini", "openai", "openrouter", "ollama"]
     default_provider = defaults.get("llm_provider", "gemini")
     llm_provider = st.selectbox(
@@ -227,26 +221,36 @@ with st.sidebar:
     )
     llm_model = st.text_input("LLM Model", value=defaults.get("llm_model", "gemini-2.5-flash"))
     llm_temperature = st.slider("LLM Temperature", min_value=0.0, max_value=1.5, value=0.0, step=0.1)
-    workflow_top_k = st.number_input("Workflow Top-K", min_value=1, max_value=100, value=int(defaults.get("workflow_top_k", 10)))
-    retrieval_mode = st.selectbox(
-        "Retrieval Mode",
-        ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"],
-        index=["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"].index(defaults.get("retrieval_mode", "hybrid"))
-        if defaults.get("retrieval_mode", "hybrid") in ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
-        else 1,
-    )
-    evidence_reranker_kind = st.selectbox(
-        "Evidence Reranker",
-        ["none", "global_cross_encoder", "within_label_cross_encoder"],
-        index=["none", "global_cross_encoder", "within_label_cross_encoder"].index(defaults.get("evidence_reranker_kind", "none"))
-        if defaults.get("evidence_reranker_kind", "none") in ["none", "global_cross_encoder", "within_label_cross_encoder"]
-        else 0,
-    )
-    cross_encoder_model = st.text_input(
-        "Cross-Encoder Model",
-        value=defaults.get("cross_encoder_model") or env("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2") or "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    )
-    cross_encoder_top_k = st.number_input("Cross-Encoder Top-K", min_value=1, max_value=100, value=int(defaults.get("cross_encoder_top_k", 15)))
+
+    with st.expander("Corpus Backend", expanded=False):
+        strategy_name = st.text_input("Strategy Name", value=defaults.get("strategy_name", "grobid"))
+        mongo_uri_placeholder = "******** (loaded from backend env)" if default_mongo_uri else ""
+        mongo_uri = st.text_input("Mongo URI", value="", type="password", placeholder=mongo_uri_placeholder)
+        mongo_db_name = st.text_input("Mongo DB Name", value=defaults.get("mongo_db_name", "episcope_academic_db"))
+        qdrant_url = st.text_input("Qdrant URL", value=defaults.get("qdrant_url", "http://qdrant:6333"))
+        qdrant_collection = st.text_input("Qdrant Collection", value=defaults.get("qdrant_collection", "episcope_academic"))
+
+    with st.expander("Advanced Retrieval", expanded=False):
+        workflow_top_k = st.number_input("Workflow Top-K", min_value=1, max_value=100, value=int(defaults.get("workflow_top_k", 10)))
+        retrieval_mode = st.selectbox(
+            "Retrieval Mode",
+            ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"],
+            index=["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"].index(defaults.get("retrieval_mode", "hybrid"))
+            if defaults.get("retrieval_mode", "hybrid") in ["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"]
+            else 1,
+        )
+        evidence_reranker_kind = st.selectbox(
+            "Evidence Reranker",
+            ["none", "global_cross_encoder", "within_label_cross_encoder"],
+            index=["none", "global_cross_encoder", "within_label_cross_encoder"].index(defaults.get("evidence_reranker_kind", "none"))
+            if defaults.get("evidence_reranker_kind", "none") in ["none", "global_cross_encoder", "within_label_cross_encoder"]
+            else 0,
+        )
+        cross_encoder_model = st.text_input(
+            "Cross-Encoder Model",
+            value=defaults.get("cross_encoder_model") or env("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2") or "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        )
+        cross_encoder_top_k = st.number_input("Cross-Encoder Top-K", min_value=1, max_value=100, value=int(defaults.get("cross_encoder_top_k", 15)))
 
 backend_config = {
     "strategy_name": strategy_name,

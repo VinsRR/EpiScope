@@ -127,7 +127,8 @@ class Settings:
 def build_classifier(settings: Settings):
     from episcope.db.mongo_academic_db import MongoAcademicDB
     from episcope.vectordb.qdrant import QdrantDB
-    from episcope.rag.retrieval.semantic import SemanticRetriever
+    from episcope.rag.retrieval.candidates import SemanticCandidateRetriever
+    from episcope.rag.retrieval.retriever import Retriever
     from episcope.clients import GeminiClient
     from episcope.rag.generation.llm_generator import LLMGenerator
     from episcope.workflows import PaperClassifier
@@ -153,7 +154,11 @@ def build_classifier(settings: Settings):
     uri = resolve_mongo_uri(settings.mongo_uri_or_env)
     db = MongoAcademicDB(uri=uri, db_name=settings.mongo_db_name)
     vdb = QdrantDB(collection=settings.qdrant_collection, url=settings.qdrant_url)
-    retriever = SemanticRetriever(vdb)
+    retriever = Retriever(
+        vectordb=vdb,
+        candidate_retrievers=[SemanticCandidateRetriever(vdb)],
+        use_rerank=False,
+    )
     client = GeminiClient()
 
     try:

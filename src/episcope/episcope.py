@@ -59,7 +59,7 @@ _CLI_ROOT = Path(".episcope")
 _DEFAULT_INDEX_DIR = _CLI_ROOT / "index"
 _DEFAULT_DB_BACKUP = _CLI_ROOT / "academic_db.json"
 _DEFAULT_STRATEGY_NAME = "local-cli"
-_DEFAULT_EMBED_MODEL = "gemini-embedding-001"
+_DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 _DEFAULT_MIN_CHUNK_SIZE = 20
 
@@ -913,6 +913,84 @@ def explore(
             provenance = generator.generate(results, question=query)
             payload["answer"] = provenance.answer
             payload["provenance"] = provenance
+        _echo_json(payload)
+    except Exception as exc:
+        _abort(str(exc))
+    finally:
+        if tempdir is not None:
+            tempdir.cleanup()
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Question to answer from a local document or folder."),
+    path: Path = typer.Option(
+        ...,
+        "--path",
+        "-p",
+        exists=True,
+        help="File or directory to index temporarily for this question.",
+    ),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        help="Parsing backend. Use `grobid` when a running GROBID service is available.",
+    ),
+    embed_model: str = typer.Option(
+        _DEFAULT_EMBED_MODEL,
+        "--embed-model",
+        help="Dense embedding model used for the temporary local index.",
+    ),
+    chunker: ChunkerKind = typer.Option(ChunkerKind.paragraph, "--chunker"),
+    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
+    chunk_size: int = typer.Option(600, "--chunk-size"),
+    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    top_k: int = typer.Option(5, "--top-k", min=1),
+    llm_provider: LLMProvider = typer.Option(
+        LLMProvider.gemini,
+        "--llm-provider",
+        help="Generation provider. Use `ollama` with --llm-model for local generation.",
+    ),
+    llm_model: Optional[str] = typer.Option(None, "--llm-model"),
+    temperature: float = typer.Option(0.0, "--temperature"),
+    show_context: bool = typer.Option(
+        False,
+        "--show-context/--answer-only",
+        help="Include full retrieved source chunks in the JSON output.",
+    ),
+) -> None:
+    """Ask a question over local papers without requiring MongoDB or Qdrant."""
+    tempdir = None
+    try:
+        tempdir, papers, retriever = _transient_retriever_for_path(
+            path,
+            loader_kind=loader,
+            embed_model=embed_model,
+            chunker_kind=chunker,
+            min_chunk_size=min_chunk_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        results = list(retriever.retrieve(question, top_k=top_k))
+        generator = _build_generator(llm_provider, llm_model, temperature)
+        provenance = generator.generate(results, question=question)
+
+        source_summaries = [
+            {
+                "paper_id": chunk.paper_id,
+                "section_type": chunk.section_type,
+                "section_title": chunk.section_title,
+                "rank_score": chunk.rank_score,
+            }
+            for chunk in results
+        ]
+        payload: dict[str, Any] = {
+            "question": question,
+            "answer": provenance.answer,
+            "papers": _paper_summaries(papers),
+            "source_count": len(results),
+            "sources": results if show_context else source_summaries,
+        }
         _echo_json(payload)
     except Exception as exc:
         _abort(str(exc))

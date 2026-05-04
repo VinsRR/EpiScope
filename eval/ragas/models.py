@@ -32,7 +32,7 @@ class SimpleRagQaCase:
 @dataclass
 class RagPipelineConfig:
     loader: str = "unstructured"
-    embed_model: str = "gemini-embedding-001"
+    embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     chunker: str = "paragraph"
     min_chunk_size: int = 20
     chunk_size: int = 600

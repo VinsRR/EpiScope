@@ -474,10 +474,11 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
         *,
         model: str = "gemini-embedding-001",
         output_dimensionality: Optional[int] = None,
+        task_type: str = "RETRIEVAL_DOCUMENT",
         **kwargs: Any,
     ) -> List[List[float]]:
         config = genai_types.EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",
+            task_type=task_type,
             output_dimensionality=output_dimensionality,
         )
         result = self._client.models.embed_content(

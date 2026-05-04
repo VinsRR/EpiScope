@@ -89,14 +89,13 @@ class FileDB(AbstractVectorDB):
         if not points_list:
             return
 
-        if (
-            not self._loaded
-        ):  # if this is the first instantiation create the payload keys
-            for p in points_list:
-                payload = p.setdefault("payload", {})
-                if namespace:
-                    payload["paper_id"] = namespace
-                self._payload_keys.update(payload.keys())
+        for p in points_list:
+            payload = p.setdefault("payload", {})
+            if p.get("id") is not None:
+                payload.setdefault("id", p["id"])
+            if namespace:
+                payload["paper_id"] = namespace
+            self._payload_keys.update(payload.keys())
 
         existing_points = {
             meta.get("id"): {"vector": vec.tolist(), "payload": meta}

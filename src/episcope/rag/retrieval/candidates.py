@@ -74,7 +74,10 @@ class SemanticCandidateRetriever(BaseRetriever, CandidateRetriever):
         namespace: Optional[str] = None,
         filter: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        dense_query = self.dense_embedder.embed_text(self._transform_query(query))
+        embed_query = getattr(
+            self.dense_embedder, "embed_query", self.dense_embedder.embed_text
+        )
+        dense_query = embed_query(self._transform_query(query))
         return list(
             self.vectordb.search_dense(
                 query_vector=dense_query,
@@ -228,7 +231,12 @@ class HybridCandidateRetriever(BaseRetriever, CandidateRetriever):
             "dense"
         ) and self.vectordb.capabilities().get("sparse"):
             try:
-                dense_query = self.semantic_retriever.dense_embedder.embed_text(query)
+                embed_query = getattr(
+                    self.semantic_retriever.dense_embedder,
+                    "embed_query",
+                    self.semantic_retriever.dense_embedder.embed_text,
+                )
+                dense_query = embed_query(query)
                 sparse_query = self.sparse_retriever.sparse_embedder.embed_text(query)
                 return list(
                     self.vectordb.search_hybrid(

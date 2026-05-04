@@ -25,9 +25,29 @@ class Embedder(ABC):
     def embed_texts(self, texts: Iterable[str]) -> List[List[float]]:
         """Embed an iterable of text strings."""
 
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a retrieval query.
+
+        Most dense embedding providers use the same path for queries and
+        documents. Providers with asymmetric retrieval heads can override this.
+        """
+        return self.embed_text(text)
+
+    def embed_queries(self, texts: Iterable[str]) -> List[List[float]]:
+        """Embed an iterable of retrieval queries."""
+        return self.embed_texts(texts)
+
+    def embed_document(self, text: str) -> List[float]:
+        """Embed a document or chunk for indexing."""
+        return self.embed_text(text)
+
+    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
+        """Embed an iterable of documents or chunks for indexing."""
+        return self.embed_texts(texts)
+
     def embed_units(self, units: Iterable[Dict[str, str]]) -> List[List[float]]:
         """Embed the ``content`` field of each unit in ``units``."""
-        return self.embed_texts(u["content"] for u in units)
+        return self.embed_documents(u["content"] for u in units)
 
 
 class SparseEmbedder(ABC):

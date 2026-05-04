@@ -359,7 +359,7 @@ class QdrantDB(AbstractVectorDB):
     def search_hybrid(
         self, dense_query, sparse_query, top_k, prefetch_k, namespace=None, filter=None
     ):
-        if not self.has_dense or not self.has_sparse:
+        if not self.has_dense() or not self.has_sparse():
             raise ValueError(
                 "Hybrid search requires both dense and sparse vectors in the collection."
             )

@@ -31,12 +31,34 @@ class GeminiEmbedder(Embedder):
     def dim(self) -> int:
         return self._dim
 
-    def embed_text(self, text: str) -> List[float]:
+    def _embed_texts_with_task(
+        self, texts: Iterable[str], *, task_type: str
+    ) -> List[List[float]]:
         return self._client.embed(
-            [text], model=self._model, output_dimensionality=self._dim
+            list(texts),
+            model=self._model,
+            output_dimensionality=self._dim,
+            task_type=task_type,
+        )
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed_texts_with_task(
+            [text], task_type="RETRIEVAL_QUERY"
         )[0]
 
+    def embed_queries(self, texts: Iterable[str]) -> List[List[float]]:
+        return self._embed_texts_with_task(texts, task_type="RETRIEVAL_QUERY")
+
+    def embed_document(self, text: str) -> List[float]:
+        return self._embed_texts_with_task(
+            [text], task_type="RETRIEVAL_DOCUMENT"
+        )[0]
+
+    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
+        return self._embed_texts_with_task(texts, task_type="RETRIEVAL_DOCUMENT")
+
+    def embed_text(self, text: str) -> List[float]:
+        return self.embed_document(text)
+
     def embed_texts(self, texts: Iterable[str]) -> List[List[float]]:
-        return self._client.embed(
-            list(texts), model=self._model, output_dimensionality=self._dim
-        )
+        return self.embed_documents(texts)
