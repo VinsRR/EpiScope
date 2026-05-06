@@ -413,20 +413,32 @@ def _apply_updates(df: pd.DataFrame, updated_rows: List[Dict[str, Any]]) -> pd.D
     New columns introduced by the fresh result are then added to the frame.
     """
     df = df.copy()
-    df = df.set_index("paper_id")
+    if "paper_id" not in df.columns:
+        raise ValueError("Cannot apply retry updates: TSV has no 'paper_id' column.")
+
     for row in updated_rows:
         pid = str(row["paper_id"])
-        # 1. Blank out every existing column for this row
-        for col in df.columns:
-            df.at[pid, col] = None
-        # 2. Write all values from the new result
+        mask = df["paper_id"].astype(str).eq(pid)
+
+        if not mask.any():
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+            continue
+
+        row_indices = df.index[mask].tolist()
+
+        # 1. Blank out every existing column for this paper_id.
+        df.loc[mask, df.columns] = None
+
+        # 2. Write all values from the new result. Assign cell-by-cell because
+        # list/dict-valued columns should be stored as objects, not broadcast.
         for col, val in row.items():
-            if col == "paper_id":
-                continue
             if col not in df.columns:
                 df[col] = None
-            df.at[pid, col] = val
-    return df.reset_index()
+            if col != "paper_id":
+                df[col] = df[col].astype("object")
+            for idx in row_indices:
+                df.at[idx, col] = val
+    return df
 
 
 # ---------------------------------------------------------------------------
