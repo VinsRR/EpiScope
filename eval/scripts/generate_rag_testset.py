@@ -17,14 +17,16 @@ from eval.ragas.models import RagPipelineConfig
 
 
 def build_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Generate an explorer-style RAGAS testset from EpiScope chunks.")
+    parser = ArgumentParser(
+        description=(
+            "Generate an explorer-style RAGAS testset from the configured EpiScope "
+            "vector DB."
+        )
+    )
     parser.add_argument(
         "--config",
         help="Optional JSON config file. Command-line flags override config values.",
     )
-    source_group = parser.add_mutually_exclusive_group(required=False)
-    source_group.add_argument("--doc-id", help="Indexed document id whose stored chunks should be used.")
-    source_group.add_argument("--path", help="File or directory to chunk with EpiScope.")
     parser.add_argument("--out-jsonl", help="Where to store generated review records.")
     parser.add_argument(
         "--out-cases-jsonl",
@@ -38,11 +40,6 @@ def build_parser() -> ArgumentParser:
         help="Optional cap on source chunks before RAGAS transforms. Useful for fast smoke tests.",
     )
 
-    parser.add_argument("--loader", default="unstructured")
-    parser.add_argument("--chunker", default="paragraph")
-    parser.add_argument("--min-chunk-size", type=int, default=20)
-    parser.add_argument("--chunk-size", type=int, default=600)
-    parser.add_argument("--chunk-overlap", type=int, default=100)
     parser.add_argument("--index-backend", default="file")
     parser.add_argument("--index-dir", default=".episcope_index")
     parser.add_argument("--qdrant-url", default="http://localhost:6333")
@@ -81,8 +78,6 @@ def parse_args_with_config() -> object:
         parser.set_defaults(**config)
     args = parser.parse_args()
     missing: list[str] = []
-    if not args.doc_id and not args.path:
-        missing.append("one of --doc-id or --path")
     if not args.out_jsonl:
         missing.append("--out-jsonl")
     if not args.generator_llm_provider:
@@ -102,11 +97,6 @@ def main() -> None:
     args = parse_args_with_config()
 
     pipeline_config = RagPipelineConfig(
-        loader=args.loader,
-        chunker=args.chunker,
-        min_chunk_size=args.min_chunk_size,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
         index_backend=args.index_backend,
         index_dir=args.index_dir,
         qdrant_url=args.qdrant_url,
@@ -114,8 +104,6 @@ def main() -> None:
     )
 
     generate_testset_candidates(
-        path=args.path,
-        doc_id=args.doc_id,
         pipeline_config=pipeline_config,
         llm_provider=args.generator_llm_provider,
         llm_model=args.generator_llm_model,

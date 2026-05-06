@@ -25,24 +25,22 @@ from eval.ragas.ragas_adapter import summarize_ragas_scores
 
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        description="Generate a synthetic explorer benchmark with RAGAS, then run and score the EpiScope explorer pipeline."
+        description=(
+            "Generate a synthetic explorer benchmark from the configured vector DB "
+            "with RAGAS, then run and score the EpiScope explorer pipeline."
+        )
     )
     parser.add_argument(
         "--config",
         help="Optional JSON config file. Command-line flags override config values.",
     )
-    source_group = parser.add_mutually_exclusive_group(required=False)
-    source_group.add_argument("--doc-id", help="Indexed document id whose stored chunks should seed generation.")
-    source_group.add_argument("--path", help="File or directory used as the explorer knowledge base.")
     parser.add_argument("--out-dir", help="Directory where generated assets and eval outputs are written.")
     parser.add_argument("--testset-size", type=int, default=10)
-
-    parser.add_argument("--loader", default="unstructured")
-    parser.add_argument("--embed-model", default="sentence-transformers/all-MiniLM-L6-v2")
-    parser.add_argument("--chunker", default="paragraph")
-    parser.add_argument("--min-chunk-size", type=int, default=20)
-    parser.add_argument("--chunk-size", type=int, default=600)
-    parser.add_argument("--chunk-overlap", type=int, default=100)
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        help="Optional cap on vector DB chunks before RAGAS transforms. Useful for fast smoke tests.",
+    )
 
     parser.add_argument("--index-backend", default="file")
     parser.add_argument("--index-dir", default=".episcope_index")
@@ -98,8 +96,6 @@ def parse_args_with_config() -> object:
         parser.set_defaults(**config)
     args = parser.parse_args()
     missing: list[str] = []
-    if not args.doc_id and not args.path:
-        missing.append("one of --doc-id or --path")
     if not args.out_dir:
         missing.append("--out-dir")
     if not args.generator_llm_provider:
@@ -121,12 +117,6 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pipeline_config = RagPipelineConfig(
-        loader=args.loader,
-        embed_model=args.embed_model,
-        chunker=args.chunker,
-        min_chunk_size=args.min_chunk_size,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
         index_backend=args.index_backend,
         index_dir=args.index_dir,
         qdrant_url=args.qdrant_url,
@@ -141,8 +131,6 @@ def main() -> None:
     )
 
     generated = generate_explorer_testset(
-        path=args.path,
-        doc_id=args.doc_id,
         pipeline_config=pipeline_config,
         llm_provider=args.generator_llm_provider,
         llm_model=args.generator_llm_model,
@@ -156,6 +144,7 @@ def main() -> None:
         out_csv=out_dir / "generated_testset.csv",
         api_key=args.generator_api_key,
         api_base=args.generator_api_base,
+        max_chunks=args.max_chunks,
         simple_ratio=args.simple_ratio,
         reasoning_ratio=args.reasoning_ratio,
         multi_context_ratio=args.multi_context_ratio,
@@ -180,11 +169,11 @@ def main() -> None:
     )
 
     manifest = {
-        "path": str(Path(args.path).resolve()) if args.path else None,
-        "doc_id": args.doc_id,
+        "source": "vector_db",
         "out_dir": str(out_dir),
         "pipeline_config": asdict(pipeline_config),
         "testset_size": args.testset_size,
+        "max_chunks": args.max_chunks,
         "generated_case_count": len(generated.qa_cases),
         "ragas_config": asdict(evaluator_config),
     }
