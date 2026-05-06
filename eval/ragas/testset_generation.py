@@ -9,14 +9,9 @@ from typing import Any
 import pandas as pd
 
 from episcope.episcope import (
-    ChunkerKind,
     IndexBackend,
-    LoaderKind,
-    _build_chunker,
     _build_vector_db,
-    _load_path,
 )
-from episcope.rag.indexing.chunking import chunk_paper
 
 from .io import dump_generated_queries, write_jsonl
 from .models import GeneratedQueryReviewRecord, RagPipelineConfig, SimpleRagQaCase
@@ -64,26 +59,7 @@ def _chunk_to_document(chunk: dict[str, Any], Document: Any | None) -> Any:
     )
 
 
-def _load_chunk_documents(path: str | Path, config: RagPipelineConfig) -> list[Any]:
-    papers = _load_path(Path(path), loader_kind=LoaderKind(config.loader))
-    chunker = _build_chunker(
-        ChunkerKind(config.chunker),
-        min_chunk_size=config.min_chunk_size,
-        chunk_size=config.chunk_size,
-        chunk_overlap=config.chunk_overlap,
-    )
-
-    Document = _optional_langchain_document()
-    chunks: list[Any] = []
-    for paper in papers:
-        for chunk in chunk_paper(chunker, paper.sections, paper.metadata, paper.paper_id):
-            document = _chunk_to_document(chunk, Document)
-            if document is not None:
-                chunks.append(document)
-    return chunks
-
-
-def _load_stored_chunk_documents(doc_id: str, config: RagPipelineConfig) -> list[Any]:
+def _load_vector_db_chunk_documents(config: RagPipelineConfig) -> list[Any]:
     Document = _optional_langchain_document()
     vectordb = _build_vector_db(
         _enum(IndexBackend, config.index_backend),
@@ -91,11 +67,11 @@ def _load_stored_chunk_documents(doc_id: str, config: RagPipelineConfig) -> list
         qdrant_collection=config.qdrant_collection,
         qdrant_url=config.qdrant_url,
     )
-    points = list(vectordb.get_points(namespace=doc_id))
+    points = list(vectordb.get_points())
     if not points:
         raise ValueError(
-            f"No indexed chunks were found for doc_id={doc_id!r}. "
-            "Check the index backend, index directory/collection, and document id."
+            "No indexed chunks were found in the configured vector DB. "
+            "Check the index backend, index directory/collection, and Qdrant URL."
         )
 
     chunks: list[Any] = []
@@ -104,7 +80,7 @@ def _load_stored_chunk_documents(doc_id: str, config: RagPipelineConfig) -> list
         if document is not None:
             chunks.append(document)
     if not chunks:
-        raise ValueError(f"Indexed chunks for doc_id={doc_id!r} were found but contained no text.")
+        raise ValueError("Indexed chunks were found but contained no text.")
     return chunks
 
 
@@ -398,35 +374,14 @@ class GeneratedExplorerTestset:
     qa_cases: list[SimpleRagQaCase]
 
 
-def _build_review_records(frame: pd.DataFrame, *, root_path: str) -> list[GeneratedQueryReviewRecord]:
+def _build_review_records(frame: pd.DataFrame) -> list[GeneratedQueryReviewRecord]:
     records: list[GeneratedQueryReviewRecord] = []
     for row in frame.to_dict(orient="records"):
         records.append(
             GeneratedQueryReviewRecord(
                 schema_version="1",
                 query_id=uuid.uuid4().hex,
-                source_kind="ragas_generate_with_chunks",
-                paper_path=root_path,
-                user_input=str(row.get("user_input", "") or ""),
-                reference=str(row.get("reference", "") or ""),
-                reference_contexts=list(row.get("reference_contexts", []) or []),
-                persona_name=row.get("persona_name"),
-                synthesizer_name=row.get("synthesizer_name"),
-                status="pending_review",
-            )
-        )
-    return records
-
-
-def _build_review_records_for_doc_id(frame: pd.DataFrame, *, doc_id: str) -> list[GeneratedQueryReviewRecord]:
-    records: list[GeneratedQueryReviewRecord] = []
-    for row in frame.to_dict(orient="records"):
-        records.append(
-            GeneratedQueryReviewRecord(
-                schema_version="1",
-                query_id=uuid.uuid4().hex,
-                source_kind="ragas_generate_with_chunks",
-                paper_id=doc_id,
+                source_kind="ragas_generate_from_vector_db",
                 user_input=str(row.get("user_input", "") or ""),
                 reference=str(row.get("reference", "") or ""),
                 reference_contexts=list(row.get("reference_contexts", []) or []),
@@ -466,8 +421,6 @@ def _build_simple_rag_qa_cases(
 
 def generate_explorer_testset(
     *,
-    path: str | Path | None = None,
-    doc_id: str | None = None,
     pipeline_config: RagPipelineConfig,
     llm_provider: str,
     llm_model: str,
@@ -490,13 +443,8 @@ def generate_explorer_testset(
     reasoning_ratio: float | None = None,
     multi_context_ratio: float | None = None,
 ) -> GeneratedExplorerTestset:
-    if bool(path is not None) == bool(doc_id is not None):
-        raise ValueError("Provide exactly one of `path` or `doc_id`.")
     TestsetGenerator = _require_ragas_testset()
-    if doc_id is not None:
-        chunk_docs = _load_stored_chunk_documents(doc_id, pipeline_config)
-    else:
-        chunk_docs = _load_chunk_documents(path, pipeline_config)
+    chunk_docs = _load_vector_db_chunk_documents(pipeline_config)
     chunk_docs = _limit_chunk_docs(chunk_docs, max_chunks)
     llm, embeddings, critic_llm = _build_testset_models(
         llm_provider=llm_provider,
@@ -568,11 +516,7 @@ def generate_explorer_testset(
         testset.to_csv(str(output_csv))
 
     frame = testset.to_pandas()
-    if doc_id is not None:
-        review_records = _build_review_records_for_doc_id(frame, doc_id=doc_id)
-    else:
-        root_path = str(Path(path).resolve())
-        review_records = _build_review_records(frame, root_path=root_path)
+    review_records = _build_review_records(frame)
     qa_cases = _build_simple_rag_qa_cases(review_records)
 
     if out_review_jsonl is not None:
@@ -589,8 +533,6 @@ def generate_explorer_testset(
 
 def generate_testset_candidates(
     *,
-    path: str | Path | None = None,
-    doc_id: str | None = None,
     pipeline_config: RagPipelineConfig,
     llm_provider: str,
     llm_model: str,
@@ -614,8 +556,6 @@ def generate_testset_candidates(
     multi_context_ratio: float | None = None,
 ) -> list[GeneratedQueryReviewRecord]:
     generated = generate_explorer_testset(
-        path=path,
-        doc_id=doc_id,
         pipeline_config=pipeline_config,
         llm_provider=llm_provider,
         llm_model=llm_model,

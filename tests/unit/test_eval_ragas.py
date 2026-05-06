@@ -4,11 +4,16 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from eval.ragas.io import load_simple_rag_qa_cases
 from eval.ragas.models import RagPipelineConfig, SimpleRagQaCase
 from eval.ragas.pipeline import run_case, run_cases
-from eval.ragas.ragas_adapter import _normalize_provider_alias, _resolve_gemini_openai_base_url
+from eval.ragas.ragas_adapter import (
+    _metric_classes,
+    _normalize_provider_alias,
+    _resolve_gemini_openai_base_url,
+)
 
 
 class _FakeEmbedder:
@@ -125,3 +130,11 @@ def test_resolve_gemini_openai_base_url_prefers_explicit_override() -> None:
 
     config = RagasEvaluatorConfig()
     assert _resolve_gemini_openai_base_url(config) == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def test_metric_classes_include_reference_free_context_metrics() -> None:
+    pytest.importorskip("ragas")
+    classes = _metric_classes()
+
+    assert "context_relevance" in classes
+    assert "context_utilization" in classes

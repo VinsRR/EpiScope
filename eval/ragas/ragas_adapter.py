@@ -26,6 +26,8 @@ def _metric_classes():
             AnswerRelevancy,
             ContextPrecision,
             ContextRecall,
+            ContextRelevance,
+            ContextUtilization,
             Faithfulness,
             FactualCorrectness,
         )
@@ -34,6 +36,8 @@ def _metric_classes():
             "faithfulness": Faithfulness,
             "context_precision": ContextPrecision,
             "context_recall": ContextRecall,
+            "context_relevance": ContextRelevance,
+            "context_utilization": ContextUtilization,
             "response_relevancy": AnswerRelevancy,
             "factual_correctness": FactualCorrectness,
         }
@@ -41,6 +45,8 @@ def _metric_classes():
         from ragas.metrics import (  # type: ignore
             FactualCorrectness,
             ResponseRelevancy,
+            ContextRelevance,
+            ContextUtilization,
         )
         from ragas.metrics import Faithfulness as LegacyFaithfulness  # type: ignore
         from ragas.metrics import LLMContextPrecisionWithReference  # type: ignore
@@ -50,6 +56,8 @@ def _metric_classes():
             "faithfulness": LegacyFaithfulness,
             "context_precision": LLMContextPrecisionWithReference,
             "context_recall": LLMContextRecall,
+            "context_relevance": ContextRelevance,
+            "context_utilization": ContextUtilization,
             "response_relevancy": ResponseRelevancy,
             "factual_correctness": FactualCorrectness,
         }
@@ -222,7 +230,14 @@ def _build_metrics(config: RagasEvaluatorConfig, llm: Any, embeddings: Any) -> l
             raise ValueError(f"Unknown metric {name!r}. Supported metrics: {supported}")
         metric_cls = classes[key]
         kwargs: dict[str, Any] = {}
-        if key in {"faithfulness", "context_precision", "context_recall", "factual_correctness"} and llm is not None:
+        if key in {
+            "faithfulness",
+            "context_precision",
+            "context_recall",
+            "context_relevance",
+            "context_utilization",
+            "factual_correctness",
+        } and llm is not None:
             kwargs["llm"] = llm
         if key == "response_relevancy":
             if llm is not None:

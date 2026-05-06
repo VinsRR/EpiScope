@@ -104,10 +104,7 @@ class Settings:
     strategy_name: str = "grobid"
     papers_csv_path: Optional[str] = None  #= "sampled_papers_full.csv"
     papers_csv_sep: str = "\t"
-    mongo_uri_or_env: str = (
-        "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF"
-        "@cluster0.s82lhln.mongodb.net/"
-    )
+    mongo_uri_or_env: str = "MONGO_URI"
     mongo_db_name: str = "episcope_academic_db"
     qdrant_url: str = "http://localhost:6334"
     qdrant_collection: str = "episcope_academic_vdb2"

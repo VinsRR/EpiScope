@@ -9,7 +9,9 @@ from .models import (
     SimpleRagQaCase,
 )
 from .precision_miner_eval import (
-    load_precision_miner_cases,
+    build_precision_miner_cases_from_references,
+    build_precision_miner_references,
+    precision_miner_agreement_metrics,
     run_precision_miner_cases,
 )
 from .pipeline import run_cases
@@ -25,8 +27,10 @@ __all__ = [
     "evaluate_case_runs",
     "generate_explorer_testset",
     "generate_testset_candidates",
-    "load_precision_miner_cases",
+    "build_precision_miner_cases_from_references",
+    "build_precision_miner_references",
     "load_simple_rag_qa_cases",
+    "precision_miner_agreement_metrics",
     "run_precision_miner_cases",
     "run_cases",
     "write_jsonl",

@@ -217,9 +217,10 @@ def _build_metadata_db(
     if backend == MetadataBackend.memory:
         _ensure_parent_dir(db_backup)
         return InMemoryAcademicDB(backup_file=str(db_backup))
-    if not mongo_uri:
+    resolved_mongo_uri = mongo_uri or _SETTINGS.mongo_uri
+    if not resolved_mongo_uri:
         raise ValueError("Mongo metadata backend requires --mongo-uri or MONGO_URI.")
-    return MongoAcademicDB(uri=mongo_uri, db_name=mongo_db_name)
+    return MongoAcademicDB(uri=resolved_mongo_uri, db_name=mongo_db_name)
 
 
 def _build_generator(provider: LLMProvider, model: Optional[str], temperature: float):
@@ -658,9 +659,10 @@ def index(
         help="JSON file used by the local metadata store.",
     ),
     mongo_uri: Optional[str] = typer.Option(
-        _SETTINGS.mongo_uri,
+        None,
         "--mongo-uri",
-        help="Mongo URI when --metadata-backend=mongo.",
+        help="Mongo URI when --metadata-backend=mongo. Defaults to the MONGO_URI environment variable.",
+        show_default=False,
     ),
     mongo_db_name: str = typer.Option(
         _SETTINGS.mongo_db_name,
@@ -670,7 +672,7 @@ def index(
     embed_model: str = typer.Option(
         _DEFAULT_EMBED_MODEL,
         "--embed-model",
-        help="Dense embedding model used for indexing. The default only needs a Gemini API key.",
+        help="Dense embedding model used for indexing. The default is local-first.",
     ),
     chunker: ChunkerKind = typer.Option(
         ChunkerKind.paragraph,
@@ -755,9 +757,10 @@ def papers(
         help="JSON file used by the local metadata store.",
     ),
     mongo_uri: Optional[str] = typer.Option(
-        _SETTINGS.mongo_uri,
+        None,
         "--mongo-uri",
-        help="Mongo URI when --metadata-backend=mongo.",
+        help="Mongo URI when --metadata-backend=mongo. Defaults to the MONGO_URI environment variable.",
+        show_default=False,
     ),
     mongo_db_name: str = typer.Option(
         _SETTINGS.mongo_db_name,
@@ -923,7 +926,9 @@ def explore(
 
 @app.command()
 def ask(
-    question: str = typer.Argument(..., help="Question to answer from a local document or folder."),
+    question: str = typer.Argument(
+        ..., help="Question to answer from a local document or folder."
+    ),
     path: Path = typer.Option(
         ...,
         "--path",
@@ -1042,7 +1047,12 @@ def classify(
         "--metadata-backend",
     ),
     db_backup: Path = typer.Option(_DEFAULT_DB_BACKUP, "--db-backup"),
-    mongo_uri: Optional[str] = typer.Option(_SETTINGS.mongo_uri, "--mongo-uri"),
+    mongo_uri: Optional[str] = typer.Option(
+        None,
+        "--mongo-uri",
+        help="Mongo URI when --metadata-backend=mongo. Defaults to the MONGO_URI environment variable.",
+        show_default=False,
+    ),
     mongo_db_name: str = typer.Option(_SETTINGS.mongo_db_name, "--mongo-db-name"),
     retrieval_mode: RetrievalMode = typer.Option(
         RetrievalMode.dense_only,
@@ -1154,7 +1164,12 @@ def precision_miner(
         "--metadata-backend",
     ),
     db_backup: Path = typer.Option(_DEFAULT_DB_BACKUP, "--db-backup"),
-    mongo_uri: Optional[str] = typer.Option(_SETTINGS.mongo_uri, "--mongo-uri"),
+    mongo_uri: Optional[str] = typer.Option(
+        None,
+        "--mongo-uri",
+        help="Mongo URI when --metadata-backend=mongo. Defaults to the MONGO_URI environment variable.",
+        show_default=False,
+    ),
     mongo_db_name: str = typer.Option(_SETTINGS.mongo_db_name, "--mongo-db-name"),
     retrieval_mode: RetrievalMode = typer.Option(
         RetrievalMode.dense_only,

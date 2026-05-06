@@ -7,7 +7,10 @@ from .base import AbstractVectorDB
 
 try:
     from qdrant_client import QdrantClient, models
-    from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+    from qdrant_client.http.exceptions import (
+        ResponseHandlingException,
+        UnexpectedResponse,
+    )
 except ImportError:
     QdrantClient = None
     models = None
@@ -29,7 +32,9 @@ def _batch_iterate(iterable: Iterable[Any], batch_size: int) -> Iterable[List[An
 
 
 def _is_connection_error(exc: Exception) -> bool:
-    if ResponseHandlingException is not None and isinstance(exc, ResponseHandlingException):
+    if ResponseHandlingException is not None and isinstance(
+        exc, ResponseHandlingException
+    ):
         return True
     return False
 
@@ -123,9 +128,7 @@ class QdrantDB(AbstractVectorDB):
 
             if self.use_dense:
                 self.dense_dim = vectors_config[self.dense_vector_name].size
-                self.dense_distance = vectors_config[
-                    self.dense_vector_name
-                ].distance
+                self.dense_distance = vectors_config[self.dense_vector_name].distance
 
             if self.use_late:
                 self.late_dim = vectors_config[self.late_vector_name].size

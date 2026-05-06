@@ -9,11 +9,12 @@ pdfs/
 OLD/
 outputs/
 expanded_papers/
-docs/
 
 
 # Data / output files
 *.json
+!eval/configs/*.json
+!eval/ragas/schemas/*.json
 *.faiss
 *.csv
 *.pdf

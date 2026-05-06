@@ -42,17 +42,13 @@ class GeminiEmbedder(Embedder):
         )
 
     def embed_query(self, text: str) -> List[float]:
-        return self._embed_texts_with_task(
-            [text], task_type="RETRIEVAL_QUERY"
-        )[0]
+        return self._embed_texts_with_task([text], task_type="RETRIEVAL_QUERY")[0]
 
     def embed_queries(self, texts: Iterable[str]) -> List[List[float]]:
         return self._embed_texts_with_task(texts, task_type="RETRIEVAL_QUERY")
 
     def embed_document(self, text: str) -> List[float]:
-        return self._embed_texts_with_task(
-            [text], task_type="RETRIEVAL_DOCUMENT"
-        )[0]
+        return self._embed_texts_with_task([text], task_type="RETRIEVAL_DOCUMENT")[0]
 
     def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
         return self._embed_texts_with_task(texts, task_type="RETRIEVAL_DOCUMENT")

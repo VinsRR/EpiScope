@@ -10,7 +10,7 @@ from eval.ragas.testset_generation import (
     _build_testset_models,
     _default_testset_max_tokens,
     _default_testset_reasoning_effort,
-    _load_stored_chunk_documents,
+    _load_vector_db_chunk_documents,
     _limit_chunk_docs,
     _query_types_from_ratios,
     generate_explorer_testset,
@@ -169,8 +169,8 @@ def test_generate_explorer_testset_writes_cases_and_threads_critic(monkeypatch, 
         lambda: _FakeGenerator,
     )
     monkeypatch.setattr(
-        "eval.ragas.testset_generation._load_chunk_documents",
-        lambda path, config: ["chunk-1", "chunk-2"],
+        "eval.ragas.testset_generation._load_vector_db_chunk_documents",
+        lambda config: ["chunk-1", "chunk-2"],
     )
     monkeypatch.setattr(
         "eval.ragas.testset_generation._build_testset_models",
@@ -186,7 +186,6 @@ def test_generate_explorer_testset_writes_cases_and_threads_critic(monkeypatch, 
     csv_path = tmp_path / "generated_testset.csv"
 
     generated = generate_explorer_testset(
-        path=tmp_path,
         pipeline_config=RagPipelineConfig(),
         llm_provider="google",
         llm_model="g-model",
@@ -218,8 +217,8 @@ def test_generate_explorer_testset_limits_chunks(monkeypatch, tmp_path: Path) ->
         lambda: _FakeGenerator,
     )
     monkeypatch.setattr(
-        "eval.ragas.testset_generation._load_chunk_documents",
-        lambda path, config: ["chunk-1", "chunk-2", "chunk-3"],
+        "eval.ragas.testset_generation._load_vector_db_chunk_documents",
+        lambda config: ["chunk-1", "chunk-2", "chunk-3"],
     )
     monkeypatch.setattr(
         "eval.ragas.testset_generation._build_testset_models",
@@ -231,7 +230,6 @@ def test_generate_explorer_testset_limits_chunks(monkeypatch, tmp_path: Path) ->
     )
 
     generate_explorer_testset(
-        path=tmp_path,
         pipeline_config=RagPipelineConfig(),
         llm_provider="google",
         llm_model="g-model",
@@ -252,7 +250,7 @@ def test_generate_explorer_testset_limits_chunks(monkeypatch, tmp_path: Path) ->
     assert _FakeGenerator.last_kwargs["chunks"] == ["chunk-1", "chunk-2"]
 
 
-def test_load_stored_chunk_documents_uses_vectordb_namespace(monkeypatch) -> None:
+def test_load_vector_db_chunk_documents_uses_full_vectordb(monkeypatch) -> None:
     class _FakeVectorDb:
         def __init__(self):
             self.calls = []
@@ -263,11 +261,13 @@ def test_load_stored_chunk_documents_uses_vectordb_namespace(monkeypatch) -> Non
                 {
                     "id": "chunk-1",
                     "paper_id": "doc-123",
-                    "text": "Stored chunk text.",
-                    "section_title": "Methods",
-                    "section_type": "Methods",
-                    "is_metadata": False,
-                }
+                    "text": "First stored chunk.",
+                },
+                {
+                    "id": "chunk-2",
+                    "paper_id": "doc-456",
+                    "text": "Second stored chunk.",
+                },
             ]
 
     fake_db = _FakeVectorDb()
@@ -280,7 +280,7 @@ def test_load_stored_chunk_documents_uses_vectordb_namespace(monkeypatch) -> Non
         lambda: None,
     )
 
-    docs = _load_stored_chunk_documents("doc-123", RagPipelineConfig())
+    docs = _load_vector_db_chunk_documents(RagPipelineConfig())
 
-    assert docs == ["Stored chunk text."]
-    assert fake_db.calls == [("doc-123", None)]
+    assert docs == ["First stored chunk.", "Second stored chunk."]
+    assert fake_db.calls == [(None, None)]
