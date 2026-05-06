@@ -1,8 +1,8 @@
 """retry_unclear.py
 
-Scans all TSV output files produced by run_repeated_experiments.py and
-re-runs the classifier for every row whose 'classification' column is
-["UNCLEAR"] or [] (the sentinel used when a paper errored out).
+Scans TSV output files produced by run_repeated_experiments.py and re-runs the
+classifier for rows whose classification is empty or is the classifier's
+current fallback/unclear label.
 
 The patched TSV is written back atomically so that no data is lost if the
 script is interrupted mid-way.
@@ -30,12 +30,14 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import dotenv
 
 dotenv.load_dotenv()
+
+import run_repeated_experiments as runner
 
 # ---------------------------------------------------------------------------
 # Re-use helpers from run_repeated_experiments (copy-pasted to keep the
@@ -102,19 +104,30 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Settings:
     strategy_name: str = "grobid"
-    papers_csv_path: Optional[str] = None  #= "sampled_papers_full.csv"
-    papers_csv_sep: str = "\t"
+    paper_source: str = "csv_subset"
+    subset_papers_csv_path: Optional[str] = "sampled_papers_full.csv"
+    subset_papers_csv_sep: str = "\t"
+    ground_truth_csv_path: Optional[str] = "sampled_papers_full.csv"
+    ground_truth_csv_sep: str = "\t"
     mongo_uri_or_env: str = "MONGO_URI"
     mongo_db_name: str = "episcope_academic_db"
-    qdrant_url: str = "http://localhost:6334"
-    qdrant_collection: str = "episcope_academic_vdb2"
-    llm_model: str = "gemini-2.5-flash"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "episcope_academic"
+    llm_provider: str = "openrouter"
+    llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
     llm_temperature: float = 0.0
-    classifier_kind: str = "data_type"
-    base_output_dir: str = "output_full"
+    classifier_kind: str = "data_accessibility"
+    workflow_top_k: int = 20
+    retrieval_mode: str = "dense_only"
+    evidence_reranker_kind: str = "none"
+    cross_encoder_model: Optional[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    cross_encoder_top_k: Optional[int] = 15
+    base_output_dir: str = "outputs/nemotron_dense"
     explicit_run_dir: Optional[str] = None
-    checkpoint_every: int = 10
+    checkpoint_every: int = 1
     fail_fast: bool = False
+    record_failures: bool = True
+    allow_delete_on_errors: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -122,92 +135,13 @@ class Settings:
 # ---------------------------------------------------------------------------
 
 def build_classifier(settings: Settings):
-    from episcope.db.mongo_academic_db import MongoAcademicDB
-    from episcope.vectordb.qdrant import QdrantDB
-    from episcope.rag.retrieval.candidates import SemanticCandidateRetriever
-    from episcope.rag.retrieval.retriever import Retriever
-    from episcope.clients import GeminiClient
-    from episcope.rag.generation.llm_generator import LLMGenerator
-    from episcope.workflows import PaperClassifier
-    from episcope.workflows.classification import (
-        PaperTypeClassifierConfig,
-        DataAccessibilityClassifierConfig,
-        DataTypeClassifierConfig,
-        GeoClassifierConfig,
-    )
-
-    config_map = {
-        "paper_type": PaperTypeClassifierConfig,
-        "data_accessibility": DataAccessibilityClassifierConfig,
-        "data_type": DataTypeClassifierConfig,
-        "geo": GeoClassifierConfig,
-    }
-    if settings.classifier_kind not in config_map:
-        raise ValueError(
-            f"Unknown classifier_kind={settings.classifier_kind!r}. "
-            f"Use one of {list(config_map)}"
-        )
-
-    uri = resolve_mongo_uri(settings.mongo_uri_or_env)
-    db = MongoAcademicDB(uri=uri, db_name=settings.mongo_db_name)
-    vdb = QdrantDB(collection=settings.qdrant_collection, url=settings.qdrant_url)
-    retriever = Retriever(
-        vectordb=vdb,
-        candidate_retrievers=[SemanticCandidateRetriever(vdb)],
-        use_rerank=False,
-    )
-    client = GeminiClient()
-
-    try:
-        generator = LLMGenerator(
-            client=client,
-            model=settings.llm_model,
-            temperature=settings.llm_temperature,
-        )
-    except TypeError:
-        generator = LLMGenerator(client=client, model=settings.llm_model)
-
-    return PaperClassifier(
-        retriever=retriever,
-        generator=generator,
-        academic_db=db,
-        strategy_name=settings.strategy_name,
-        config=config_map[settings.classifier_kind](),
-    )
+    return runner.build_classifier(settings)
 
 
 def result_row_from_output(
     paper_id: str, c_res: Any, classifier_kind: str
 ) -> Dict[str, Any]:
-    evidence = None
-    if hasattr(c_res, "evidence"):
-        if isinstance(c_res.evidence, dict):
-            evidence = c_res.evidence.get("reasoning") or c_res.evidence
-        else:
-            evidence = c_res.evidence
-
-    base: Dict[str, Any] = {
-        "paper_id": str(paper_id),
-        "classification": [c.name for c in getattr(c_res, "classification", [])],
-        "class_probabilities": getattr(c_res, "class_probabilities", None),
-        "confidence": getattr(c_res, "confidence", None),
-        "evidence": evidence,
-    }
-
-    extras = getattr(c_res, "extras", {}) or {}
-
-    if classifier_kind == "paper_type":
-        sec = extras.get("secondary_labels", [])
-        base["secondary_labels"] = [c.name for c in sec] if isinstance(sec, list) else []
-        base["extras"] = extras
-    elif classifier_kind == "geo":
-        base["countries"] = extras.get("countries", [])
-        base["cities"] = extras.get("cities", [])
-        base["extras"] = extras
-    else:
-        base["extras"] = extras
-
-    return base
+    return runner.result_row_from_output(paper_id, c_res, classifier_kind)
 
 
 # ---------------------------------------------------------------------------
@@ -235,13 +169,23 @@ def _parse_classification(raw: Any) -> List[str]:
     return [raw]
 
 
-def is_unclear_row(row: pd.Series) -> bool:
+UNCLEAR_TOKENS_BY_KIND = {
+    "paper_type": {"UNCLEAR", "unclear"},
+    "data_accessibility": {"UNCLEAR", "unclear"},
+    "data_type": {"UNCLEAR", "unclear", "H"},
+    "geo": {"UNCLEAR", "unclear", "H"},
+}
+
+
+def is_unclear_row(row: pd.Series, classifier_kind: str = "data_accessibility") -> bool:
     """Return True if this row should be retried."""
     labels = _parse_classification(row.get("classification"))
-    # Retry when: no label at all, or the only label is UNCLEAR
     if not labels:
         return True
-    return labels == ["UNCLEAR"] or all(lbl.upper() == "UNCLEAR" for lbl in labels)
+    unclear_tokens = UNCLEAR_TOKENS_BY_KIND.get(
+        classifier_kind, {"UNCLEAR", "unclear"}
+    )
+    return all(str(lbl).strip() in unclear_tokens for lbl in labels)
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +260,9 @@ def retry_tsv(
         print(f"  [SKIP] Missing required columns in {tsv_path}")
         return 0, 0
 
-    unclear_mask = df.apply(is_unclear_row, axis=1)
+    unclear_mask = df.apply(
+        lambda row: is_unclear_row(row, settings.classifier_kind), axis=1
+    )
     unclear_ids: List[str] = df.loc[unclear_mask, "paper_id"].astype(str).tolist()
 
     if not unclear_ids:
@@ -338,43 +284,107 @@ def retry_tsv(
 
     n_retried = 0
     n_still_unclear = 0
+    p = runner.paths_for_repeat(tsv_path.parent, repeat_idx)
+    if tsv_path.name.startswith("final_"):
+        provenance_path = p["final_provenance_jsonl"]
+        token_summary_path = p["final_token_summary"]
+    else:
+        provenance_path = p["checkpoint_provenance_jsonl"]
+        token_summary_path = p["checkpoint_token_summary"]
+
+    provenance_records = {
+        str(record["paper_id"]): record
+        for record in runner.load_jsonl_if_any(provenance_path)
+        if "paper_id" in record
+    }
+
     pending_rows: List[Dict[str, Any]] = []
+    pending_provenance: List[Dict[str, Any]] = []
 
     for i, paper_id in enumerate(unclear_ids, start=1):
         print(f"    [{i}/{len(unclear_ids)}] retrying paper_id={paper_id} …")
+        usage_before = runner._usage_snapshot_from_classifier(classifier)
+        caught_error: Optional[Exception] = None
         try:
-            c_res = classifier.run(paper_id)
+            c_res = classifier.run_detailed(paper_id)
             new_row = result_row_from_output(paper_id, c_res, settings.classifier_kind)
             append_log(log_path, f"OK paper_id={paper_id} classification={new_row['classification']}")
         except Exception as exc:
+            caught_error = exc
             append_log(log_path, f"ERROR paper_id={paper_id} err={repr(exc)}")
             print(f"    [ERROR] paper_id={paper_id}: {repr(exc)}")
             if settings.fail_fast:
                 raise
-            # Keep as UNCLEAR so we can retry again later
             new_row = {
                 "paper_id": paper_id,
-                "classification": ["UNCLEAR"],
+                "classification": [],
                 "class_probabilities": None,
                 "confidence": None,
                 "evidence": None,
                 "extras": {"error": repr(exc)},
             }
+            c_res = None
             n_still_unclear += 1
 
+        usage_after = runner._usage_snapshot_from_classifier(classifier)
+        usage_delta = (
+            runner._usage_delta(usage_after, usage_before)
+            if usage_before is not None and usage_after is not None
+            else None
+        )
+        new_row.update(runner._usage_payload_for_row(settings, usage_delta))
+
+        if c_res is not None:
+            provenance_record = runner.detailed_record_from_output(
+                paper_id,
+                c_res,
+                token_usage=usage_delta,
+            )
+            if is_unclear_row(pd.Series(new_row), settings.classifier_kind):
+                n_still_unclear += 1
+        else:
+            provenance_record = runner.failure_record(
+                paper_id, caught_error or RuntimeError("unknown error")
+            )
+            provenance_record["token_usage"] = usage_delta or {}
+
         pending_rows.append(new_row)
+        pending_provenance.append(provenance_record)
         n_retried += 1
 
         # Periodic checkpoint write
         if len(pending_rows) % settings.checkpoint_every == 0:
             df = _apply_updates(df, pending_rows)
             atomic_write_tsv(df, tsv_path)
+            for record in pending_provenance:
+                provenance_records[str(record["paper_id"])] = record
+            runner.atomic_write_jsonl(list(provenance_records.values()), provenance_path)
+            runner.atomic_write_text(
+                token_summary_path,
+                json.dumps(
+                    runner.build_token_summary(df, settings, repeat_idx=repeat_idx),
+                    indent=2,
+                    sort_keys=True,
+                ),
+            )
             pending_rows.clear()
+            pending_provenance.clear()
 
     # Final flush
     if pending_rows:
         df = _apply_updates(df, pending_rows)
         atomic_write_tsv(df, tsv_path)
+        for record in pending_provenance:
+            provenance_records[str(record["paper_id"])] = record
+        runner.atomic_write_jsonl(list(provenance_records.values()), provenance_path)
+        runner.atomic_write_text(
+            token_summary_path,
+            json.dumps(
+                runner.build_token_summary(df, settings, repeat_idx=repeat_idx),
+                indent=2,
+                sort_keys=True,
+            ),
+        )
 
     return n_retried, n_still_unclear
 
@@ -455,14 +465,40 @@ def settings_from_run_dir(run_dir: Path, base_settings: Settings) -> Settings:
     if sig:
         if "classifier_kind" in sig:
             d["classifier_kind"] = sig["classifier_kind"]
+        if "llm_provider" in sig:
+            d["llm_provider"] = sig["llm_provider"]
         if "llm_model" in sig:
             d["llm_model"] = sig["llm_model"]
         if "llm_temperature" in sig:
             d["llm_temperature"] = float(sig["llm_temperature"])
+        if "workflow_top_k" in sig:
+            d["workflow_top_k"] = int(sig["workflow_top_k"])
+        if "retrieval_mode" in sig:
+            d["retrieval_mode"] = sig["retrieval_mode"]
+        if "evidence_reranker_kind" in sig:
+            d["evidence_reranker_kind"] = sig["evidence_reranker_kind"]
+        if "cross_encoder_model" in sig:
+            d["cross_encoder_model"] = sig["cross_encoder_model"]
+        if "cross_encoder_top_k" in sig:
+            d["cross_encoder_top_k"] = sig["cross_encoder_top_k"]
         if "strategy_name" in sig:
             d["strategy_name"] = sig["strategy_name"]
+        if "qdrant_url" in sig:
+            d["qdrant_url"] = sig["qdrant_url"]
         if "qdrant_collection" in sig:
             d["qdrant_collection"] = sig["qdrant_collection"]
+        if "mongo_db_name" in sig:
+            d["mongo_db_name"] = sig["mongo_db_name"]
+        if "paper_source" in sig:
+            d["paper_source"] = sig["paper_source"]
+        if "subset_papers_csv_path" in sig:
+            d["subset_papers_csv_path"] = sig["subset_papers_csv_path"]
+        if "subset_papers_csv_sep" in sig:
+            d["subset_papers_csv_sep"] = sig["subset_papers_csv_sep"]
+        if "ground_truth_csv_path" in sig:
+            d["ground_truth_csv_path"] = sig["ground_truth_csv_path"]
+        if "ground_truth_csv_sep" in sig:
+            d["ground_truth_csv_sep"] = sig["ground_truth_csv_sep"]
         return Settings(**d)
 
     # --- 2. Fallback: parse what we can from the path -----------------------
@@ -505,10 +541,31 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--strategy-name", type=str, default=None)
     ap.add_argument("--qdrant-url", type=str, default=None)
     ap.add_argument("--qdrant-collection", type=str, default=None)
+    ap.add_argument(
+        "--llm-provider",
+        type=str,
+        default=None,
+        choices=["gemini", "openrouter", "openai", "ollama"],
+    )
     ap.add_argument("--mongo-uri-or-env", type=str, default=None)
     ap.add_argument("--mongo-db-name", type=str, default=None)
     ap.add_argument("--llm-model", type=str, default=None)
     ap.add_argument("--llm-temperature", type=float, default=None)
+    ap.add_argument("--workflow-top-k", type=int, default=None)
+    ap.add_argument(
+        "--retrieval-mode",
+        type=str,
+        default=None,
+        choices=["dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"],
+    )
+    ap.add_argument(
+        "--evidence-reranker-kind",
+        type=str,
+        default=None,
+        choices=["none", "global_cross_encoder", "within_label_cross_encoder"],
+    )
+    ap.add_argument("--cross-encoder-model", type=str, default=None)
+    ap.add_argument("--cross-encoder-top-k", type=int, default=None)
     ap.add_argument("--classifier-kind", type=str, default=None,
                     help="Override classifier kind (otherwise inferred from path).")
     ap.add_argument("--checkpoint-every", type=int, default=None)
@@ -527,11 +584,21 @@ def merge_settings(base: Settings, args: argparse.Namespace) -> Settings:
     if args.strategy_name:       d["strategy_name"]       = args.strategy_name
     if args.qdrant_url:          d["qdrant_url"]           = args.qdrant_url
     if args.qdrant_collection:   d["qdrant_collection"]    = args.qdrant_collection
+    if args.llm_provider:        d["llm_provider"]         = args.llm_provider
     if args.mongo_uri_or_env:    d["mongo_uri_or_env"]     = args.mongo_uri_or_env
     if args.mongo_db_name:       d["mongo_db_name"]        = args.mongo_db_name
     if args.llm_model:           d["llm_model"]            = args.llm_model
     if args.llm_temperature is not None:
                                  d["llm_temperature"]      = args.llm_temperature
+    if args.workflow_top_k is not None:
+                                 d["workflow_top_k"]       = args.workflow_top_k
+    if args.retrieval_mode:      d["retrieval_mode"]       = args.retrieval_mode
+    if args.evidence_reranker_kind:
+                                 d["evidence_reranker_kind"] = args.evidence_reranker_kind
+    if args.cross_encoder_model is not None:
+                                 d["cross_encoder_model"]  = args.cross_encoder_model
+    if args.cross_encoder_top_k is not None:
+                                 d["cross_encoder_top_k"]  = args.cross_encoder_top_k
     if args.classifier_kind:     d["classifier_kind"]      = args.classifier_kind
     if args.checkpoint_every:    d["checkpoint_every"]     = args.checkpoint_every
     if args.fail_fast:           d["fail_fast"]            = True
