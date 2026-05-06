@@ -84,6 +84,8 @@ def append_log(log_path: Path, msg: str) -> None:
 
 def resolve_mongo_uri(mongo_uri_or_env: str) -> str:
     s = (mongo_uri_or_env or "").strip()
+    if not s:
+        s = "MONGO_URI"
     if s.lower().startswith("mongodb"):
         return s
     uri = os.environ.get(s)
@@ -109,7 +111,7 @@ class Settings:
     subset_papers_csv_sep: str = "\t"
     ground_truth_csv_path: Optional[str] = "sampled_papers_full.csv"
     ground_truth_csv_sep: str = "\t"
-    mongo_uri_or_env: str = os.environ.get("MONGO_URI", "")
+    mongo_uri_or_env: str =  "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF@cluster0.s82lhln.mongodb.net/" #"MONGO_URI"
     mongo_db_name: str = "episcope_academic_db"
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
@@ -193,6 +195,20 @@ def is_unclear_row(row: pd.Series, classifier_kind: str = "data_accessibility") 
 # ---------------------------------------------------------------------------
 
 KNOWN_KINDS = ["paper_type", "data_accessibility", "data_type", "geo"]
+
+
+def _clean_optional_text(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _finalize_settings_dict(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize values that are unsafe when copied from older metadata/defaults."""
+    if not _clean_optional_text(d.get("mongo_uri_or_env")):
+        d["mongo_uri_or_env"] = "MONGO_URI"
+    return d
 
 
 def infer_classifier_kind(run_dir: Path) -> Optional[str]:
@@ -499,7 +515,7 @@ def settings_from_run_dir(run_dir: Path, base_settings: Settings) -> Settings:
             d["ground_truth_csv_path"] = sig["ground_truth_csv_path"]
         if "ground_truth_csv_sep" in sig:
             d["ground_truth_csv_sep"] = sig["ground_truth_csv_sep"]
-        return Settings(**d)
+        return Settings(**_finalize_settings_dict(d))
 
     # --- 2. Fallback: parse what we can from the path -----------------------
     kind = infer_classifier_kind(run_dir)
@@ -515,7 +531,7 @@ def settings_from_run_dir(run_dir: Path, base_settings: Settings) -> Settings:
     # We leave d["llm_model"] as the base_settings value in that case so the
     # user gets a clear warning rather than a silently wrong model name.
 
-    return Settings(**d)
+    return Settings(**_finalize_settings_dict(d))
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +618,7 @@ def merge_settings(base: Settings, args: argparse.Namespace) -> Settings:
     if args.classifier_kind:     d["classifier_kind"]      = args.classifier_kind
     if args.checkpoint_every:    d["checkpoint_every"]     = args.checkpoint_every
     if args.fail_fast:           d["fail_fast"]            = True
-    return Settings(**d)
+    return Settings(**_finalize_settings_dict(d))
 
 
 # ---------------------------------------------------------------------------
