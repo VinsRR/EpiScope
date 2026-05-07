@@ -5,7 +5,6 @@ import io
 import logging
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -15,15 +14,12 @@ from sklearn.decomposition import (
     TruncatedSVD,
 )
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import normalize
 
 from episcope.schemas import PaperMetadata
 from episcope.workflows.classification.baselines.common import (
     BaselinePrediction,
-    classifier_config,
     default_labels,
-    label_from_category,
     labels_from_names,
     majority_label_set,
     metadata_from_mapping,
@@ -31,50 +27,12 @@ from episcope.workflows.classification.baselines.common import (
     parse_label_names,
     result_from_labels,
 )
-from episcope.workflows.classification.schemas import (
-    DATA_ACCESS_CODE_DEFINITIONS,
-    DATA_TYPE_CODE_DEFINITIONS,
-    GEO_CODE_DEFINITIONS,
-    PAPER_TYPE_DEFINITIONS,
-)
 
 SKLEARN_TOPIC_BASELINES = {"lsa", "plsa", "lda", "nmf"}
 OPTIONAL_TOPIC_BASELINES = {"bertopic", "top2vec"}
-BASE_TOPIC_MODEL_KINDS = (
-    *sorted(SKLEARN_TOPIC_BASELINES),
-    *sorted(OPTIONAL_TOPIC_BASELINES),
-)
-GUIDED_TOPIC_MODEL_BASELINES = tuple(
-    f"guided_{kind}" for kind in BASE_TOPIC_MODEL_KINDS
-)
-TOPIC_MAJORITY_BASELINES = tuple(
-    f"topic_majority_{kind}" for kind in BASE_TOPIC_MODEL_KINDS
-)
-TOPIC_MODEL_BASELINES = GUIDED_TOPIC_MODEL_BASELINES
-
-DEFINITIONS_BY_CLASSIFIER = {
-    "paper_type": PAPER_TYPE_DEFINITIONS,
-    "data_accessibility": DATA_ACCESS_CODE_DEFINITIONS,
-    "data_type": DATA_TYPE_CODE_DEFINITIONS,
-    "geo": GEO_CODE_DEFINITIONS,
-}
+TOPIC_MODEL_BASELINES = (*sorted(SKLEARN_TOPIC_BASELINES), *sorted(OPTIONAL_TOPIC_BASELINES))
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class LabelGuide:
-    label: Any
-    name: str
-    text: str
-
-
-def base_topic_model_kind(model_kind: str) -> str:
-    kind = model_kind.lower()
-    for prefix in ("guided_", "topic_majority_"):
-        if kind.startswith(prefix):
-            return kind.removeprefix(prefix)
-    return kind
 
 
 def _effective_n_topics(requested: int, n_documents: int, n_features: int) -> int:
@@ -90,72 +48,6 @@ def _safe_corpus(records: Sequence[Mapping[str, object]]) -> list[str]:
             text = str(record.get("paper_id") or "empty document")
         corpus.append(text)
     return corpus
-
-
-def _unique_text_parts(parts: Sequence[Any]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for part in parts:
-        text = str(part or "").strip()
-        if not text:
-            continue
-        key = " ".join(text.lower().split())
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(text)
-    return out
-
-
-def _label_guides(classifier_kind: str) -> list[LabelGuide]:
-    config = classifier_config(classifier_kind)
-    definitions = DEFINITIONS_BY_CLASSIFIER.get(classifier_kind, {})
-    by_label: dict[Any, list[str]] = {}
-
-    def add(label: Any, *parts: Any) -> None:
-        if getattr(label, "name", "") == "UNCLEAR":
-            return
-        by_label.setdefault(label, []).extend(parts)
-
-    for key, label in config.classification_mapping.items():
-        label_name = getattr(label, "name", str(label))
-        label_value = getattr(label, "value", label_name)
-        category_label = (
-            config.category_labels.get(key)
-            or config.category_labels.get(str(label_value))
-            or label_name
-        )
-        definition = (
-            definitions.get(key)
-            or definitions.get(label_name)
-            or definitions.get(str(label_value))
-            or ""
-        )
-        add(
-            label,
-            f"Classifier label {label_name}: {label_value}.",
-            category_label,
-            definition,
-        )
-
-    for category, paragraphs in config.template_paragraphs.items():
-        label = label_from_category(classifier_kind, category)
-        if label is None:
-            continue
-        add(label, category, *paragraphs)
-
-    if classifier_kind == "geo":
-        for label, parts in list(by_label.items()):
-            name = str(getattr(label, "name", label)).replace("_", " ").title()
-            parts.append(f"Epidemiological evidence geographically located in {name}.")
-
-    guides = []
-    for label, parts in by_label.items():
-        label_name = str(getattr(label, "name", label))
-        text = "\n".join(_unique_text_parts(parts))
-        if text:
-            guides.append(LabelGuide(label=label, name=label_name, text=text))
-    return guides
 
 
 def _topic_matrix_from_assignments(
@@ -305,7 +197,7 @@ class TopicModelBaseline:
         leave_one_out: bool = True,
     ) -> None:
         self.classifier_kind = classifier_kind
-        self.model_kind = base_topic_model_kind(model_kind)
+        self.model_kind = model_kind.lower()
         self.records = [dict(record) for record in records]
         self.n_topics = n_topics
         self.max_features = max_features
@@ -398,7 +290,7 @@ class TopicModelBaseline:
         else:
             raise ValueError(
                 f"Unknown topic baseline {self.model_kind!r}. "
-                f"Use one of {list(BASE_TOPIC_MODEL_KINDS)}."
+                f"Use one of {list(TOPIC_MODEL_BASELINES)}."
             )
 
         topic_ids, topic_scores = self._topic_assignments(doc_topic)
@@ -569,375 +461,3 @@ class TopicModelBaseline:
         scores = np.max(normalized, axis=1)
         topic_ids = np.argmax(normalized, axis=1)
         return topic_ids, scores
-
-
-class GuidedTopicModelBaseline:
-    """Topic/embedding baseline guided by task label descriptions, not gold labels."""
-
-    def __init__(
-        self,
-        *,
-        classifier_kind: str,
-        model_kind: str,
-        records: Sequence[Mapping[str, object]],
-        n_topics: int = 10,
-        max_features: int = 5000,
-        min_df: int | float = 1,
-        max_df: int | float = 0.95,
-        random_state: int = 13,
-        multilabel_ratio: float = 0.6,
-        min_score: float = 0.05,
-        max_labels: int = 4,
-    ) -> None:
-        self.classifier_kind = classifier_kind
-        self.model_kind = base_topic_model_kind(model_kind)
-        self.records = [dict(record) for record in records]
-        self.n_topics = n_topics
-        self.max_features = max_features
-        self.min_df = min_df
-        self.max_df = max_df
-        self.random_state = random_state
-        self.multilabel_ratio = multilabel_ratio
-        self.min_score = min_score
-        self.max_labels = max_labels
-        self.guides = _label_guides(classifier_kind)
-        if not self.guides:
-            raise ValueError(f"No label guides are configured for {classifier_kind!r}.")
-
-        self.topic_terms: dict[int, list[str]] = {}
-        self.score_by_paper_id: dict[str, dict[str, float]] = {}
-        self.top_scores_by_paper_id: dict[str, list[dict[str, Any]]] = {}
-        self._fit()
-
-    @property
-    def name(self) -> str:
-        return f"guided_{self.model_kind}"
-
-    def predict(
-        self,
-        paper_id: str,
-        metadata: PaperMetadata,
-        record: Mapping[str, object] | None = None,
-    ) -> BaselinePrediction:
-        scores = self.score_by_paper_id.get(str(paper_id), {})
-        ranked = sorted(
-            ((guide, scores.get(guide.name, 0.0)) for guide in self.guides),
-            key=lambda item: item[1],
-            reverse=True,
-        )
-        selected = self._select_labels(ranked)
-        confidence = float(ranked[0][1]) if ranked else 0.0
-
-        total = float(sum(max(score, 0.0) for _, score in ranked)) or 1.0
-        probabilities = {
-            guide.name: float(max(score, 0.0) / total) for guide, score in ranked
-        }
-        extras: dict[str, Any] = {
-            "baseline_mode": "guided_topic_model",
-            "topic_model": self.model_kind,
-            "top_scores": self.top_scores_by_paper_id.get(str(paper_id), []),
-            "n_topics": self.n_topics,
-            "multilabel_ratio": self.multilabel_ratio,
-            "min_score": self.min_score,
-            "max_labels": self._max_labels_for_task(),
-        }
-        if self.classifier_kind == "paper_type" and selected:
-            extras["primary_label"] = selected[0]
-            extras["secondary_labels"] = selected[1:]
-
-        result = result_from_labels(
-            self.classifier_kind,
-            selected,
-            confidence=confidence,
-            reasoning=(
-                f"Guided {self.model_kind.upper()} baseline: projected the paper and "
-                "label-definition prompts into the same topic/embedding space, then "
-                "selected every label close to the best-scoring label."
-            ),
-            class_probabilities=probabilities,
-            extras=extras,
-        )
-        return BaselinePrediction(result=result)
-
-    def _fit(self) -> None:
-        corpus = _safe_corpus(self.records)
-        guide_texts = [guide.text for guide in self.guides]
-        all_embeddings, terms = self._fit_embeddings(corpus, guide_texts)
-        n_documents = len(corpus)
-        doc_embeddings = all_embeddings[:n_documents]
-        guide_embeddings = all_embeddings[n_documents:]
-
-        similarities = cosine_similarity(doc_embeddings, guide_embeddings)
-        similarities = np.nan_to_num(similarities, nan=0.0, posinf=0.0, neginf=0.0)
-        if similarities.size and np.min(similarities) < 0:
-            similarities = (similarities + 1.0) / 2.0
-        similarities = np.clip(similarities, 0.0, 1.0)
-
-        for row_idx, record in enumerate(self.records):
-            paper_id = str(record.get("paper_id"))
-            label_scores = {
-                guide.name: float(similarities[row_idx, guide_idx])
-                for guide_idx, guide in enumerate(self.guides)
-            }
-            ranked = sorted(
-                label_scores.items(), key=lambda item: item[1], reverse=True
-            )
-            self.score_by_paper_id[paper_id] = label_scores
-            self.top_scores_by_paper_id[paper_id] = [
-                {"label": label, "score": score} for label, score in ranked[:8]
-            ]
-        self.topic_terms = terms
-
-    def _fit_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        if self.model_kind == "lsa":
-            return self._fit_lsa_embeddings(corpus, guide_texts)
-        if self.model_kind == "plsa":
-            return self._fit_plsa_embeddings(corpus, guide_texts)
-        if self.model_kind == "lda":
-            return self._fit_lda_embeddings(corpus, guide_texts)
-        if self.model_kind == "nmf":
-            return self._fit_nmf_embeddings(corpus, guide_texts)
-        if self.model_kind == "bertopic":
-            return self._fit_bertopic_embeddings(corpus, guide_texts)
-        if self.model_kind == "top2vec":
-            return self._fit_top2vec_embeddings(corpus, guide_texts)
-        raise ValueError(
-            f"Unknown guided topic baseline {self.model_kind!r}. "
-            f"Use one of {list(BASE_TOPIC_MODEL_KINDS)}."
-        )
-
-    def _fit_lsa_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        vectorizer = TfidfVectorizer(
-            lowercase=True,
-            stop_words="english",
-            ngram_range=(1, 2),
-            max_features=self.max_features,
-            min_df=self.min_df,
-            max_df=self.max_df,
-        )
-        matrix = vectorizer.fit_transform([*corpus, *guide_texts])
-        n_components = _effective_n_topics(
-            self.n_topics, matrix.shape[0], matrix.shape[1]
-        )
-        model = TruncatedSVD(n_components=n_components, random_state=self.random_state)
-        embeddings = model.fit_transform(matrix)
-        terms = _component_terms(model.components_, vectorizer.get_feature_names_out())
-        return embeddings, terms
-
-    def _fit_lda_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        matrix, feature_names = self._count_matrix([*corpus, *guide_texts])
-        n_components = _effective_n_topics(
-            self.n_topics, matrix.shape[0], matrix.shape[1]
-        )
-        model = LatentDirichletAllocation(
-            n_components=n_components,
-            random_state=self.random_state,
-            learning_method="batch",
-        )
-        embeddings = model.fit_transform(matrix)
-        terms = _component_terms(model.components_, feature_names)
-        return embeddings, terms
-
-    def _fit_nmf_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        vectorizer = TfidfVectorizer(
-            lowercase=True,
-            stop_words="english",
-            ngram_range=(1, 2),
-            max_features=self.max_features,
-            min_df=self.min_df,
-            max_df=self.max_df,
-        )
-        matrix = vectorizer.fit_transform([*corpus, *guide_texts])
-        n_components = _effective_n_topics(
-            self.n_topics, matrix.shape[0], matrix.shape[1]
-        )
-        init = "nndsvda" if n_components <= min(matrix.shape) else "random"
-        model = NMF(
-            n_components=n_components,
-            init=init,
-            random_state=self.random_state,
-            max_iter=500,
-        )
-        embeddings = model.fit_transform(matrix)
-        terms = _component_terms(model.components_, vectorizer.get_feature_names_out())
-        return embeddings, terms
-
-    def _fit_plsa_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        matrix, feature_names = self._count_matrix([*corpus, *guide_texts])
-        n_components = _effective_n_topics(
-            self.n_topics, matrix.shape[0], matrix.shape[1]
-        )
-        model = NMF(
-            n_components=n_components,
-            init="random",
-            solver="mu",
-            beta_loss="kullback-leibler",
-            random_state=self.random_state,
-            max_iter=700,
-        )
-        embeddings = model.fit_transform(matrix)
-        terms = _component_terms(model.components_, feature_names)
-        return embeddings, terms
-
-    def _fit_bertopic_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        try:
-            import bertopic  # noqa: F401
-            import hdbscan  # noqa: F401
-            import umap  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "BERTopic baseline requires the optional 'bertopic' package. "
-                "Install it in this environment before running --baseline-kind guided_bertopic."
-            ) from exc
-
-        all_texts = [*corpus, *guide_texts]
-        model = _build_bertopic_model(
-            n_topics=self.n_topics,
-            n_documents=len(all_texts),
-            random_state=self.random_state,
-        )
-        topics, probabilities = model.fit_transform(all_texts)
-        embeddings, topic_index = _topic_matrix_from_assignments(topics, probabilities)
-        terms = {
-            topic_index[int(topic)]: [word for word, _ in model.get_topic(topic) or []][
-                :10
-            ]
-            for topic in topic_index
-        }
-        return embeddings, terms
-
-    def _fit_top2vec_embeddings(
-        self,
-        corpus: Sequence[str],
-        guide_texts: Sequence[str],
-    ) -> tuple[np.ndarray, dict[int, list[str]]]:
-        try:
-            from top2vec import Top2Vec
-        except ImportError as exc:
-            raise RuntimeError(
-                "Top2Vec baseline requires the optional 'top2vec' package. "
-                "Install it in this environment before running --baseline-kind guided_top2vec."
-            ) from exc
-
-        all_texts = [*corpus, *guide_texts]
-        model = _build_top2vec_model(documents=all_texts, n_topics=self.n_topics)
-        try:
-            n_topics = max(1, min(self.n_topics, int(model.get_num_topics())))
-        except Exception:
-            n_topics = 1
-        topic_nums, topic_scores, *_ = model.get_documents_topics(
-            doc_ids=list(range(len(all_texts))),
-            num_topics=n_topics,
-        )
-        topic_nums = np.asarray(topic_nums)
-        topic_scores = np.asarray(topic_scores)
-        if topic_nums.ndim == 1:
-            topic_nums = topic_nums.reshape(-1, 1)
-            topic_scores = topic_scores.reshape(-1, 1)
-
-        topic_ids = sorted({int(topic) for topic in topic_nums.reshape(-1)})
-        topic_index = {topic: idx for idx, topic in enumerate(topic_ids)}
-        embeddings = np.zeros((len(all_texts), len(topic_ids)), dtype=float)
-        for row_idx in range(topic_nums.shape[0]):
-            for col_idx in range(topic_nums.shape[1]):
-                topic = int(topic_nums[row_idx, col_idx])
-                embeddings[row_idx, topic_index[topic]] = max(
-                    embeddings[row_idx, topic_index[topic]],
-                    float(topic_scores[row_idx, col_idx]),
-                )
-
-        terms = {}
-        try:
-            topic_words, _, topic_ids_out = model.get_topics()
-            for words, topic_id in zip(topic_words, topic_ids_out):
-                if int(topic_id) in topic_index:
-                    terms[topic_index[int(topic_id)]] = [
-                        str(word) for word in words[:10]
-                    ]
-        except Exception:
-            terms = {}
-        return embeddings, terms
-
-    def _count_matrix(self, texts: Sequence[str]) -> tuple[Any, np.ndarray]:
-        vectorizer = CountVectorizer(
-            lowercase=True,
-            stop_words="english",
-            ngram_range=(1, 2),
-            max_features=self.max_features,
-            min_df=self.min_df,
-            max_df=self.max_df,
-        )
-        matrix = vectorizer.fit_transform(texts)
-        return matrix, vectorizer.get_feature_names_out()
-
-    def _select_labels(self, ranked: Sequence[tuple[LabelGuide, float]]) -> list[Any]:
-        if not ranked:
-            return default_labels(self.classifier_kind)
-
-        best_score = ranked[0][1]
-        selected = [
-            guide.label
-            for guide, score in ranked
-            if score >= self.min_score and score >= best_score * self.multilabel_ratio
-        ][: self._max_labels_for_task()]
-        if not selected:
-            selected = [ranked[0][0].label]
-        return self._apply_exclusive_labels(selected)
-
-    def _max_labels_for_task(self) -> int:
-        if self.classifier_kind == "geo":
-            return max(self.max_labels, 6)
-        return self.max_labels
-
-    def _apply_exclusive_labels(self, labels: Sequence[Any]) -> list[Any]:
-        if not labels:
-            return default_labels(self.classifier_kind)
-        top = labels[0]
-        top_name = str(getattr(top, "name", top))
-        names_to_drop: set[str] = {"UNCLEAR"}
-        exclusive_names: set[str] = set()
-        if self.classifier_kind == "paper_type":
-            exclusive_names = {"OTHER", "UNCLEAR"}
-        elif self.classifier_kind == "data_accessibility":
-            exclusive_names = {"NOT_STATED", "UNCLEAR"}
-        elif self.classifier_kind == "data_type":
-            exclusive_names = {"NO_EMPIRICAL_DATA", "UNCLEAR"}
-        elif self.classifier_kind == "geo":
-            exclusive_names = {"IRRELEVANT", "UNCLEAR"}
-
-        if top_name in exclusive_names:
-            return [top]
-
-        names_to_drop.update(exclusive_names)
-        clean: list[Any] = []
-        for label in labels:
-            name = str(getattr(label, "name", label))
-            if name in names_to_drop:
-                continue
-            if label not in clean:
-                clean.append(label)
-        return clean or [top]

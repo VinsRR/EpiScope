@@ -2,7 +2,7 @@
 
 The output layout intentionally mirrors run_repeated_experiments.py:
 
-  <base-output-dir>/<task>/<baseline>/<strategy>/<run-id>/final_1.tsv
+  <base-output-dir>/<task>/<baseline>/<strategy>/<text-scope>/<run-id>/final_1.tsv
 
 LLM baselines add a temperature folder between <baseline> and <strategy>.
 
@@ -40,14 +40,21 @@ from episcope.workflows.classification.baselines import (
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
     PrototypeSimilarityBaseline,
+    SUPERVISED_BASELINES,
+    SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_TOPIC_BASELINES,
     TOPIC_MODEL_BASELINES,
+    SupervisedCVBaseline,
     TopicModelBaseline,
     build_llm_generator,
+    classifier_config,
     ground_truth_column,
     metadata_from_mapping,
     result_to_tsv_row,
     stable_hash,
     task_slug,
+    is_supervised_baseline,
+    is_supervised_topic_baseline,
 )
 from episcope.workflows.classification.baselines.llm import (
     usage_delta,
@@ -59,7 +66,7 @@ from episcope.settings import AppSettings
 CLASSIFIER_KINDS = ("paper_type", "data_accessibility", "data_type", "geo")
 LIGHT_TOPIC_BASELINES = ("lsa", "plsa", "lda", "nmf")
 DEFAULT_BASELINES = ("majority", "prototype_similarity", *LIGHT_TOPIC_BASELINES)
-NON_LLM_BASELINES = ("majority", "prototype_similarity", *TOPIC_MODEL_BASELINES)
+NON_LLM_BASELINES = ("majority", "prototype_similarity", *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
 BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
@@ -72,6 +79,9 @@ BASELINE_CHOICES = (
     "all_default",
     "all_non_llm",
     "all_topics",
+    "all_supervised",
+    "all_supervised_classifiers",
+    "all_supervised_topics",
 )
 
 
@@ -89,6 +99,7 @@ class Settings:
     strategy_name: str = "grobid"
     mongo_uri: str | None = None
     mongo_db_name: str = "episcope_academic_db"
+    text_scope: str = "full_text"
     classifier_kinds: tuple[str, ...] = CLASSIFIER_KINDS
     baseline_kinds: tuple[str, ...] = DEFAULT_BASELINES
     repeats: int = 1
@@ -98,10 +109,15 @@ class Settings:
     prototype_multilabel_ratio: float = 0.92
     prototype_min_score: float = 0.03
     topic_n_topics: int = 10
+    topic_k_multipliers: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)
+    topic_k_values: tuple[int, ...] = ()
     topic_max_features: int = 5000
     topic_min_df: float = 1.0
     topic_max_df: float = 0.95
     topic_random_state: int = 13
+    supervised_cv_modes: tuple[str, ...] = ("kfold",)
+    supervised_cv_folds: int = 5
+    supervised_threshold: float = 0.5
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.0
@@ -154,6 +170,22 @@ def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
             + "-"
             + settings.llm_model
         )
+    if baseline_kind in TOPIC_MODEL_BASELINES:
+        return f"{baseline_kind}-k_{settings.topic_n_topics}"
+    if is_supervised_baseline(baseline_kind):
+        cv_slug = (
+            f"cv_kfold_{settings.supervised_cv_folds}"
+            if settings.supervised_cv_modes == ("kfold",)
+            else "cv_leave_one_out"
+            if settings.supervised_cv_modes == ("leave_one_out",)
+            else "cv_mixed"
+        )
+        topic_slug = (
+            f"-k_{settings.topic_n_topics}"
+            if is_supervised_topic_baseline(baseline_kind)
+            else ""
+        )
+        return f"{baseline_kind}{topic_slug}-{cv_slug}"
     return baseline_kind
 
 
@@ -170,14 +202,20 @@ def build_run_dir(
         "classifier_kind": classifier_kind,
         "baseline_kind": baseline_kind,
         "strategy_name": settings.strategy_name,
+        "text_scope": settings.text_scope,
         "majority_fit_mode": settings.majority_fit_mode,
         "prototype_multilabel_ratio": settings.prototype_multilabel_ratio,
         "prototype_min_score": settings.prototype_min_score,
         "topic_n_topics": settings.topic_n_topics,
+        "topic_k_multipliers": settings.topic_k_multipliers,
+        "topic_k_values": settings.topic_k_values,
         "topic_max_features": settings.topic_max_features,
         "topic_min_df": settings.topic_min_df,
         "topic_max_df": settings.topic_max_df,
         "topic_random_state": settings.topic_random_state,
+        "supervised_cv_modes": settings.supervised_cv_modes,
+        "supervised_cv_folds": settings.supervised_cv_folds,
+        "supervised_threshold": settings.supervised_threshold,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_temperature": settings.llm_temperature,
@@ -190,7 +228,7 @@ def build_run_dir(
     )
     if baseline_kind == "metadata_llm":
         run_dir = run_dir / f"temperature_{settings.llm_temperature}"
-    return run_dir / settings.strategy_name / run_id
+    return run_dir / settings.strategy_name / settings.text_scope / run_id
 
 
 def build_baseline(
@@ -242,6 +280,23 @@ def build_baseline(
             random_state=settings.topic_random_state,
             leave_one_out=settings.majority_fit_mode == "leave_one_out",
         )
+    if is_supervised_baseline(baseline_kind):
+        gt_col = ground_truth_column(classifier_kind)
+        return SupervisedCVBaseline(
+            classifier_kind=classifier_kind,
+            baseline_kind=baseline_kind,
+            records=records,
+            ground_truth_records=ground_truth_records,
+            ground_truth_column=gt_col,
+            cv_mode=settings.supervised_cv_modes[0],
+            cv_folds=settings.supervised_cv_folds,
+            n_topics=settings.topic_n_topics,
+            max_features=settings.topic_max_features,
+            min_df=topic_min_df,
+            max_df=topic_max_df,
+            random_state=settings.topic_random_state,
+            threshold=settings.supervised_threshold,
+        )
     if baseline_kind == "metadata_llm":
         generator = build_llm_generator(
             provider=settings.llm_provider,
@@ -253,6 +308,59 @@ def build_baseline(
             generator=generator,
         )
     raise ValueError(f"Unknown baseline_kind={baseline_kind!r}.")
+
+
+def task_label_count(classifier_kind: str) -> int:
+    labels = {
+        label
+        for label in classifier_config(classifier_kind).classification_mapping.values()
+        if getattr(label, "name", str(label)).upper() != "UNCLEAR"
+    }
+    return max(1, len(labels))
+
+
+def topic_k_values_for_task(settings: Settings, classifier_kind: str) -> tuple[int, ...]:
+    if settings.topic_k_values:
+        values = settings.topic_k_values
+    elif settings.topic_k_multipliers:
+        label_count = task_label_count(classifier_kind)
+        values = tuple(
+            max(2, int(round(label_count * multiplier)))
+            for multiplier in settings.topic_k_multipliers
+        )
+    else:
+        values = (settings.topic_n_topics,)
+
+    deduped: list[int] = []
+    for value in values:
+        clean = max(2, int(value))
+        if clean not in deduped:
+            deduped.append(clean)
+    return tuple(deduped)
+
+
+def settings_for_baseline(
+    settings: Settings,
+    *,
+    classifier_kind: str,
+    baseline_kind: str,
+) -> tuple[Settings, ...]:
+    baseline_kind = normalize_baseline_kind(baseline_kind)
+    cv_modes = settings.supervised_cv_modes or ("kfold",)
+    if is_supervised_baseline(baseline_kind):
+        return tuple(
+            dataclasses.replace(
+                settings,
+                supervised_cv_modes=(cv_mode,),
+            )
+            for cv_mode in cv_modes
+        )
+    if baseline_kind in TOPIC_MODEL_BASELINES:
+        return tuple(
+            dataclasses.replace(settings, topic_n_topics=k)
+            for k in topic_k_values_for_task(settings, classifier_kind)
+        )
+    return (settings,)
 
 
 def _section_text(section: Any) -> str:
@@ -267,16 +375,59 @@ def _section_title(section: Any) -> str:
     return str(getattr(section, "title", "") or "").strip()
 
 
-def paper_text_from_db(db: Any, paper_id: str, strategy_name: str) -> tuple[PaperMetadata, str, dict[str, Any]]:
+def _section_type(section: Any) -> str:
+    if isinstance(section, Mapping):
+        return str(section.get("section_type", "") or "").strip()
+    return str(getattr(section, "section_type", "") or "").strip()
+
+
+def _abstract_sections(sections: Iterable[Any]) -> list[Any]:
+    abstract_sections = []
+    for section in sections:
+        title = _section_title(section).lower()
+        section_type = _section_type(section).lower()
+        if "abstract" in title or "abstract" in section_type:
+            abstract_sections.append(section)
+    return abstract_sections
+
+
+def paper_text_from_db(
+    db: Any,
+    paper_id: str,
+    strategy_name: str,
+    *,
+    text_scope: str = "full_text",
+) -> tuple[PaperMetadata, str, dict[str, Any]]:
     metadata = db.get_paper_metadata(paper_id, strategy_name)
     if metadata is None:
         metadata = PaperMetadata(doi=paper_id)
 
     sections = db.retrieve(paper_id, "sections", strategy_name) or []
-
+    abstract_sections = _abstract_sections(sections)
     blocks: list[str] = []
     title = str(getattr(metadata, "title", "") or "").strip()
     abstract = str(getattr(metadata, "abstract", "") or "").strip()
+    if text_scope == "abstract":
+        abstract_blocks = [abstract]
+        abstract_blocks.extend(_section_text(section) for section in abstract_sections)
+        text = "\n\n".join(
+            block for block in abstract_blocks if block and block.strip()
+        ).strip()
+        stats = {
+            "text_source": "mongo_abstract",
+            "text_scope": text_scope,
+            "section_count": len(sections),
+            "used_section_count": len(
+                [section for section in abstract_sections if _section_text(section)]
+            ),
+            "metadata_abstract_char_count": len(abstract),
+            "abstract_section_count": len(abstract_sections),
+            "char_count": len(text),
+        }
+        return metadata, text, stats
+    if text_scope != "full_text":
+        raise ValueError("text_scope must be one of: full_text, abstract")
+
     if title:
         blocks.append(title)
     if abstract:
@@ -290,9 +441,12 @@ def paper_text_from_db(db: Any, paper_id: str, strategy_name: str) -> tuple[Pape
 
     text = "\n\n".join(block for block in blocks if block.strip()).strip()
     stats = {
-        "text_source": "mongo",
+        "text_source": "mongo_full_text",
+        "text_scope": text_scope,
         "section_count": len(sections),
         "used_section_count": sum(1 for section in sections if _section_text(section)),
+        "metadata_abstract_char_count": len(abstract),
+        "abstract_section_count": len(abstract_sections),
         "char_count": len(text),
     }
     return metadata, text, stats
@@ -314,33 +468,82 @@ def build_mongo_db(settings: Settings):
 def records_with_paper_text(settings: Settings, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     db = build_mongo_db(settings)
     enriched = []
-    missing: list[str] = []
     for record in records:
         paper_id = str(record["paper_id"])
-        metadata, text, stats = paper_text_from_db(db, paper_id, settings.strategy_name)
+        metadata, text, stats = paper_text_from_db(
+            db,
+            paper_id,
+            settings.strategy_name,
+            text_scope=settings.text_scope,
+        )
+        skip_reason = None
         if not text:
-            missing.append(paper_id)
+            skip_reason = f"missing_{settings.text_scope}"
         enriched.append(
             {
                 **record,
                 "_metadata": metadata,
                 "_metadata_text": text,
                 "_text_stats": stats,
+                "_text_scope": settings.text_scope,
+                "_skip_reason": skip_reason,
             }
         )
-    if missing:
-        sample = ", ".join(missing[:5])
-        raise RuntimeError(
-            f"No paper text found in Mongo for {len(missing)} document(s) "
-            f"using strategy={settings.strategy_name!r}. Examples: {sample}"
-        )
     return enriched
+
+
+def skipped_result_row(
+    paper_id: str,
+    *,
+    classifier_kind: str,
+    baseline_kind: str,
+    reason: str,
+    text_stats: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    row = {
+        "paper_id": paper_id,
+        "classifier_kind": classifier_kind,
+        "baseline_name": baseline_kind,
+        "classification": "__SKIPPED__",
+        "reasoning": reason,
+        "confidence": 0.0,
+        "raw_response": "",
+        "messages": "",
+        "evaluation_status": "skipped",
+        "skip_reason": reason,
+    }
+    text_stats = text_stats or {}
+    row.update(
+        {
+            "text_source": text_stats.get("text_source"),
+            "text_scope": text_stats.get("text_scope"),
+            "paper_text_char_count": text_stats.get("char_count"),
+            "paper_section_count": text_stats.get("section_count"),
+            "paper_used_section_count": text_stats.get("used_section_count"),
+            "metadata_abstract_char_count": text_stats.get("metadata_abstract_char_count"),
+            "abstract_section_count": text_stats.get("abstract_section_count"),
+        }
+    )
+    return row
 
 
 def metadata_for_record(record: Mapping[str, Any]) -> PaperMetadata:
     metadata = record.get("_metadata")
     text = str(record.get("_metadata_text") or "")
+    text_scope = str(record.get("_text_scope") or "")
     if isinstance(metadata, PaperMetadata):
+        if text_scope == "abstract":
+            return PaperMetadata(
+                title="",
+                abstract=text or metadata.abstract,
+                authors=[],
+                publication_year=None,
+                journal="",
+                doi=metadata.doi,
+                keywords=[],
+                first_author=None,
+                file_path=None,
+            )
         return PaperMetadata(
             title=metadata.title,
             abstract=text or metadata.abstract,
@@ -377,15 +580,31 @@ def run_once(
         print(f"[OK] final already exists: {paths['final_tsv']}")
         return paths["final_tsv"]
 
-    fit_records = records_with_paper_text(settings, records)
+    enriched_records = records_with_paper_text(settings, records)
+    fit_records = [
+        record for record in enriched_records if not record.get("_skip_reason")
+    ]
+    skipped_records = [
+        record for record in enriched_records if record.get("_skip_reason")
+    ]
+    if skipped_records:
+        sample = ", ".join(str(record["paper_id"]) for record in skipped_records[:5])
+        message = (
+            f"skipping {len(skipped_records)} paper(s) with no usable "
+            f"{settings.text_scope} text. Examples: {sample}"
+        )
+        append_log(paths["log"], message)
+        print(f"[WARN] {message}")
 
-    baseline = build_baseline(
-        settings,
-        classifier_kind=classifier_kind,
-        baseline_kind=baseline_kind,
-        records=fit_records,
-        ground_truth_records=ground_truth_records,
-    )
+    baseline = None
+    if fit_records:
+        baseline = build_baseline(
+            settings,
+            classifier_kind=classifier_kind,
+            baseline_kind=baseline_kind,
+            records=fit_records,
+            ground_truth_records=ground_truth_records,
+        )
 
     checkpoint = (
         pd.read_csv(paths["checkpoint_tsv"], sep="\t")
@@ -398,14 +617,39 @@ def run_once(
         else set()
     )
     rows: list[dict[str, Any]] = []
-    total = len(fit_records)
+    total = len(enriched_records)
     append_log(paths["log"], f"start baseline={baseline_kind} task={classifier_kind}")
 
-    for idx, record in enumerate(fit_records, start=1):
+    for idx, record in enumerate(enriched_records, start=1):
         paper_id = str(record["paper_id"])
         if paper_id in done_ids:
             print(f"[{idx}/{total}] skip {paper_id} (checkpoint)")
             continue
+        skip_reason = record.get("_skip_reason")
+        if skip_reason:
+            print(f"[{idx}/{total}] skip {paper_id} ({skip_reason})")
+            rows.append(
+                skipped_result_row(
+                    paper_id,
+                    classifier_kind=classifier_kind,
+                    baseline_kind=baseline_kind,
+                    reason=str(skip_reason),
+                    text_stats=record.get("_text_stats")
+                    if isinstance(record.get("_text_stats"), Mapping)
+                    else None,
+                )
+            )
+            if len(rows) >= settings.checkpoint_every:
+                merged = pd.concat([checkpoint, pd.DataFrame(rows)], ignore_index=True)
+                merged = merged.drop_duplicates(subset=["paper_id"], keep="first")
+                atomic_write_tsv(merged, paths["checkpoint_tsv"])
+                checkpoint = merged
+                done_ids = set(checkpoint["paper_id"].astype(str))
+                append_log(paths["log"], f"checkpoint rows={len(checkpoint)}/{total}")
+                rows.clear()
+            continue
+        if baseline is None:
+            raise RuntimeError("No non-skipped papers are available for this run.")
         print(f"[{idx}/{total}] {baseline_kind} {classifier_kind} {paper_id}")
         metadata = metadata_for_record(record)
         usage_before = usage_snapshot_from_baseline(baseline)
@@ -417,14 +661,19 @@ def run_once(
             classifier_kind=classifier_kind,
             baseline_name=baseline_kind,
         )
+        row["evaluation_status"] = "evaluated"
+        row["skip_reason"] = ""
         text_stats = record.get("_text_stats") or {}
         if isinstance(text_stats, Mapping):
             row.update(
                 {
                     "text_source": text_stats.get("text_source"),
+                    "text_scope": text_stats.get("text_scope"),
                     "paper_text_char_count": text_stats.get("char_count"),
                     "paper_section_count": text_stats.get("section_count"),
                     "paper_used_section_count": text_stats.get("used_section_count"),
+                    "metadata_abstract_char_count": text_stats.get("metadata_abstract_char_count"),
+                    "abstract_section_count": text_stats.get("abstract_section_count"),
                 }
             )
         if usage_before is not None and usage_after is not None:
@@ -461,18 +710,27 @@ def run_once(
         return paths["checkpoint_tsv"]
 
     atomic_write_tsv(checkpoint, paths["final_tsv"])
+    n_skipped = int(
+        checkpoint.get("evaluation_status", pd.Series(dtype=str))
+        .astype(str)
+        .str.lower()
+        .eq("skipped")
+        .sum()
+    )
     manifest = {
         "classifier_kind": classifier_kind,
         "baseline_kind": baseline_kind,
         "repeat_idx": repeat_idx,
-        "n_predictions": len(checkpoint),
+        "n_rows": len(checkpoint),
+        "n_predictions": len(checkpoint) - n_skipped,
+        "n_skipped": n_skipped,
         "input_csv": settings.input_csv,
         "ground_truth_csv": settings.ground_truth_csv,
         "settings": dataclasses.asdict(settings),
     }
     atomic_write_text(paths["manifest"], json.dumps(manifest, indent=2, sort_keys=True))
-    append_log(paths["log"], f"success final={paths['final_tsv']}")
-    print(f"[OK] wrote {paths['final_tsv']} ({len(checkpoint)} rows)")
+    append_log(paths["log"], f"success final={paths['final_tsv']} skipped={n_skipped}")
+    print(f"[OK] wrote {paths['final_tsv']} ({len(checkpoint)} rows, {n_skipped} skipped)")
     return paths["final_tsv"]
 
 
@@ -487,6 +745,12 @@ def expand_arg_values(values: Iterable[str] | None, *, all_values: tuple[str, ..
             out.extend(DEFAULT_BASELINES)
         elif value == "all_topics":
             out.extend(TOPIC_MODEL_BASELINES)
+        elif value == "all_supervised":
+            out.extend(SUPERVISED_BASELINES)
+        elif value == "all_supervised_classifiers":
+            out.extend(SUPERVISED_CLASSIFIER_BASELINES)
+        elif value == "all_supervised_topics":
+            out.extend(SUPERVISED_TOPIC_BASELINES)
         else:
             out.append(normalize_baseline_kind(value))
     deduped = []
@@ -506,6 +770,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy-name", default=None)
     parser.add_argument("--mongo-uri", default=None)
     parser.add_argument("--mongo-db-name", default=None)
+    parser.add_argument(
+        "--text-scope",
+        choices=["full_text", "abstract"],
+        default=None,
+        help=(
+            "Which Mongo text to give to the baselines. full_text uses title, "
+            "abstract, and sections; abstract uses metadata.abstract plus any "
+            "Mongo sections explicitly titled/typed as abstract."
+        ),
+    )
     parser.add_argument(
         "--classifier-kind",
         action="append",
@@ -529,10 +803,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prototype-multilabel-ratio", type=float, default=None)
     parser.add_argument("--prototype-min-score", type=float, default=None)
     parser.add_argument("--topic-n-topics", type=int, default=None)
+    parser.add_argument(
+        "--topic-k-multiplier",
+        action="append",
+        type=float,
+        default=None,
+        help=(
+            "Run unsupervised topic baselines with K = round(L * multiplier), "
+            "where L is the number of task labels. Repeat this flag for a K "
+            "sweep. Defaults to 0.5, 1, 2, and 4 times L."
+        ),
+    )
+    parser.add_argument(
+        "--topic-k-value",
+        action="append",
+        type=int,
+        default=None,
+        help=(
+            "Explicit topic count K for unsupervised topic baselines. Repeat "
+            "for a sweep. Overrides --topic-k-multiplier when provided."
+        ),
+    )
     parser.add_argument("--topic-max-features", type=int, default=None)
     parser.add_argument("--topic-min-df", type=float, default=None)
     parser.add_argument("--topic-max-df", type=float, default=None)
     parser.add_argument("--topic-random-state", type=int, default=None)
+    parser.add_argument(
+        "--supervised-cv-mode",
+        action="append",
+        choices=["kfold", "leave_one_out"],
+        default=None,
+        help=(
+            "Cross-validation mode for supervised baselines. Defaults to "
+            "kfold; use leave_one_out for leave-one-out CV. Repeat to run both."
+        ),
+    )
+    parser.add_argument("--supervised-cv-folds", type=int, default=None)
+    parser.add_argument("--supervised-threshold", type=float, default=None)
     parser.add_argument(
         "--llm-provider",
         choices=["gemini", "openrouter", "openai", "ollama"],
@@ -560,6 +867,7 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "strategy_name",
         "mongo_uri",
         "mongo_db_name",
+        "text_scope",
         "repeats",
         "checkpoint_every",
         "majority_fit_mode",
@@ -570,6 +878,8 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "topic_min_df",
         "topic_max_df",
         "topic_random_state",
+        "supervised_cv_folds",
+        "supervised_threshold",
         "llm_provider",
         "llm_model",
         "llm_temperature",
@@ -577,6 +887,15 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         value = getattr(args, field)
         if value is not None:
             data[field] = value
+    if args.topic_k_multiplier is not None:
+        data["topic_k_multipliers"] = tuple(args.topic_k_multiplier)
+    if args.topic_k_value is not None:
+        data["topic_k_values"] = tuple(args.topic_k_value)
+    if args.topic_n_topics is not None and args.topic_k_multiplier is None and args.topic_k_value is None:
+        data["topic_k_multipliers"] = ()
+        data["topic_k_values"] = ()
+    if args.supervised_cv_mode is not None:
+        data["supervised_cv_modes"] = tuple(args.supervised_cv_mode)
     if args.overwrite:
         data["overwrite"] = True
     data["classifier_kinds"] = expand_arg_values(
@@ -605,26 +924,42 @@ def main() -> None:
     failures = 0
     for classifier_kind in settings.classifier_kinds:
         for baseline_kind in settings.baseline_kinds:
-            for repeat_idx in range(1, settings.repeats + 1):
-                try:
-                    print(
-                        f"\n=== task={classifier_kind} baseline={baseline_kind} "
-                        f"repeat={repeat_idx}/{settings.repeats} ==="
-                    )
-                    run_once(
-                        settings,
-                        classifier_kind=classifier_kind,
-                        baseline_kind=baseline_kind,
-                        repeat_idx=repeat_idx,
-                        records=records,
-                        ground_truth_records=ground_truth_records,
-                    )
-                except Exception as exc:
-                    failures += 1
-                    print(
-                        f"[ERROR] task={classifier_kind} baseline={baseline_kind}: {exc!r}",
-                        file=sys.stderr,
-                    )
+            for run_settings in settings_for_baseline(
+                settings,
+                classifier_kind=classifier_kind,
+                baseline_kind=baseline_kind,
+            ):
+                for repeat_idx in range(1, run_settings.repeats + 1):
+                    try:
+                        k_suffix = (
+                            f" k={run_settings.topic_n_topics}"
+                            if normalize_baseline_kind(baseline_kind) in TOPIC_MODEL_BASELINES
+                            or is_supervised_topic_baseline(normalize_baseline_kind(baseline_kind))
+                            else ""
+                        )
+                        cv_suffix = (
+                            f" cv={run_settings.supervised_cv_modes[0]}"
+                            if is_supervised_baseline(normalize_baseline_kind(baseline_kind))
+                            else ""
+                        )
+                        print(
+                            f"\n=== task={classifier_kind} baseline={baseline_kind}"
+                            f"{k_suffix}{cv_suffix} repeat={repeat_idx}/{run_settings.repeats} ==="
+                        )
+                        run_once(
+                            run_settings,
+                            classifier_kind=classifier_kind,
+                            baseline_kind=baseline_kind,
+                            repeat_idx=repeat_idx,
+                            records=records,
+                            ground_truth_records=ground_truth_records,
+                        )
+                    except Exception as exc:
+                        failures += 1
+                        print(
+                            f"[ERROR] task={classifier_kind} baseline={baseline_kind}: {exc!r}",
+                            file=sys.stderr,
+                        )
     if failures:
         raise SystemExit(1)
 

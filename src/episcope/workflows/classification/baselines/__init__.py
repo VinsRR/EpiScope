@@ -14,32 +14,34 @@ from .common import (
 from .llm import MetadataOnlyLLMBaseline, build_llm_generator
 from .majority import MajorityLabelBaseline
 from .prototype import PrototypeSimilarityBaseline
+from .supervised import (
+    SUPERVISED_BASELINES,
+    SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_TOPIC_BASELINES,
+    SupervisedCVBaseline,
+    is_supervised_baseline,
+    is_supervised_topic_baseline,
+)
 from .topic_models import (
-    BASE_TOPIC_MODEL_KINDS,
-    GUIDED_TOPIC_MODEL_BASELINES,
     OPTIONAL_TOPIC_BASELINES,
     SKLEARN_TOPIC_BASELINES,
-    TOPIC_MAJORITY_BASELINES,
     TOPIC_MODEL_BASELINES,
-    GuidedTopicModelBaseline,
     TopicModelBaseline,
-    base_topic_model_kind,
 )
 
 __all__ = [
     "BaselinePrediction",
     "MajorityLabelBaseline",
     "PrototypeSimilarityBaseline",
-    "GuidedTopicModelBaseline",
+    "SupervisedCVBaseline",
     "TopicModelBaseline",
-    "BASE_TOPIC_MODEL_KINDS",
-    "GUIDED_TOPIC_MODEL_BASELINES",
     "MetadataOnlyLLMBaseline",
     "OPTIONAL_TOPIC_BASELINES",
     "SKLEARN_TOPIC_BASELINES",
-    "TOPIC_MAJORITY_BASELINES",
+    "SUPERVISED_BASELINES",
+    "SUPERVISED_CLASSIFIER_BASELINES",
+    "SUPERVISED_TOPIC_BASELINES",
     "TOPIC_MODEL_BASELINES",
-    "base_topic_model_kind",
     "build_llm_generator",
     "classifier_config",
     "default_labels",
@@ -51,4 +53,6 @@ __all__ = [
     "result_to_tsv_row",
     "stable_hash",
     "task_slug",
+    "is_supervised_baseline",
+    "is_supervised_topic_baseline",
 ]

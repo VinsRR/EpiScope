@@ -11,6 +11,7 @@ from episcope.schemas import PaperMetadata, StructuredSection
 from episcope.workflows.classification.baselines import (
     MajorityLabelBaseline,
     PrototypeSimilarityBaseline,
+    SupervisedCVBaseline,
     TopicModelBaseline,
     ground_truth_column,
     metadata_from_mapping,
@@ -83,6 +84,66 @@ def test_lsa_topic_baseline_maps_topics_to_majority_labels() -> None:
     assert prediction.result.extras["topic_model"] == "lsa"
 
 
+def test_topic_k_values_scale_with_task_label_count() -> None:
+    settings = baseline_runner.Settings(
+        topic_k_multipliers=(0.5, 1.0, 2.0),
+        topic_k_values=(),
+    )
+
+    assert baseline_runner.task_label_count("data_accessibility") == 6
+    assert baseline_runner.topic_k_values_for_task(settings, "data_accessibility") == (
+        3,
+        6,
+        12,
+    )
+
+
+def test_supervised_tfidf_baseline_runs_kfold_predictions() -> None:
+    records = [
+        {"paper_id": "p1", "_metadata_text": "data deposited on zenodo repository", "availability_classification": "['OPEN']"},
+        {"paper_id": "p2", "_metadata_text": "supplementary csv files are publicly available", "availability_classification": "['OPEN']"},
+        {"paper_id": "p3", "_metadata_text": "data available from author upon reasonable request", "availability_classification": "['AVAILABLE_UPON_REQUEST']"},
+        {"paper_id": "p4", "_metadata_text": "access requires committee approval and data use agreement", "availability_classification": "['AVAILABLE_UPON_REQUEST']"},
+    ]
+    baseline = SupervisedCVBaseline(
+        classifier_kind="data_accessibility",
+        baseline_kind="supervised_tfidf_logreg",
+        records=records,
+        ground_truth_records=records,
+        ground_truth_column=ground_truth_column("data_accessibility"),
+        cv_mode="kfold",
+        cv_folds=2,
+        min_df=1,
+    )
+
+    prediction = baseline.predict("p1", metadata_from_mapping(records[0]), records[0])
+    assert prediction.result.classification
+    assert prediction.result.extras["cv_mode"] == "kfold"
+
+
+def test_supervised_topic_settings_do_not_sweep_topic_k_values() -> None:
+    settings = baseline_runner.Settings(
+        topic_n_topics=10,
+        topic_k_values=(3, 6),
+        supervised_cv_modes=("kfold", "leave_one_out"),
+    )
+
+    expanded = baseline_runner.settings_for_baseline(
+        settings,
+        classifier_kind="data_accessibility",
+        baseline_kind="supervised_lsa_logreg",
+    )
+
+    assert [(item.topic_n_topics, item.supervised_cv_modes[0]) for item in expanded] == [
+        (10, "kfold"),
+        (10, "leave_one_out"),
+    ]
+
+
+def test_supervised_cv_defaults_to_fixed_kfold() -> None:
+    assert baseline_runner.Settings().supervised_cv_modes == ("kfold",)
+
+
 def test_paper_text_from_db_uses_sections_as_stored() -> None:
     db = InMemoryAcademicDB(backup_file=None)
     db.insert(
@@ -112,10 +173,97 @@ def test_paper_text_from_db_uses_sections_as_stored() -> None:
     metadata, text, stats = baseline_runner.paper_text_from_db(db, "paper-1", "grobid")
 
     assert metadata.title == "Useful title"
+    assert "Useful abstract" in text
     assert "surveillance data" in text
     assert "Smith et al" in text
+    assert stats["text_source"] == "mongo_full_text"
+    assert stats["text_scope"] == "full_text"
     assert stats["section_count"] == 2
     assert stats["used_section_count"] == 2
+    assert stats["metadata_abstract_char_count"] == len("Useful abstract")
+
+
+def test_paper_text_from_db_can_use_abstract_only() -> None:
+    db = InMemoryAcademicDB(backup_file=None)
+    db.insert(
+        "paper-1",
+        "metadata",
+        "grobid",
+        PaperMetadata(
+            title="Title should not be included",
+            abstract="Only this abstract should be used.",
+        ).to_dict(),
+    )
+    db.insert(
+        "paper-1",
+        "sections",
+        "grobid",
+        [
+            StructuredSection(
+                title="Methods",
+                content="Section text should not be included.",
+            ).to_dict(),
+        ],
+    )
+
+    metadata, text, stats = baseline_runner.paper_text_from_db(
+        db,
+        "paper-1",
+        "grobid",
+        text_scope="abstract",
+    )
+
+    assert metadata.title == "Title should not be included"
+    assert text == "Only this abstract should be used."
+    assert "Title should not be included" not in text
+    assert "Section text" not in text
+    assert stats["text_source"] == "mongo_abstract"
+    assert stats["text_scope"] == "abstract"
+    assert stats["section_count"] == 1
+    assert stats["used_section_count"] == 0
+    assert stats["metadata_abstract_char_count"] == len("Only this abstract should be used.")
+    assert stats["abstract_section_count"] == 0
+
+
+def test_paper_text_from_db_abstract_only_falls_back_to_abstract_section() -> None:
+    db = InMemoryAcademicDB(backup_file=None)
+    db.insert(
+        "paper-1",
+        "metadata",
+        "grobid",
+        PaperMetadata(title="Useful title", abstract="").to_dict(),
+    )
+    db.insert(
+        "paper-1",
+        "sections",
+        "grobid",
+        [
+            StructuredSection(
+                title="Abstract",
+                content="This is an abstract section from Mongo sections.",
+                section_type="introduction",
+            ).to_dict(),
+            StructuredSection(
+                title="Methods",
+                content="This methods text should not be included.",
+                section_type="methods",
+            ).to_dict(),
+        ],
+    )
+
+    _, text, stats = baseline_runner.paper_text_from_db(
+        db,
+        "paper-1",
+        "grobid",
+        text_scope="abstract",
+    )
+
+    assert text == "This is an abstract section from Mongo sections."
+    assert "methods text" not in text
+    assert stats["section_count"] == 2
+    assert stats["used_section_count"] == 1
+    assert stats["metadata_abstract_char_count"] == 0
+    assert stats["abstract_section_count"] == 1
 
 
 def test_run_classification_baselines_script_writes_eval_compatible_tsv(
@@ -174,6 +322,7 @@ def test_run_classification_baselines_script_writes_eval_compatible_tsv(
             classifier_kinds=("data_accessibility",),
             baseline_kinds=("lsa",),
             topic_n_topics=2,
+            topic_k_multipliers=(),
             checkpoint_every=10,
         ),
         classifier_kind="data_accessibility",
@@ -188,4 +337,89 @@ def test_run_classification_baselines_script_writes_eval_compatible_tsv(
     result = pd.read_csv(files[0], sep="\t")
     assert set(result["paper_id"]) == {"p1", "p2"}
     assert "classification" in result.columns
+    assert set(result["text_scope"]) == {"full_text"}
+    assert "lsa-k_2" in files[0].parts
+    assert "full_text" in files[0].parts
     assert not any("temperature_" in part for part in files[0].parts)
+
+
+def test_run_classification_baselines_marks_missing_abstract_as_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_csv = tmp_path / "papers.tsv"
+    pd.DataFrame(
+        [
+            {
+                "paper_id": "p1",
+                "availability_classification": "['OPEN']",
+                "geo_classification": "['EUROPE']",
+                "data_type_classification": "['TRADITIONAL']",
+                "ptype_classification": "['EMPIRICAL']",
+            },
+            {
+                "paper_id": "p2",
+                "availability_classification": "['REFERENCED']",
+                "geo_classification": "['ASIA']",
+                "data_type_classification": "['SYNTHETIC']",
+                "ptype_classification": "['INFERENCE']",
+            },
+        ]
+    ).to_csv(input_csv, sep="\t", index=False)
+    output_dir = tmp_path / "outputs"
+    db = InMemoryAcademicDB(backup_file=None)
+    db.insert(
+        "p1",
+        "metadata",
+        "grobid",
+        PaperMetadata(abstract="This paper has an abstract.").to_dict(),
+    )
+    db.insert(
+        "p1",
+        "sections",
+        "grobid",
+        [StructuredSection(title="Methods", content="Methods text.").to_dict()],
+    )
+    db.insert(
+        "p2",
+        "metadata",
+        "grobid",
+        PaperMetadata(abstract="").to_dict(),
+    )
+    db.insert(
+        "p2",
+        "sections",
+        "grobid",
+        [StructuredSection(title="Methods", content="No abstract here.").to_dict()],
+    )
+
+    monkeypatch.setattr(baseline_runner, "build_mongo_db", lambda settings: db)
+    records = baseline_runner.load_records(input_csv, "\t")
+    baseline_runner.run_once(
+        baseline_runner.Settings(
+            input_csv=str(input_csv),
+            ground_truth_csv=str(input_csv),
+            base_output_dir=str(output_dir),
+            mongo_uri="mongodb://example.invalid",
+            classifier_kinds=("data_accessibility",),
+            baseline_kinds=("majority",),
+            text_scope="abstract",
+            checkpoint_every=10,
+        ),
+        classifier_kind="data_accessibility",
+        baseline_kind="majority",
+        repeat_idx=1,
+        records=records,
+        ground_truth_records=records,
+    )
+
+    files = list(output_dir.rglob("final_1.tsv"))
+    assert len(files) == 1
+    result = pd.read_csv(files[0], sep="\t")
+    skipped = result[result["paper_id"] == "p2"].iloc[0]
+    evaluated = result[result["paper_id"] == "p1"].iloc[0]
+    assert skipped["evaluation_status"] == "skipped"
+    assert skipped["classification"] == "__SKIPPED__"
+    assert skipped["skip_reason"] == "missing_abstract"
+    assert evaluated["evaluation_status"] == "evaluated"
+    assert "abstract" in files[0].parts
