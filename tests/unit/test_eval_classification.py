@@ -56,7 +56,7 @@ def test_classification_eval_loads_and_summarizes_runs(tmp_path: Path) -> None:
         ]
     ).to_csv(run_dir_2 / "final_1.tsv", sep="\t", index=False)
 
-    run_dir_3 = run_root / "data-accessibility" / "guided_lsa" / "grobid" / "run-c"
+    run_dir_3 = run_root / "data-accessibility" / "lsa" / "grobid" / "run-c"
     run_dir_3.mkdir(parents=True)
     pd.DataFrame(
         [
@@ -75,7 +75,7 @@ def test_classification_eval_loads_and_summarizes_runs(tmp_path: Path) -> None:
     assert merged["is_incorrect"].sum() == 1
 
     consistency = within_config_consistency(merged)
-    assert set(consistency["model"]) == {"gemini-2-5-pro", "gemini-2-5-flash", "guided_lsa"}
+    assert set(consistency["model"]) == {"gemini-2-5-pro", "gemini-2-5-flash", "lsa"}
 
     containment = containment_pro_vs_flash(merged, temperature="0.0")
     assert "data-accessibility" in set(containment["task"])

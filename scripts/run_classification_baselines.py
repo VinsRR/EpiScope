@@ -37,15 +37,11 @@ for candidate in (ROOT, SRC):
         sys.path.insert(0, str(candidate))
 
 from episcope.workflows.classification.baselines import (
-    BASE_TOPIC_MODEL_KINDS,
-    GuidedTopicModelBaseline,
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
     PrototypeSimilarityBaseline,
-    TOPIC_MAJORITY_BASELINES,
     TOPIC_MODEL_BASELINES,
     TopicModelBaseline,
-    base_topic_model_kind,
     build_llm_generator,
     ground_truth_column,
     metadata_from_mapping,
@@ -61,24 +57,21 @@ from episcope.schemas import PaperMetadata
 from episcope.settings import AppSettings
 
 CLASSIFIER_KINDS = ("paper_type", "data_accessibility", "data_type", "geo")
-LIGHT_TOPIC_BASELINES = ("guided_lsa", "guided_plsa", "guided_lda", "guided_nmf")
+LIGHT_TOPIC_BASELINES = ("lsa", "plsa", "lda", "nmf")
 DEFAULT_BASELINES = ("majority", "prototype_similarity", *LIGHT_TOPIC_BASELINES)
 NON_LLM_BASELINES = ("majority", "prototype_similarity", *TOPIC_MODEL_BASELINES)
 BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
     "zero_shot_llm": "metadata_llm",
-    **{kind: f"guided_{kind}" for kind in BASE_TOPIC_MODEL_KINDS},
 }
 BASELINE_CHOICES = (
     *BASELINE_KINDS,
-    *TOPIC_MAJORITY_BASELINES,
     *BASELINE_ALIASES,
     "all",
     "all_default",
     "all_non_llm",
     "all_topics",
-    "all_topic_majority",
 )
 
 
@@ -109,9 +102,6 @@ class Settings:
     topic_min_df: float = 1.0
     topic_max_df: float = 0.95
     topic_random_state: int = 13
-    guided_multilabel_ratio: float = 0.6
-    guided_min_score: float = 0.05
-    guided_max_labels: int = 4
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.0
@@ -188,9 +178,6 @@ def build_run_dir(
         "topic_min_df": settings.topic_min_df,
         "topic_max_df": settings.topic_max_df,
         "topic_random_state": settings.topic_random_state,
-        "guided_multilabel_ratio": settings.guided_multilabel_ratio,
-        "guided_min_score": settings.guided_min_score,
-        "guided_max_labels": settings.guided_max_labels,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_temperature": settings.llm_temperature,
@@ -241,20 +228,6 @@ def build_baseline(
             min_score=settings.prototype_min_score,
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
-        return GuidedTopicModelBaseline(
-            classifier_kind=classifier_kind,
-            model_kind=base_topic_model_kind(baseline_kind),
-            records=records,
-            n_topics=settings.topic_n_topics,
-            max_features=settings.topic_max_features,
-            min_df=topic_min_df,
-            max_df=topic_max_df,
-            random_state=settings.topic_random_state,
-            multilabel_ratio=settings.guided_multilabel_ratio,
-            min_score=settings.guided_min_score,
-            max_labels=settings.guided_max_labels,
-        )
-    if baseline_kind in TOPIC_MAJORITY_BASELINES:
         gt_col = ground_truth_column(classifier_kind)
         return TopicModelBaseline(
             classifier_kind=classifier_kind,
@@ -514,8 +487,6 @@ def expand_arg_values(values: Iterable[str] | None, *, all_values: tuple[str, ..
             out.extend(DEFAULT_BASELINES)
         elif value == "all_topics":
             out.extend(TOPIC_MODEL_BASELINES)
-        elif value == "all_topic_majority":
-            out.extend(TOPIC_MAJORITY_BASELINES)
         else:
             out.append(normalize_baseline_kind(value))
     deduped = []
@@ -562,9 +533,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--topic-min-df", type=float, default=None)
     parser.add_argument("--topic-max-df", type=float, default=None)
     parser.add_argument("--topic-random-state", type=int, default=None)
-    parser.add_argument("--guided-multilabel-ratio", type=float, default=None)
-    parser.add_argument("--guided-min-score", type=float, default=None)
-    parser.add_argument("--guided-max-labels", type=int, default=None)
     parser.add_argument(
         "--llm-provider",
         choices=["gemini", "openrouter", "openai", "ollama"],
@@ -602,9 +570,6 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "topic_min_df",
         "topic_max_df",
         "topic_random_state",
-        "guided_multilabel_ratio",
-        "guided_min_score",
-        "guided_max_labels",
         "llm_provider",
         "llm_model",
         "llm_temperature",

@@ -9,9 +9,9 @@ import scripts.run_classification_baselines as baseline_runner
 from episcope.db.in_memory_academic_db import InMemoryAcademicDB
 from episcope.schemas import PaperMetadata, StructuredSection
 from episcope.workflows.classification.baselines import (
-    GuidedTopicModelBaseline,
     MajorityLabelBaseline,
     PrototypeSimilarityBaseline,
+    TopicModelBaseline,
     ground_truth_column,
     metadata_from_mapping,
     parse_label_names,
@@ -62,29 +62,25 @@ def test_prototype_similarity_uses_label_templates() -> None:
     }
 
 
-def test_guided_lsa_topic_baseline_uses_label_guidance_without_gold_labels() -> None:
+def test_lsa_topic_baseline_maps_topics_to_majority_labels() -> None:
     records = [
-        {
-            "paper_id": "p1",
-            "_metadata_text": (
-                "The dataset is deposited on Zenodo. We provide stratified case "
-                "counts by age group and week in Table 2."
-            ),
-        },
+        {"paper_id": "p1", "title": "hospital surveillance outbreak case counts", "ptype_classification": "['EMPIRICAL']"},
+        {"paper_id": "p2", "title": "field surveillance confirmed cases and deaths", "ptype_classification": "['EMPIRICAL']"},
+        {"paper_id": "p3", "title": "bayesian seir model inference reproduction number", "ptype_classification": "['INFERENCE']"},
+        {"paper_id": "p4", "title": "mechanistic model estimates epidemic parameters", "ptype_classification": "['INFERENCE']"},
     ]
-    baseline = GuidedTopicModelBaseline(
-        classifier_kind="data_accessibility",
+    baseline = TopicModelBaseline(
+        classifier_kind="paper_type",
         model_kind="lsa",
         records=records,
-        n_topics=4,
-        multilabel_ratio=0.6,
-        min_score=0.0,
+        ground_truth_records=records,
+        ground_truth_column=ground_truth_column("paper_type"),
+        n_topics=2,
     )
 
     prediction = baseline.predict("p1", metadata_from_mapping(records[0]), records[0])
-    assert DataAccessibility.OPEN in prediction.result.classification
-    assert DataAccessibility.REPORTED in prediction.result.classification
-    assert prediction.result.extras["baseline_mode"] == "guided_topic_model"
+    assert prediction.result.classification
+    assert prediction.result.extras["topic_model"] == "lsa"
 
 
 def test_paper_text_from_db_uses_sections_as_stored() -> None:
@@ -176,7 +172,7 @@ def test_run_classification_baselines_script_writes_eval_compatible_tsv(
             base_output_dir=str(output_dir),
             mongo_uri="mongodb://example.invalid",
             classifier_kinds=("data_accessibility",),
-            baseline_kinds=("guided_lsa",),
+            baseline_kinds=("lsa",),
             topic_n_topics=2,
             checkpoint_every=10,
         ),
