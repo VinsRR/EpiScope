@@ -6,7 +6,7 @@ from typing import Any
 from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
 from episcope.rag.generation.llm_generator import LLMGenerator
 from episcope.schemas import PaperMetadata
-from episcope.workflows.classification.baselines.common import (
+from classification.baselines.common import (
     BaselinePrediction,
     classifier_config,
 )

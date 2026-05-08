@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -17,8 +18,9 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 from episcope.schemas import PaperMetadata
-from episcope.workflows.classification.baselines.common import (
+from classification.baselines.common import (
     BaselinePrediction,
+    classifier_config,
     default_labels,
     labels_from_names,
     majority_label_set,
@@ -29,7 +31,9 @@ from episcope.workflows.classification.baselines.common import (
 )
 
 SKLEARN_TOPIC_BASELINES = {"lsa", "plsa", "lda", "nmf"}
-OPTIONAL_TOPIC_BASELINES = {"bertopic", "top2vec"}
+BERTOPIC_BASELINES = {"bertopic", "bertopic_guided", "bertopic_semisupervised"}
+TOP2VEC_BASELINES = {"top2vec", "top2vec_contextual"}
+OPTIONAL_TOPIC_BASELINES = BERTOPIC_BASELINES | TOP2VEC_BASELINES
 TOPIC_MODEL_BASELINES = (*sorted(SKLEARN_TOPIC_BASELINES), *sorted(OPTIONAL_TOPIC_BASELINES))
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,78 @@ def _safe_corpus(records: Sequence[Mapping[str, object]]) -> list[str]:
             text = str(record.get("paper_id") or "empty document")
         corpus.append(text)
     return corpus
+
+
+def _label_set_key(label_names: Sequence[str]) -> str:
+    return "|".join(
+        sorted(str(label).upper() for label in label_names if str(label).strip())
+    )
+
+
+def _tokenize_seed_text(text: str) -> list[str]:
+    stop = {
+        "and",
+        "are",
+        "for",
+        "from",
+        "into",
+        "only",
+        "that",
+        "the",
+        "this",
+        "used",
+        "with",
+        "without",
+    }
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z_\-]{2,}", text):
+        clean = token.lower().replace("_", " ").replace("-", " ").strip()
+        if clean and clean not in stop and clean not in terms:
+            terms.append(clean)
+    return terms
+
+
+def _seed_topic_list(classifier_kind: str, *, max_terms: int = 12) -> list[list[str]]:
+    config = classifier_config(classifier_kind)
+    templates = {
+        str(key).lower(): value for key, value in (config.template_paragraphs or {}).items()
+    }
+    seeds: list[list[str]] = []
+    for key, label in config.category_labels.items():
+        label_text = str(label)
+        if label_text.upper() == "UNCLEAR":
+            continue
+        candidates = [str(key), label_text]
+        lookup_keys = {
+            str(key).lower(),
+            label_text.lower(),
+            label_text.lower().replace(" ", "_"),
+            label_text.lower().replace("_", " "),
+        }
+        for lookup in lookup_keys:
+            candidates.extend(templates.get(lookup, [])[:2])
+        terms = _tokenize_seed_text(" ".join(candidates))
+        if terms:
+            seeds.append(terms[:max_terms])
+    return seeds
+
+
+def _gold_label_sets_for_records(
+    *,
+    records: Sequence[Mapping[str, object]],
+    ground_truth_records: Sequence[Mapping[str, object]],
+    ground_truth_column: str,
+) -> list[tuple[str, ...]]:
+    truth_by_id = {
+        str(record.get("paper_id")): record
+        for record in ground_truth_records
+        if record.get("paper_id") is not None
+    }
+    out: list[tuple[str, ...]] = []
+    for record in records:
+        truth = truth_by_id.get(str(record.get("paper_id")), record)
+        out.append(parse_label_names(truth.get(ground_truth_column)))
+    return out
 
 
 def _topic_matrix_from_assignments(
@@ -92,9 +168,28 @@ def _build_bertopic_model(
     n_topics: int,
     n_documents: int,
     random_state: int,
+    seed_topic_list: list[list[str]] | None = None,
+    supervised: bool = False,
     verbose: bool = True,
 ):
     from bertopic import BERTopic
+    from bertopic.vectorizers import ClassTfidfTransformer
+
+    if supervised:
+        from bertopic.dimensionality import BaseDimensionalityReduction
+        from sklearn.linear_model import LogisticRegression
+
+        return BERTopic(
+            umap_model=BaseDimensionalityReduction(),
+            hdbscan_model=LogisticRegression(
+                max_iter=1000,
+                class_weight="balanced",
+                random_state=random_state,
+            ),
+            ctfidf_model=ClassTfidfTransformer(reduce_frequent_words=True),
+            verbose=verbose,
+        )
+
     from hdbscan import HDBSCAN
     from umap import UMAP
 
@@ -122,6 +217,7 @@ def _build_bertopic_model(
         umap_model=umap_model,
         hdbscan_model=hdbscan_model,
         calculate_probabilities=False,
+        seed_topic_list=seed_topic_list,
         verbose=verbose,
     )
 
@@ -157,11 +253,19 @@ def _build_top2vec_model(
     *,
     documents: Sequence[str],
     n_topics: int,
+    contextual: bool = False,
 ):
     from top2vec import Top2Vec
 
     logging.getLogger("top2vec").setLevel(logging.WARNING)
     kwargs = _top2vec_kwargs(n_documents=len(documents), n_topics=n_topics)
+    if contextual:
+        kwargs.update(
+            {
+                "embedding_model": "all-MiniLM-L6-v2",
+                "contextual_top2vec": True,
+            }
+        )
     with contextlib.redirect_stderr(io.StringIO()):
         try:
             return Top2Vec(documents=list(documents), **kwargs)
@@ -171,10 +275,12 @@ def _build_top2vec_model(
                 exc,
             )
             fallback = {
-                "embedding_model": "doc2vec",
+                "embedding_model": "all-MiniLM-L6-v2" if contextual else "doc2vec",
                 "speed": "fast-learn",
                 "workers": 1,
             }
+            if contextual:
+                fallback["contextual_top2vec"] = True
             return Top2Vec(documents=list(documents), **fallback)
 
 
@@ -195,6 +301,7 @@ class TopicModelBaseline:
         max_df: int | float = 0.95,
         random_state: int = 13,
         leave_one_out: bool = True,
+        semisupervised_label_fraction: float = 0.5,
     ) -> None:
         self.classifier_kind = classifier_kind
         self.model_kind = model_kind.lower()
@@ -205,6 +312,9 @@ class TopicModelBaseline:
         self.max_df = max_df
         self.random_state = random_state
         self.leave_one_out = leave_one_out
+        self.semisupervised_label_fraction = float(semisupervised_label_fraction)
+        self.ground_truth_records = [dict(record) for record in ground_truth_records]
+        self.ground_truth_column = ground_truth_column
         self.gold_by_paper_id = {
             str(record.get("paper_id")): parse_label_names(
                 record.get(ground_truth_column)
@@ -265,6 +375,14 @@ class TopicModelBaseline:
             },
             extras={
                 "topic_model": self.model_kind,
+                "topic_model_family": (
+                    "bertopic"
+                    if self.model_kind in BERTOPIC_BASELINES
+                    else "top2vec"
+                    if self.model_kind in TOP2VEC_BASELINES
+                    else self.model_kind
+                ),
+                "topic_model_mode": self._topic_model_mode,
                 "topic_id": topic_id,
                 "topic_size": len(topic_members),
                 "topic_score": topic_score,
@@ -283,9 +401,9 @@ class TopicModelBaseline:
             doc_topic, terms = self._fit_lda()
         elif self.model_kind == "nmf":
             doc_topic, terms = self._fit_nmf()
-        elif self.model_kind == "bertopic":
+        elif self.model_kind in BERTOPIC_BASELINES:
             doc_topic, terms = self._fit_bertopic()
-        elif self.model_kind == "top2vec":
+        elif self.model_kind in TOP2VEC_BASELINES:
             doc_topic, terms = self._fit_top2vec()
         else:
             raise ValueError(
@@ -376,6 +494,52 @@ class TopicModelBaseline:
         terms = _component_terms(model.components_, feature_names)
         return doc_topic, terms
 
+    @property
+    def _topic_model_mode(self) -> str:
+        if self.model_kind == "bertopic_guided":
+            return "guided"
+        if self.model_kind == "bertopic_semisupervised":
+            return "semi_supervised"
+        if self.model_kind == "top2vec_contextual":
+            return "contextual"
+        return "unsupervised"
+
+    def _semisupervised_targets(self) -> tuple[list[int], dict[int, tuple[str, ...]]]:
+        label_sets = _gold_label_sets_for_records(
+            records=self.records,
+            ground_truth_records=self.ground_truth_records,
+            ground_truth_column=self.ground_truth_column,
+        )
+        label_to_id: dict[str, int] = {}
+        id_to_labels: dict[int, tuple[str, ...]] = {}
+        targets: list[int] = []
+        for labels in label_sets:
+            key = _label_set_key(labels)
+            if not key:
+                targets.append(-1)
+                continue
+            if key not in label_to_id:
+                label_id = len(label_to_id)
+                label_to_id[key] = label_id
+                id_to_labels[label_id] = labels
+            targets.append(label_to_id[key])
+
+        fraction = max(0.0, min(1.0, self.semisupervised_label_fraction))
+        if fraction < 1.0:
+            known_indices = [idx for idx, label_id in enumerate(targets) if label_id >= 0]
+            keep_count = int(round(len(known_indices) * fraction))
+            rng = np.random.default_rng(self.random_state)
+            keep = (
+                set(rng.choice(known_indices, size=keep_count, replace=False).tolist())
+                if keep_count
+                else set()
+            )
+            targets = [
+                label_id if idx in keep else -1
+                for idx, label_id in enumerate(targets)
+            ]
+        return targets, id_to_labels
+
     def _fit_bertopic(self) -> tuple[np.ndarray, dict[int, list[str]]]:
         try:
             import bertopic  # noqa: F401
@@ -388,12 +552,21 @@ class TopicModelBaseline:
             ) from exc
 
         corpus = _safe_corpus(self.records)
+        seed_topics = (
+            _seed_topic_list(self.classifier_kind)
+            if self.model_kind == "bertopic_guided"
+            else None
+        )
         model = _build_bertopic_model(
             n_topics=self.n_topics,
             n_documents=len(corpus),
             random_state=self.random_state,
+            seed_topic_list=seed_topics,
         )
-        topics, probabilities = model.fit_transform(corpus)
+        targets = None
+        if self.model_kind == "bertopic_semisupervised":
+            targets, _ = self._semisupervised_targets()
+        topics, probabilities = model.fit_transform(corpus, y=targets)
         doc_topic, topic_index = _topic_matrix_from_assignments(topics, probabilities)
         terms = {
             topic_index[int(topic)]: [word for word, _ in model.get_topic(topic) or []][
@@ -413,7 +586,11 @@ class TopicModelBaseline:
             ) from exc
 
         corpus = _safe_corpus(self.records)
-        model = _build_top2vec_model(documents=corpus, n_topics=self.n_topics)
+        model = _build_top2vec_model(
+            documents=corpus,
+            n_topics=self.n_topics,
+            contextual=self.model_kind == "top2vec_contextual",
+        )
         topic_nums, topic_scores, *_ = model.get_documents_topics(
             doc_ids=list(range(len(corpus))),
             num_topics=1,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from episcope.schemas import PaperMetadata
-from episcope.workflows.classification.baselines.common import (
+from classification.baselines.common import (
     BaselinePrediction,
     labels_from_names,
     majority_label_set,

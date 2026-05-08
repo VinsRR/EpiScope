@@ -36,7 +36,7 @@ for candidate in (ROOT, SRC):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from episcope.workflows.classification.baselines import (
+from classification.baselines import (
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
     PrototypeSimilarityBaseline,
@@ -56,7 +56,7 @@ from episcope.workflows.classification.baselines import (
     is_supervised_baseline,
     is_supervised_topic_baseline,
 )
-from episcope.workflows.classification.baselines.llm import (
+from classification.baselines.llm import (
     usage_delta,
     usage_snapshot_from_baseline,
 )
@@ -71,6 +71,7 @@ BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
     "zero_shot_llm": "metadata_llm",
+    "bertopic_supervised": "supervised_bertopic",
 }
 BASELINE_CHOICES = (
     *BASELINE_KINDS,
@@ -115,6 +116,7 @@ class Settings:
     topic_min_df: float = 1.0
     topic_max_df: float = 0.95
     topic_random_state: int = 13
+    bertopic_semisupervised_label_fraction: float = 0.5
     supervised_cv_modes: tuple[str, ...] = ("kfold",)
     supervised_cv_folds: int = 5
     supervised_threshold: float = 0.5
@@ -171,6 +173,11 @@ def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
             + settings.llm_model
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
+        if baseline_kind == "bertopic_semisupervised":
+            return (
+                f"{baseline_kind}-k_{settings.topic_n_topics}"
+                f"-labels_{settings.bertopic_semisupervised_label_fraction:g}"
+            )
         return f"{baseline_kind}-k_{settings.topic_n_topics}"
     if is_supervised_baseline(baseline_kind):
         cv_slug = (
@@ -213,6 +220,7 @@ def build_run_dir(
         "topic_min_df": settings.topic_min_df,
         "topic_max_df": settings.topic_max_df,
         "topic_random_state": settings.topic_random_state,
+        "bertopic_semisupervised_label_fraction": settings.bertopic_semisupervised_label_fraction,
         "supervised_cv_modes": settings.supervised_cv_modes,
         "supervised_cv_folds": settings.supervised_cv_folds,
         "supervised_threshold": settings.supervised_threshold,
@@ -279,6 +287,7 @@ def build_baseline(
             max_df=topic_max_df,
             random_state=settings.topic_random_state,
             leave_one_out=settings.majority_fit_mode == "leave_one_out",
+            semisupervised_label_fraction=settings.bertopic_semisupervised_label_fraction,
         )
     if is_supervised_baseline(baseline_kind):
         gt_col = ground_truth_column(classifier_kind)
@@ -829,6 +838,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--topic-max-df", type=float, default=None)
     parser.add_argument("--topic-random-state", type=int, default=None)
     parser.add_argument(
+        "--bertopic-semisupervised-label-fraction",
+        type=float,
+        default=None,
+        help=(
+            "Fraction of gold labels exposed to BERTopic semi-supervised mode; "
+            "remaining papers are passed as unlabeled (-1)."
+        ),
+    )
+    parser.add_argument(
         "--supervised-cv-mode",
         action="append",
         choices=["kfold", "leave_one_out"],
@@ -878,6 +896,7 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "topic_min_df",
         "topic_max_df",
         "topic_random_state",
+        "bertopic_semisupervised_label_fraction",
         "supervised_cv_folds",
         "supervised_threshold",
         "llm_provider",

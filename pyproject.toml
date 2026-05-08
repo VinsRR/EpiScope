@@ -37,6 +37,10 @@ ui = [
 eval = [
     "ragas",
 ]
+topic-baselines = [
+    "bertopic",
+    "top2vec",
+]
 table-extraction = [
     "gmft",
     "pymupdf",
@@ -50,6 +54,8 @@ dev = [
 all = [
     "streamlit",
     "ragas",
+    "bertopic",
+    "top2vec",
     "gmft",
     "pymupdf",
     "layoutparser",

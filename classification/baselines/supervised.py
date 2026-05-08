@@ -11,7 +11,7 @@ from sklearn.model_selection import KFold, LeaveOneOut
 from sklearn.svm import LinearSVC
 
 from episcope.schemas import PaperMetadata
-from episcope.workflows.classification.baselines.common import (
+from classification.baselines.common import (
     BaselinePrediction,
     classifier_config,
     default_labels,
@@ -32,7 +32,12 @@ SUPERVISED_TOPIC_BASELINES = (
     "supervised_lda_logreg",
     "supervised_nmf_logreg",
 )
-SUPERVISED_BASELINES = (*SUPERVISED_CLASSIFIER_BASELINES, *SUPERVISED_TOPIC_BASELINES)
+SUPERVISED_BERTOPIC_BASELINES = ("supervised_bertopic",)
+SUPERVISED_BASELINES = (
+    *SUPERVISED_CLASSIFIER_BASELINES,
+    *SUPERVISED_TOPIC_BASELINES,
+    *SUPERVISED_BERTOPIC_BASELINES,
+)
 
 
 def is_supervised_baseline(baseline_kind: str) -> bool:
@@ -41,6 +46,10 @@ def is_supervised_baseline(baseline_kind: str) -> bool:
 
 def is_supervised_topic_baseline(baseline_kind: str) -> bool:
     return baseline_kind in SUPERVISED_TOPIC_BASELINES
+
+
+def is_supervised_bertopic_baseline(baseline_kind: str) -> bool:
+    return baseline_kind in SUPERVISED_BERTOPIC_BASELINES
 
 
 def label_names_for_task(classifier_kind: str) -> tuple[str, ...]:
@@ -87,6 +96,12 @@ def _label_matrix(
             if name in label_index:
                 matrix[row_idx, label_index[name]] = 1
     return matrix, label_names
+
+
+def _label_set_key(label_names: Sequence[str]) -> str:
+    return "|".join(
+        sorted(str(label).upper() for label in label_names if str(label).strip())
+    )
 
 
 def _cv_splits(n_samples: int, *, cv_mode: str, cv_folds: int, random_state: int):
@@ -174,6 +189,10 @@ class SupervisedCVBaseline:
         return BaselinePrediction(result=result)
 
     def _fit_predict(self) -> None:
+        if self.baseline_kind in SUPERVISED_BERTOPIC_BASELINES:
+            self._fit_predict_bertopic()
+            return
+
         corpus = _safe_corpus(self.records)
         splits = _cv_splits(
             len(corpus),
@@ -220,6 +239,115 @@ class SupervisedCVBaseline:
                     "cv_folds": self.cv_folds if self.cv_mode == "kfold" else len(self.records),
                     "fold_index": fold_by_index.get(row_idx),
                     "n_topics": self.n_topics if self._uses_topic_features else None,
+                    "top_scores": [
+                        {"label": label, "score": float(score)}
+                        for label, score in ranked[:8]
+                    ],
+                },
+            )
+            self.predictions[paper_id] = BaselinePrediction(result=result)
+
+    def _fit_predict_bertopic(self) -> None:
+        try:
+            from bertopic import BERTopic
+            from bertopic.dimensionality import BaseDimensionalityReduction
+            from bertopic.vectorizers import ClassTfidfTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "The supervised BERTopic baseline requires the optional "
+                "'bertopic' package. Install it before running "
+                "--baseline-kind supervised_bertopic."
+            ) from exc
+
+        corpus = _safe_corpus(self.records)
+        splits = _cv_splits(
+            len(corpus),
+            cv_mode=self.cv_mode,
+            cv_folds=self.cv_folds,
+            random_state=self.random_state,
+        )
+        probabilities = np.zeros_like(self.y_true, dtype=float)
+        fold_by_index: dict[int, int] = {}
+        label_sets = [
+            tuple(label for label, value in zip(self.label_names, row) if int(value) == 1)
+            for row in self.y_true
+        ]
+
+        for fold_idx, (train_idx, test_idx) in enumerate(splits, start=1):
+            train_texts = [corpus[idx] for idx in train_idx]
+            test_texts = [corpus[idx] for idx in test_idx]
+            train_sets = [label_sets[idx] for idx in train_idx]
+            label_to_id: dict[str, int] = {}
+            id_to_labels: dict[int, tuple[str, ...]] = {}
+            y_train: list[int] = []
+            for labels in train_sets:
+                key = _label_set_key(labels)
+                if key not in label_to_id:
+                    label_id = len(label_to_id)
+                    label_to_id[key] = label_id
+                    id_to_labels[label_id] = labels
+                y_train.append(label_to_id[key])
+
+            if len(label_to_id) == 1:
+                only_labels = next(iter(id_to_labels.values()))
+                for row_idx in test_idx:
+                    for label_idx, label in enumerate(self.label_names):
+                        probabilities[row_idx, label_idx] = float(label in only_labels)
+                    fold_by_index[int(row_idx)] = fold_idx
+                continue
+
+            model = BERTopic(
+                umap_model=BaseDimensionalityReduction(),
+                hdbscan_model=LogisticRegression(
+                    max_iter=self.max_iter,
+                    class_weight="balanced",
+                    random_state=self.random_state,
+                ),
+                ctfidf_model=ClassTfidfTransformer(reduce_frequent_words=True),
+                verbose=False,
+            )
+            model.fit(train_texts, y=y_train)
+            topics, topic_probs = model.transform(test_texts)
+            for local_idx, row_idx in enumerate(test_idx):
+                topic = int(np.asarray(topics).reshape(-1)[local_idx])
+                predicted_labels = id_to_labels.get(topic, ())
+                for label_idx, label in enumerate(self.label_names):
+                    probabilities[row_idx, label_idx] = float(label in predicted_labels)
+                if topic_probs is not None:
+                    probs = np.asarray(topic_probs)
+                    if probs.ndim == 2 and local_idx < probs.shape[0] and probs.shape[1]:
+                        probabilities[row_idx] *= float(np.max(probs[local_idx]))
+                fold_by_index[int(row_idx)] = fold_idx
+
+        for row_idx, paper_id in enumerate(self.paper_ids):
+            scores = probabilities[row_idx]
+            selected_names = self._selected_label_names(scores)
+            labels = labels_from_names(self.classifier_kind, selected_names)
+            if not labels:
+                labels = default_labels(self.classifier_kind)
+            ranked = sorted(
+                zip(self.label_names, scores),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            result = result_from_labels(
+                self.classifier_kind,
+                labels,
+                confidence=float(np.max(scores)) if len(scores) else 0.0,
+                reasoning=(
+                    "supervised_bertopic baseline: BERTopic used its supervised "
+                    "classification mode on each training fold and predicted this "
+                    "paper from its held-out fold."
+                ),
+                class_probabilities={
+                    label: float(score) for label, score in zip(self.label_names, scores)
+                },
+                extras={
+                    "cv_mode": self.cv_mode,
+                    "cv_folds": self.cv_folds if self.cv_mode == "kfold" else len(self.records),
+                    "fold_index": fold_by_index.get(row_idx),
+                    "topic_model_family": "bertopic",
+                    "topic_model_mode": "supervised",
                     "top_scores": [
                         {"label": label, "score": float(score)}
                         for label, score in ranked[:8]

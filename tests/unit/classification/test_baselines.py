@@ -8,15 +8,20 @@ import pytest
 import scripts.run_classification_baselines as baseline_runner
 from episcope.db.in_memory_academic_db import InMemoryAcademicDB
 from episcope.schemas import PaperMetadata, StructuredSection
-from episcope.workflows.classification.baselines import (
+from classification.baselines import (
     MajorityLabelBaseline,
     PrototypeSimilarityBaseline,
+    SUPERVISED_BASELINES,
+    TOPIC_MODEL_BASELINES,
     SupervisedCVBaseline,
     TopicModelBaseline,
     ground_truth_column,
     metadata_from_mapping,
     parse_label_names,
 )
+from classification.baselines.topic_models import _seed_topic_list
+from classification.runners.families import family_parser
+from classification.topic_modeling import TopicExplorer
 from episcope.workflows.classification.schemas import (
     DataAccessibility,
     PaperType,
@@ -96,6 +101,53 @@ def test_topic_k_values_scale_with_task_label_count() -> None:
         6,
         12,
     )
+
+
+def test_optional_topic_modes_expose_bertopic_and_top2vec_capabilities() -> None:
+    assert "bertopic_guided" in TOPIC_MODEL_BASELINES
+    assert "bertopic_semisupervised" in TOPIC_MODEL_BASELINES
+    assert "top2vec_contextual" in TOPIC_MODEL_BASELINES
+    assert "supervised_bertopic" in SUPERVISED_BASELINES
+    assert baseline_runner.normalize_baseline_kind("bertopic_supervised") == "supervised_bertopic"
+
+
+def test_bertopic_guided_seed_topics_are_built_from_classifier_protocol() -> None:
+    seeds = _seed_topic_list("paper_type")
+    flattened = {term for seed in seeds for term in seed}
+
+    assert len(seeds) >= 3
+    assert "empirical" in flattened
+    assert "inference" in flattened
+
+
+def test_topic_explorer_can_cluster_documents_for_eda() -> None:
+    fitted = TopicExplorer(model_kind="lsa", n_topics=2).fit_texts(
+        [
+            "hospital surveillance outbreak case counts",
+            "bayesian seir model inference reproduction number",
+        ],
+        ids=["paper-1", "paper-2"],
+    )
+
+    assert set(fitted.document_topics()["paper_id"]) == {"paper-1", "paper-2"}
+    assert set(fitted.clusters()).issubset({0, 1})
+    assert not fitted.topics().empty
+
+
+def test_family_runners_expose_narrow_baseline_choices() -> None:
+    topic_choices = family_parser(
+        family="topic",
+        description="topic",
+    )._option_string_actions["--baseline-kind"].choices
+    supervised_choices = family_parser(
+        family="supervised",
+        description="supervised",
+    )._option_string_actions["--baseline-kind"].choices
+
+    assert "bertopic_guided" in topic_choices
+    assert "supervised_tfidf_logreg" not in topic_choices
+    assert "supervised_bertopic" in supervised_choices
+    assert "lda" not in supervised_choices
 
 
 def test_supervised_tfidf_baseline_runs_kfold_predictions() -> None:

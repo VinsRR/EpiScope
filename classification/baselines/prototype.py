@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from typing import Any
 
 from episcope.schemas import PaperMetadata
-from episcope.workflows.classification.baselines.common import (
+from classification.baselines.common import (
     BaselinePrediction,
     classifier_config,
     default_labels,
