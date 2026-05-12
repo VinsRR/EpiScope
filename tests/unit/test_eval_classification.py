@@ -56,16 +56,37 @@ def test_classification_eval_loads_and_summarizes_runs(tmp_path: Path) -> None:
         ]
     ).to_csv(run_dir_2 / "final_1.tsv", sep="\t", index=False)
 
+    run_dir_3 = run_root / "data-accessibility" / "lsa" / "grobid" / "run-c"
+    run_dir_3.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"paper_id": "paper-1", "classification": "['REPORTED']"},
+            {"paper_id": "paper-2", "classification": "['REFERENCED']"},
+            {
+                "paper_id": "paper-3",
+                "classification": "__SKIPPED__",
+                "evaluation_status": "skipped",
+                "skip_reason": "missing_abstract",
+            },
+        ]
+    ).to_csv(run_dir_3 / "final_1.tsv", sep="\t", index=False)
+
     per_run = per_run_metrics(ground_truth_path=gt_path, run_roots=[run_root])
-    assert len(per_run) == 2
+    assert len(per_run) == 3
     assert set(per_run["task"]) == {"data-accessibility"}
+    assert "unknown" in set(per_run["temperature"])
+    lsa_row = per_run[per_run["model"] == "lsa"].iloc[0]
+    assert lsa_row["n_predictions"] == 2
+    assert lsa_row["n_skipped"] == 1
+    assert lsa_row["n_rows"] == 3
 
     merged = load_merged_predictions(ground_truth_path=gt_path, run_roots=[run_root])
-    assert len(merged) == 4
+    assert len(merged) == 6
+    assert "paper-3" not in set(merged["paper_id"])
     assert merged["is_incorrect"].sum() == 1
 
     consistency = within_config_consistency(merged)
-    assert set(consistency["model"]) == {"gemini-2-5-pro", "gemini-2-5-flash"}
+    assert set(consistency["model"]) == {"gemini-2-5-pro", "gemini-2-5-flash", "lsa"}
 
     containment = containment_pro_vs_flash(merged, temperature="0.0")
     assert "data-accessibility" in set(containment["task"])

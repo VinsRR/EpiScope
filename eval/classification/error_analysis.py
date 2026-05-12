@@ -11,6 +11,19 @@ from eval.common.paths import discover_result_files, parse_result_path
 from eval.common.tasks import TASK_TO_GT_COLUMN, ground_truth_column
 
 
+SKIPPED_CLASSIFICATION = "__SKIPPED__"
+
+
+def skipped_mask(df: pd.DataFrame) -> pd.Series:
+    status = (
+        df["evaluation_status"].astype(str).str.lower()
+        if "evaluation_status" in df.columns
+        else pd.Series("", index=df.index, dtype=str)
+    )
+    classification = df["classification"].astype(str) if "classification" in df.columns else pd.Series("", index=df.index, dtype=str)
+    return status.eq("skipped") | classification.eq(SKIPPED_CLASSIFICATION)
+
+
 def load_merged_predictions(
     *,
     ground_truth_path: str | Path,
@@ -42,6 +55,9 @@ def load_merged_predictions(
         except Exception:
             continue
 
+        df = df[~skipped_mask(df)].copy()
+        if df.empty:
+            continue
         df["task"] = meta["task"]
         df["model"] = meta["model"]
         df["temperature"] = meta["temperature"]
@@ -225,21 +241,20 @@ def per_run_metrics(
         except Exception:
             continue
 
+        skip_mask = skipped_mask(df)
+        n_skipped = int(skip_mask.sum())
+        eval_df = df[~skip_mask].copy()
         gt_col = ground_truth_column(meta["task"])
         if gt_col not in gt.columns:
             raise KeyError(f"Ground-truth file is missing expected column {gt_col!r}")
 
         gt_dict = gt.set_index("paper_id")[gt_col].astype(str).to_dict()
-        pred_dict = df.set_index("paper_id")["classification"].astype(str).to_dict()
+        pred_dict = eval_df.set_index("paper_id")["classification"].astype(str).to_dict()
 
-        prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro", sep=",")
-        prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro", sep=",")
-        rows.append(
-            {
-                "task": meta["task"],
-                "model": meta["model"],
-                "temperature": meta["temperature"],
-                "source_file": meta["source_file"],
+        if pred_dict:
+            prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro", sep=",")
+            prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro", sep=",")
+            metrics = {
                 "jaccard_samples": jaccard_samples(gt_dict, pred_dict, sep=","),
                 "micro_precision": prf_micro["precision"],
                 "micro_recall": prf_micro["recall"],
@@ -249,7 +264,29 @@ def per_run_metrics(
                 "macro_f1": prf_macro["f1"],
                 "hamming_loss": multilabel_hamming_loss(gt_dict, pred_dict, sep=","),
                 "subset_accuracy": subset_accuracy(gt_dict, pred_dict, sep=","),
+            }
+        else:
+            metrics = {
+                "jaccard_samples": None,
+                "micro_precision": None,
+                "micro_recall": None,
+                "micro_f1": None,
+                "macro_precision": None,
+                "macro_recall": None,
+                "macro_f1": None,
+                "hamming_loss": None,
+                "subset_accuracy": None,
+            }
+        rows.append(
+            {
+                "task": meta["task"],
+                "model": meta["model"],
+                "temperature": meta["temperature"],
+                "source_file": meta["source_file"],
+                **metrics,
                 "n_predictions": len(pred_dict),
+                "n_skipped": n_skipped,
+                "n_rows": len(df),
             }
         )
 
