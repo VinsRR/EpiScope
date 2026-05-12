@@ -1230,7 +1230,7 @@ def main():
         0.0,
         # 1.0
         ]
-    REPEATS = 1
+    REPEATS = 5
 
     def apply_overrides(s: Settings, overrides: dict) -> Settings:
         d = dataclasses.asdict(s)
