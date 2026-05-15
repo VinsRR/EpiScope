@@ -11,10 +11,13 @@ import scripts.run_classification_baselines as base
 
 
 FAMILY_BASELINES = {
+    "zero_shot": ("majority", "prototype_similarity", *base.ZERO_SHOT_TOPIC_BASELINES),
+    "unsupervised": base.UNSUPERVISED_TOPIC_BASELINES,
+    "supervised": (*base.SUPERVISED_BASELINES, *base.BERTOPIC_SEMISUPERVISED_BASELINES),
+    "llm": ("metadata_llm",),
+    # Legacy aliases kept so old invocations don't break.
     "simple": ("majority", "prototype_similarity"),
     "topic": base.TOPIC_MODEL_BASELINES,
-    "supervised": base.SUPERVISED_BASELINES,
-    "llm": ("metadata_llm",),
 }
 
 
@@ -56,11 +59,20 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int, default=None)
     parser.add_argument("--checkpoint-every", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
-    if family == "simple":
+    if family in ("zero_shot", "simple"):
         parser.add_argument("--majority-fit-mode", choices=["leave_one_out", "all"], default=None)
         parser.add_argument("--prototype-multilabel-ratio", type=float, default=None)
         parser.add_argument("--prototype-min-score", type=float, default=None)
-    if family == "topic":
+        parser.add_argument(
+            "--prototype-embedding-model",
+            default=None,
+            help=(
+                "sentence-transformers model name for the prototype baseline. "
+                "When set, uses dense embeddings instead of TF-IDF."
+            ),
+        )
+        add_topic_args(parser, include_k_sweep=True)
+    if family in ("unsupervised", "topic"):
         add_topic_args(parser, include_k_sweep=True)
     if family == "supervised":
         add_topic_args(parser, include_k_sweep=False)
@@ -101,11 +113,13 @@ def settings_from_family_args(
     family: str,
 ) -> base.Settings:
     app_settings = AppSettings.from_env()
+    canonical_family = {"simple": "zero_shot", "topic": "unsupervised"}.get(family, family)
     settings = base.Settings(
         strategy_name=app_settings.strategy_name,
         mongo_uri=app_settings.mongo_uri,
         mongo_db_name=app_settings.mongo_db_name,
         baseline_kinds=FAMILY_BASELINES[family],
+        base_output_dir=f"outputs/baselines/{canonical_family}",
     )
     data: dict[str, Any] = dataclasses.asdict(settings)
     for field in (
@@ -123,6 +137,7 @@ def settings_from_family_args(
         "majority_fit_mode",
         "prototype_multilabel_ratio",
         "prototype_min_score",
+        "prototype_embedding_model",
         "topic_n_topics",
         "topic_max_features",
         "topic_min_df",

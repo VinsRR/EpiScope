@@ -4,6 +4,15 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from .schemas import (
+    DATA_ACCESS_CODE_DEFINITIONS,
+    DATA_ACCESS_CODE_LABELS,
+    DATA_ACCESS_CODE_TO_ENUM,
+    DATA_TYPE_CODE_DEFINITIONS,
+    DATA_TYPE_CODE_LABELS,
+    DATA_TYPE_CODE_TO_ENUM,
+    GEO_CODE_LABELS,
+    GEO_CODE_TO_ENUM,
+    PAPER_TYPE_DEFINITIONS,
     # Enums
     PaperType,
     DataAccessibility,
@@ -144,12 +153,6 @@ class BaseClassifierConfig:
 # -----------------------------------------------------------------------------
 # Data Availability
 # -----------------------------------------------------------------------------
-
-from .schemas import (
-    DATA_ACCESS_CODE_TO_ENUM,
-    DATA_ACCESS_CODE_LABELS,
-    DATA_ACCESS_CODE_DEFINITIONS,
-)
 
 
 @dataclass
@@ -298,8 +301,6 @@ Keywords: {keywords}
 # PAPER TYPE (parameter-estimation focused taxonomy; paper-level, primary + secondary)
 # -----------------------------------------------------------------------------
 
-from .schemas import PAPER_TYPE_DEFINITIONS
-
 
 @dataclass
 class PaperTypeClassifierConfig(BaseClassifierConfig):
@@ -409,12 +410,6 @@ Keywords: {keywords}
 # -----------------------------------------------------------------------------
 # DTYPE (Data Type) – protocol-aligned
 # -----------------------------------------------------------------------------
-
-from .schemas import (
-    DATA_TYPE_CODE_TO_ENUM,
-    DATA_TYPE_CODE_LABELS,
-    DATA_TYPE_CODE_DEFINITIONS,
-)
 
 
 @dataclass
@@ -537,8 +532,6 @@ Keywords: {keywords}
 # -----------------------------------------------------------------------------
 # GEO (Geography) – protocol-aligned
 # -----------------------------------------------------------------------------
-
-from .schemas import GEO_CODE_TO_ENUM, GEO_CODE_LABELS
 
 
 @dataclass

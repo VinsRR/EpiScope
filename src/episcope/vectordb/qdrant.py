@@ -5,6 +5,10 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .base import AbstractVectorDB
 
+QdrantClient: Any
+models: Any
+ResponseHandlingException: Any
+UnexpectedResponse: Any
 try:
     from qdrant_client import QdrantClient, models
     from qdrant_client.http.exceptions import (

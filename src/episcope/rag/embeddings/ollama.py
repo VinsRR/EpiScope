@@ -1,10 +1,10 @@
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 from .base import Embedder
 from episcope.clients import OllamaClient
 
 
 class OllamaEmbedder(Embedder):
-    def __init__(self, model: str, client: OllamaClient = None):
+    def __init__(self, model: str, client: Optional[OllamaClient] = None):
         self._model = model
         self._client = client or OllamaClient()
         self._dim = len(self.embed_text("test"))

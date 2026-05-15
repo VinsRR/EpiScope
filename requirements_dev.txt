@@ -1,0 +1,8 @@
+-r requirements.txt
+-r eval/requirements.txt
+
+pytest==9.0.3
+ruff==0.15.11
+ty==0.0.35
+tox==4.54.0
+ragas==0.4.3

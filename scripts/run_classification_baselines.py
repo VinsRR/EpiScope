@@ -37,6 +37,7 @@ for candidate in (ROOT, SRC):
         sys.path.insert(0, str(candidate))
 
 from classification.baselines import (
+    BERTOPIC_SEMISUPERVISED_BASELINES,
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
     PrototypeSimilarityBaseline,
@@ -44,6 +45,8 @@ from classification.baselines import (
     SUPERVISED_CLASSIFIER_BASELINES,
     SUPERVISED_TOPIC_BASELINES,
     TOPIC_MODEL_BASELINES,
+    UNSUPERVISED_TOPIC_BASELINES,
+    ZERO_SHOT_TOPIC_BASELINES,
     SupervisedCVBaseline,
     TopicModelBaseline,
     build_llm_generator,
@@ -65,8 +68,9 @@ from episcope.settings import AppSettings
 
 CLASSIFIER_KINDS = ("paper_type", "data_accessibility", "data_type", "geo")
 LIGHT_TOPIC_BASELINES = ("lsa", "plsa", "lda", "nmf")
+ZERO_SHOT_BASELINES = ("majority", "prototype_similarity", *ZERO_SHOT_TOPIC_BASELINES)
 DEFAULT_BASELINES = ("majority", "prototype_similarity", *LIGHT_TOPIC_BASELINES)
-NON_LLM_BASELINES = ("majority", "prototype_similarity", *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
+NON_LLM_BASELINES = (*ZERO_SHOT_BASELINES, *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
 BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
@@ -79,7 +83,9 @@ BASELINE_CHOICES = (
     "all",
     "all_default",
     "all_non_llm",
-    "all_topics",
+    "all_zero_shot",
+    "all_unsupervised",
+    "all_topics",         # kept as alias for all_unsupervised
     "all_supervised",
     "all_supervised_classifiers",
     "all_supervised_topics",
@@ -109,6 +115,7 @@ class Settings:
     majority_fit_mode: str = "leave_one_out"
     prototype_multilabel_ratio: float = 0.92
     prototype_min_score: float = 0.03
+    prototype_embedding_model: str | None = "allenai-specter"
     topic_n_topics: int = 10
     topic_k_multipliers: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)
     topic_k_values: tuple[int, ...] = ()
@@ -165,6 +172,9 @@ def paths_for_repeat(run_dir: Path, repeat_idx: int) -> dict[str, Path]:
 
 
 def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
+    if baseline_kind == "prototype_similarity" and settings.prototype_embedding_model:
+        safe = settings.prototype_embedding_model.replace("/", "-").replace(":", "-")
+        return f"prototype_similarity-emb_{safe}"
     if baseline_kind == "metadata_llm":
         return (
             "metadata-llm-"
@@ -213,6 +223,7 @@ def build_run_dir(
         "majority_fit_mode": settings.majority_fit_mode,
         "prototype_multilabel_ratio": settings.prototype_multilabel_ratio,
         "prototype_min_score": settings.prototype_min_score,
+        "prototype_embedding_model": settings.prototype_embedding_model,
         "topic_n_topics": settings.topic_n_topics,
         "topic_k_multipliers": settings.topic_k_multipliers,
         "topic_k_values": settings.topic_k_values,
@@ -272,6 +283,7 @@ def build_baseline(
             records=records,
             multilabel_ratio=settings.prototype_multilabel_ratio,
             min_score=settings.prototype_min_score,
+            embedding_model=settings.prototype_embedding_model,
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
         gt_col = ground_truth_column(classifier_kind)
@@ -752,8 +764,10 @@ def expand_arg_values(values: Iterable[str] | None, *, all_values: tuple[str, ..
             out.extend(all_values)
         elif value == "all_default":
             out.extend(DEFAULT_BASELINES)
-        elif value == "all_topics":
-            out.extend(TOPIC_MODEL_BASELINES)
+        elif value == "all_zero_shot":
+            out.extend(ZERO_SHOT_BASELINES)
+        elif value in {"all_unsupervised", "all_topics"}:
+            out.extend(UNSUPERVISED_TOPIC_BASELINES)
         elif value == "all_supervised":
             out.extend(SUPERVISED_BASELINES)
         elif value == "all_supervised_classifiers":
@@ -811,6 +825,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prototype-multilabel-ratio", type=float, default=None)
     parser.add_argument("--prototype-min-score", type=float, default=None)
+    parser.add_argument(
+        "--prototype-embedding-model",
+        default=None,
+        help=(
+            "sentence-transformers model name for the prototype baseline. "
+            "When set, uses dense embeddings instead of TF-IDF (e.g. "
+            "'all-MiniLM-L6-v2' or 'allenai-specter')."
+        ),
+    )
     parser.add_argument("--topic-n-topics", type=int, default=None)
     parser.add_argument(
         "--topic-k-multiplier",
@@ -891,6 +914,7 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "majority_fit_mode",
         "prototype_multilabel_ratio",
         "prototype_min_score",
+        "prototype_embedding_model",
         "topic_n_topics",
         "topic_max_features",
         "topic_min_df",

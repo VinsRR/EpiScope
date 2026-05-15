@@ -16,11 +16,14 @@ from dataclasses import dataclass, field
 
 import requests
 
+OpenAI: Any
 try:
-    from openai import OpenAI
+    from openai import OpenAI as OpenAI
 except ImportError:  # pragma: no cover - exercised in environments without the SDK
     OpenAI = None
 
+genai: Any
+genai_types: Any
 try:
     from google import genai
     from google.genai import types as genai_types

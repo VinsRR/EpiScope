@@ -14,15 +14,15 @@ dependencies = [
     "typer",
     "requests",
     "numpy",
-    "scikit-learn",
-    "pandas",
     "python-dotenv",
     "torch",
     "transformers",
     "sentence-transformers",
+    "tqdm",
     "faiss-cpu",
     "qdrant-client",
     "unstructured[pdf]",
+    "pypdf",
     "openai",
     "google-genai",
     "rapidfuzz",
@@ -35,7 +35,11 @@ ui = [
     "streamlit",
 ]
 eval = [
+    "pandas",
+    "scikit-learn",
     "ragas",
+    "langchain-core",
+    "httpx",
 ]
 topic-baselines = [
     "bertopic",
@@ -49,11 +53,19 @@ table-extraction = [
     "effdet",
 ]
 dev = [
-    "pytest",
+    "pytest==9.0.3",
+    "ruff==0.15.11",
+    "ty==0.0.35",
+    "tox==4.54.0",
+    "ragas==0.4.3",
 ]
 all = [
     "streamlit",
+    "pandas",
+    "scikit-learn",
     "ragas",
+    "langchain-core",
+    "httpx",
     "bertopic",
     "top2vec",
     "gmft",
@@ -61,7 +73,11 @@ all = [
     "layoutparser",
     "img2table",
     "effdet",
-    "pytest",
+    "pytest==9.0.3",
+    "ruff==0.15.11",
+    "ty==0.0.35",
+    "tox==4.54.0",
+    "ragas==0.4.3",
 ]
 
 [project.scripts]

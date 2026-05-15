@@ -31,10 +31,35 @@ from classification.baselines.common import (
 )
 
 SKLEARN_TOPIC_BASELINES = {"lsa", "plsa", "lda", "nmf"}
-BERTOPIC_BASELINES = {"bertopic", "bertopic_guided", "bertopic_semisupervised"}
-TOP2VEC_BASELINES = {"top2vec", "top2vec_contextual"}
+
+BERTOPIC_UNSUPERVISED_BASELINES = {"bertopic"}
+BERTOPIC_ZERO_SHOT_BASELINES = {"bertopic_guided"}
+BERTOPIC_SEMISUPERVISED_BASELINES = {"bertopic_semisupervised"}
+BERTOPIC_BASELINES = (
+    BERTOPIC_UNSUPERVISED_BASELINES
+    | BERTOPIC_ZERO_SHOT_BASELINES
+    | BERTOPIC_SEMISUPERVISED_BASELINES
+)
+
+TOP2VEC_UNSUPERVISED_BASELINES = {"top2vec"}
+TOP2VEC_ZERO_SHOT_BASELINES = {"top2vec_contextual"}
+TOP2VEC_BASELINES = TOP2VEC_UNSUPERVISED_BASELINES | TOP2VEC_ZERO_SHOT_BASELINES
+
 OPTIONAL_TOPIC_BASELINES = BERTOPIC_BASELINES | TOP2VEC_BASELINES
+
+# All methods dispatched to TopicModelBaseline — the implementation boundary.
 TOPIC_MODEL_BASELINES = (*sorted(SKLEARN_TOPIC_BASELINES), *sorted(OPTIONAL_TOPIC_BASELINES))
+
+# Semantic family groupings (used by runners).
+UNSUPERVISED_TOPIC_BASELINES: tuple[str, ...] = (
+    *sorted(SKLEARN_TOPIC_BASELINES),
+    *sorted(BERTOPIC_UNSUPERVISED_BASELINES),
+    *sorted(TOP2VEC_UNSUPERVISED_BASELINES),
+)
+ZERO_SHOT_TOPIC_BASELINES: tuple[str, ...] = (
+    *sorted(BERTOPIC_ZERO_SHOT_BASELINES),
+    *sorted(TOP2VEC_ZERO_SHOT_BASELINES),
+)
 
 logger = logging.getLogger(__name__)
 

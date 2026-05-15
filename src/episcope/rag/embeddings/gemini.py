@@ -1,4 +1,4 @@
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 from .base import Embedder
 from episcope.clients import GeminiClient
 
@@ -7,12 +7,12 @@ class GeminiEmbedder(Embedder):
     def __init__(
         self,
         model: str = "gemini-embedding-001",  # "embedding-001",# "models/embedding-001",
-        client: GeminiClient = None,
+        client: Optional[GeminiClient] = None,
         # 3072 is the maximum available dimension for Gemini embeddings
         # Nevertheles, they use what they call "Matrioshka" embeddings
         # where the the model is trained to store the most important semantic information in the "earlier" parts of the vector,
         # a 768-dimensional slice of a 3072-vector is nearly as accurate as the full vector.
-        fixed_dim: int = None,
+        fixed_dim: Optional[int] = None,
     ):
         self._model = model
         self._client = client or GeminiClient()

@@ -31,7 +31,7 @@ from __future__ import annotations
 import abc
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, Sequence
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
 
 import difflib
 import requests
@@ -44,6 +44,7 @@ from episcope.settings import env
 logger = logging.getLogger(__name__)
 
 # try fast fuzzy engine, fallback to difflib
+fuzz: Any
 try:
     from rapidfuzz import fuzz
 
@@ -522,13 +523,13 @@ class DocumentLoaderFactory:
     reference to :data:`LOADER_REGISTRY`.
     """
 
-    LOADER_REGISTRY: Dict[str, callable] = {
+    LOADER_REGISTRY: Dict[str, Callable[..., AbstractDocumentLoader]] = {
         "unstructured": UnstructuredDocumentLoader,
         "grobid": GrobidDocumentLoader,
     }
 
     @classmethod
-    def get_loader(cls, name: str, **kwargs: any) -> AbstractDocumentLoader:
+    def get_loader(cls, name: str, **kwargs: Any) -> AbstractDocumentLoader:
         """Instantiate a document loader by name.
 
         Args:

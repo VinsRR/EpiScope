@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_academic_db(
-    uri: str = None,
+    uri: Optional[str] = None,
     db_name: str = "AcademicCorpus",
     use_in_memory: bool = False,
     backup_file: Optional[str] = None,

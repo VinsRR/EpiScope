@@ -13,6 +13,6 @@ class AbstractRAG(ABC):
         self.generator = generator
 
     @abstractmethod
-    def run(self, **kwargs) -> Any:
+    def run(self, paper_id: str, metadata: Any = None) -> Any:
         """Run the RAG workflow."""
         pass

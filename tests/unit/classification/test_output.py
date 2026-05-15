@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from episcope.schemas import PaperMetadata
 from episcope.workflows.classification.output import (
     ClassificationTrainingRecord,
     CompletionSample,

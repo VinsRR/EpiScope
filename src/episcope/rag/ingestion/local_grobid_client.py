@@ -11,11 +11,18 @@ from __future__ import annotations
 import re
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from lxml import etree
 
 from episcope.schemas import StructuredSection, PaperMetadata, Reference
+
+try:
+    from grobid_client.grobid_client import GrobidClient as _PyClient  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - optional runtime dependency
+    _PyClient = None
+
+PyClient: Any = _PyClient
 
 # at module load time
 SECTION_KEYWORDS = {
@@ -73,8 +80,6 @@ COMPILED_PATTERNS = {
 
 logger = logging.getLogger(__name__)
 
-from grobid_client.grobid_client import GrobidClient as PyClient
-
 
 class GrobidClient:
     """GROBID client that fully utilizes structured output"""
@@ -84,13 +89,16 @@ class GrobidClient:
     ):
         self.grobid_server = grobid_server
         self.timeout = timeout
-        try:
-            self.client = PyClient(grobid_server, timeout=timeout)
-            logger.info(f" GROBID client initialized with server: {grobid_server}")
-        except ImportError:
+        if PyClient is None:
             logger.error(
                 "grobid_client_python not installed. Install with: pip install grobid_client_python"
             )
+            raise ImportError("grobid_client_python is not installed.")
+        try:
+            self.client = PyClient(grobid_server, timeout=timeout)
+            logger.info(f" GROBID client initialized with server: {grobid_server}")
+        except Exception:
+            logger.exception("Failed to initialize GROBID client.")
             raise
 
     def process_fulltext(
@@ -250,9 +258,9 @@ class GrobidClient:
             title=title,
             authors=authors,
             publication_year=year,
-            doi=doi,
-            journal=journal,
-            abstract=abstract,
+            doi=doi or "",
+            journal=journal or "",
+            abstract=abstract or "",
             keywords=keywords,
         )
 
@@ -260,7 +268,7 @@ class GrobidClient:
         self, root, ns: Dict[str, str]
     ) -> List[StructuredSection]:
         """Extract structured sections from TEI body"""
-        sections = []
+        sections: List[StructuredSection] = []
 
         # Find main body
         body = root.find(".//tei:body", namespaces=ns)
@@ -295,8 +303,8 @@ class GrobidClient:
                 sections.append(section)
 
         # Filter out duplicate sections by content
-        seen_content = set()
-        unique_sections = []
+        seen_content: set[str] = set()
+        unique_sections: List[StructuredSection] = []
         for section in sections:
             content = getattr(section, "content", None)
             if not isinstance(content, str):
@@ -316,7 +324,7 @@ class GrobidClient:
             self._get_element_text(head_elem)
             if head_elem is not None
             else "Untitled Section"
-        )
+        ) or "Untitled Section"
 
         section_type = self._classify_section_type(title)
 
@@ -331,7 +339,7 @@ class GrobidClient:
         if not content.strip():
             return None
 
-        references_cited = []
+        references_cited: List[str] = []
         for ref in div_elem.findall('.//tei:ref[@type="bibr"]', namespaces=ns):
             ref_target = ref.get("target")
             if ref_target:
@@ -353,7 +361,7 @@ class GrobidClient:
 
     def _extract_references(self, root, ns: Dict[str, str]) -> List[Reference]:
         """Extract structured references from bibliography"""
-        references = []
+        references: List[Reference] = []
 
         for div in root.findall('.//tei:div[@type="references"]', namespaces=ns):
             for bibl in div.findall(".//tei:biblStruct", namespaces=ns):
@@ -424,12 +432,12 @@ class GrobidClient:
 
         return Reference(
             raw_text=raw_text,
-            title=title,
+            title=title or "",
             authors=authors,
-            journal=journal,
+            journal=journal or "",
             year=year,
-            doi=doi,
-            url=url,
+            doi=doi or "",
+            url=url or "",
         )
 
     def _get_element_text(self, elem) -> Optional[str]:
@@ -477,6 +485,6 @@ class GrobidClient:
         """Create fallback data when GROBID fails"""
         logger.warning(f"Creating fallback data for {pdf_path}")
         metadata = PaperMetadata(
-            title=Path(pdf_path).stem, authors=[], publication_year=None, doi=None
+            title=Path(pdf_path).stem, authors=[], publication_year=None, doi=""
         )
         return metadata, [], []
