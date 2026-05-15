@@ -15,6 +15,10 @@ from eval.classification.error_analysis import (
     pro_always_wrong,
     within_config_consistency,
 )
+from eval.classification.per_label import (
+    per_label_metrics_for_files,
+    summarize_per_label_metrics,
+)
 from eval.classification.summary import summarize_per_run_metrics
 from eval.common.io import write_csv
 
@@ -58,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="gemini-2-5-flash",
         help="Model name used as the 'flash' reference in containment analyses.",
     )
+    parser.add_argument(
+        "--per-label",
+        action="store_true",
+        default=False,
+        help=(
+            "When set, also compute per-label metrics and write "
+            "per_label_metrics.csv and per_label_summary.csv to --out-dir."
+        ),
+    )
     return parser
 
 
@@ -99,6 +112,15 @@ def main() -> None:
         ),
         out_dir / "pro_always_wrong.csv",
     )
+
+    if args.per_label:
+        per_label = per_label_metrics_for_files(
+            ground_truth_path=args.ground_truth,
+            run_roots=args.run_roots,
+            pattern=args.pattern,
+        )
+        write_csv(per_label, out_dir / "per_label_metrics.csv")
+        write_csv(summarize_per_label_metrics(per_label), out_dir / "per_label_summary.csv")
 
     print(f"Wrote classification evaluation outputs to {out_dir}")
 

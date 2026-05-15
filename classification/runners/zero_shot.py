@@ -7,7 +7,7 @@ from .families import run_family
 DESCRIPTION = (
     "Run zero-shot classification baselines (no labeled training examples): "
     "majority prior, prototype similarity (TF-IDF / sentence embeddings), "
-    "BERTopic guided, and Top2Vec contextual."
+    "and BERTopic guided."
 )
 
 

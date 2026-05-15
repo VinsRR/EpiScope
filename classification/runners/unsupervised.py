@@ -5,10 +5,9 @@ from collections.abc import Sequence
 from .families import run_family
 
 DESCRIPTION = (
-    "Run unsupervised corpus-structure baselines (LSA, LDA, NMF, PLSA, "
-    "BERTopic, Top2Vec). These are not competitive classifiers — they audit "
-    "whether the classification categories have natural clustering signal in "
-    "the corpus."
+    "Run unsupervised corpus-structure baselines (LSA, LDA, NMF, PLSA, BERTopic). "
+    "These are not competitive classifiers — they audit whether the classification "
+    "categories have natural clustering signal in the corpus."
 )
 
 
