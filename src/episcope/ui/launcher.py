@@ -11,7 +11,8 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit(
             "The Streamlit UI dependencies are not installed. "
-            "Install them with `pip install episcope[ui]` or `pip install .[ui]`."
+            'Install them with `pip install "epi-scope[ui]"` or '
+            '`pip install ".[ui]"`.'
         ) from exc
 
     app_path = resources.files("episcope.ui").joinpath("streamlit_app.py")
