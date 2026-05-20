@@ -156,3 +156,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+classification/runners/README.md
+deploy/README.md
+eval/README.md
+eval/ragas/README.md
+eval/ragas/datasets/generated/README.md
+eval/ragas/datasets/manual/README.md
+tests/README.md
+tests/integration/classification/README.md
