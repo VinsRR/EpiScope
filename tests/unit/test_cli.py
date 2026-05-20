@@ -114,6 +114,72 @@ def test_index_and_papers_use_local_defaults(tmp_path, monkeypatch) -> None:
     assert papers_payload["paper_ids"] == ["paper"]
 
 
+def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeAnswerGenerator(),
+    )
+
+    workspace = tmp_path / "my-review"
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    init_result = runner.invoke(app, ["init", str(workspace), "--name", "My Review"])
+
+    assert init_result.exit_code == 0
+    init_payload = json.loads(init_result.stdout)
+    assert init_payload["workspace"] == str(workspace.resolve())
+    assert (workspace / "episcope.toml").exists()
+    assert (workspace / "papers").is_dir()
+    assert (workspace / "index").is_dir()
+
+    index_result = runner.invoke(
+        app,
+        [
+            "index",
+            str(paper),
+            "--workspace",
+            str(workspace),
+            "--embed-model",
+            "fake-embedder/1",
+        ],
+    )
+
+    assert index_result.exit_code == 0
+    index_payload = json.loads(index_result.stdout)
+    assert index_payload["workspace"] == str(workspace.resolve())
+    assert index_payload["papers"][0]["paper_id"] == "paper"
+    assert (workspace / "metadata.json").exists()
+
+    papers_result = runner.invoke(app, ["papers", "--workspace", str(workspace)])
+
+    assert papers_result.exit_code == 0
+    papers_payload = json.loads(papers_result.stdout)
+    assert papers_payload["paper_ids"] == ["paper"]
+
+    ask_result = runner.invoke(
+        app,
+        [
+            "ask",
+            "Where are the data?",
+            "--workspace",
+            str(workspace),
+        ],
+    )
+
+    assert ask_result.exit_code == 0
+    ask_payload = json.loads(ask_result.stdout)
+    assert ask_payload["answer"] == "The paper says the data are on Zenodo."
+    assert ask_payload["source_count"] >= 1
+
+
 def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
