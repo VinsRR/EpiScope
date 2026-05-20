@@ -124,6 +124,8 @@ celerybeat.pid
 # ── Documentation ─────────────────────────────────────────────────────────────
 docs/_build/
 /site
+/docs/
+/docs/*
 
 # ── Type checkers / static analysis ──────────────────────────────────────────
 .mypy_cache/
