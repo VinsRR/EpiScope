@@ -6,10 +6,13 @@ ENV PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-RUN pip install --upgrade pip && pip install streamlit requests pandas python-dotenv
+RUN pip install --upgrade pip
 
-COPY streamlit_app.py /app/streamlit_app.py
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN pip install ".[ui]"
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "/app/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
+CMD ["episcope-ui", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
