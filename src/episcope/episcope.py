@@ -30,7 +30,6 @@ from episcope.rag.retrieval.candidates import (
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import PaperMetadata, Reference, StructuredSection
 from episcope.settings import AppSettings
-from episcope.vectordb.faiss import FaissDB
 from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
 from episcope.workflows import PaperClassifier, PrecisionMiner
@@ -193,6 +192,8 @@ def _build_vector_db(
         index_dir.mkdir(parents=True, exist_ok=True)
         return FileDB(str(index_dir))
     if backend == IndexBackend.faiss:
+        from episcope.vectordb.faiss import FaissDB
+
         index_dir.mkdir(parents=True, exist_ok=True)
         return FaissDB(str(index_dir))
     if backend == IndexBackend.qdrant:

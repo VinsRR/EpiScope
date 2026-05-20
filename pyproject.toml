@@ -3,13 +3,11 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "episcope"
+name = "epi-scope"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi",
-    "uvicorn",
     "pydantic",
     "typer",
     "requests",
@@ -19,15 +17,12 @@ dependencies = [
     "transformers",
     "sentence-transformers",
     "tqdm",
-    "faiss-cpu",
-    "qdrant-client",
     "unstructured[pdf]",
     "pypdf",
     "openai",
     "google-genai",
     "rapidfuzz",
     "lxml",
-    "pymongo",
 ]
 
 [project.optional-dependencies]
@@ -37,48 +32,19 @@ ui = [
     "requests",
     "python-dotenv",
 ]
-eval = [
-    "pandas",
-    "scikit-learn",
-    "ragas",
-    "langchain-core",
-    "httpx",
-]
-topic-baselines = [
-    "bertopic",
-]
-table-extraction = [
-    "gmft",
-    "pymupdf",
-    "layoutparser",
-    "img2table",
-    "effdet",
+server = [
+    "fastapi",
+    "uvicorn",
+    "qdrant-client",
+    "pymongo",
 ]
 dev = [
     "pytest==9.0.3",
     "ruff==0.15.11",
     "ty==0.0.35",
     "tox==4.54.0",
-    "ragas==0.4.3",
-]
-all = [
-    "streamlit",
-    "pandas",
-    "scikit-learn",
-    "ragas",
-    "langchain-core",
-    "httpx",
-    "bertopic",
-    "gmft",
-    "pymupdf",
-    "layoutparser",
-    "img2table",
-    "effdet",
-    "pytest==9.0.3",
-    "ruff==0.15.11",
-    "ty==0.0.35",
-    "tox==4.54.0",
-    "ragas==0.4.3",
+    "build",
+    "twine",
 ]
 
 [project.scripts]
