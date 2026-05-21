@@ -5,7 +5,7 @@ from typing import Any
 
 from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
 from episcope.rag.generation.llm_generator import LLMGenerator
-from episcope.schemas import PaperMetadata
+from episcope.schemas import PaperMetadata as _PaperMetadata
 from classification.baselines.common import (
     BaselinePrediction,
     classifier_config,
@@ -40,6 +40,8 @@ class MetadataOnlyLLMBaseline:
     """Zero-shot LLM baseline using metadata and the label protocol, no retrieval."""
 
     name = "metadata_llm"
+    # Do not skip papers that lack body text — we only need the metadata fields.
+    skip_if_no_text = False
 
     def __init__(
         self,
@@ -61,10 +63,16 @@ class MetadataOnlyLLMBaseline:
     def predict(
         self,
         paper_id: str,
-        metadata: PaperMetadata,
+        metadata: _PaperMetadata,
         record: Mapping[str, object] | None = None,
     ) -> BaselinePrediction:
-        attempt = self.runner.run(metadata, chunks=[])
+        # Use the raw metadata fetched from Mongo (title + real abstract + keywords)
+        # rather than the enriched version that substitutes full body text into the
+        # abstract field. This keeps the baseline strictly metadata-only so it is a
+        # clean ablation of the RAG retrieval contribution.
+        raw = (record or {}).get("_metadata")
+        source = raw if isinstance(raw, _PaperMetadata) else metadata
+        attempt = self.runner.run(source, chunks=[], expect_no_chunks=True)
         return BaselinePrediction(
             result=attempt.result,
             raw_response=attempt.raw_response,

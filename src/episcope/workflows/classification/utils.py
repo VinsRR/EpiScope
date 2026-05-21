@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict, TypeAlias
+from typing import Any, Dict, List, TypeAlias, Union
 
 from episcope.schemas import SearchResult
 
-PromptMessage: TypeAlias = Dict[str, str]
+PromptMessage: TypeAlias = Dict[str, Union[str, List[Dict[str, Any]]]]
 
 
 def result_score(chunk: SearchResult) -> float:

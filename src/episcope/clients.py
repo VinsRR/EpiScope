@@ -8,10 +8,11 @@ components to be written without being tied to a specific LLM provider.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import json
 import inspect
-from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping
+from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Tuple, Union
 from dataclasses import dataclass, field
 
 import requests
@@ -40,7 +41,7 @@ class LLMClient(Protocol):
 
     def chat(
         self,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         model: str,
         temperature: float = 0.0,
@@ -121,6 +122,35 @@ class UsageTrackingMixin:
         self.cumulative_usage.call_count += usage.call_count
 
 
+# ---------------------------------------------------------------------------
+# Prompt-cache helpers
+# ---------------------------------------------------------------------------
+
+def _is_anthropic_model(model: str) -> bool:
+    m = model.lower()
+    return m.startswith("anthropic/") or "claude" in m
+
+
+def _with_anthropic_cache_control(
+    messages: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Wrap the last system message's content in an Anthropic cache_control block.
+
+    For non-system messages, and for providers that auto-cache, this is a no-op
+    (those messages are returned unchanged).
+    """
+    result: List[Dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            content = msg["content"]
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+            result.append({"role": "system", "content": content})
+        else:
+            result.append(dict(msg))
+    return result
+
+
 # Provider-specific implementations
 
 
@@ -147,7 +177,7 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
 
     def chat(
         self,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         model: str,
         temperature: float = 0.0,
@@ -254,11 +284,15 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
     - Reads `OPENROUTER_API_KEY` from environment.
     - `api_key` can be passed explicitly to override env var.
     - `site_url` and `app_title` can be passed for analytics headers.
+    - `prompt_cache`: when True, injects Anthropic cache_control blocks for
+      Anthropic models (detected by model name). Non-Anthropic models routed
+      through OpenRouter use automatic prefix caching — no extra markers needed.
     """
 
     api_key: Optional[str] = field(default=None, repr=False)
     site_url: str = "http://localhost:8501"  # Default for local Streamlit
     app_title: str = "EpiScope"
+    prompt_cache: bool = True
     _client: Any = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -284,7 +318,7 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
 
     def chat(
         self,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         model: str,
         temperature: float = 0.0,
@@ -292,11 +326,16 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
         **kwargs: Any,
     ) -> str:
         """Call the OpenRouter Chat Completions endpoint."""
+        processed = (
+            _with_anthropic_cache_control(messages)
+            if self.prompt_cache and _is_anthropic_model(model)
+            else list(messages)
+        )
         sig = inspect.signature(self._client.chat.completions.create)
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         response = self._client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=processed,
             temperature=temperature,
             max_tokens=max_tokens,
             **supported_kwargs,
@@ -365,7 +404,7 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
 
     def chat(
         self,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         model: str,
         temperature: float = 0.0,
@@ -377,7 +416,7 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         response = self._client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=list(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             **supported_kwargs,
@@ -420,13 +459,21 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
 
     - Reads `GEMINI_API_KEY` from the environment.
     - `api_key` can be passed explicitly to override env var.
+    - `prompt_cache`: when True, creates an explicit CachedContent for the
+      system instruction and reuses it for all calls sharing the same system
+      prompt + model combination (keyed by a hash of the system text). Falls
+      back silently to uncached if the system prompt is too short for the
+      model's minimum cache token threshold.
     """
 
     api_key: Optional[str] = field(default=None, repr=False)
+    prompt_cache: bool = True
     _client: Any = field(init=False, repr=False)
+    _cache_store: Dict[Tuple[str, str], str] = field(init=False, repr=False)
 
     def __post_init__(self):
         self._init_usage_tracking()
+        self._cache_store = {}
         if genai is None or genai_types is None:
             raise ImportError(
                 "The google-genai package is not installed. Install it to use GeminiClient."
@@ -438,9 +485,31 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
             )
         self._client = genai.Client(api_key=key)
 
+    def _get_or_create_cache(self, model: str, system_text: str) -> Optional[str]:
+        """Return a CachedContent name for system_text, creating it on first call.
+
+        Returns None if creation fails (e.g. prompt is below the model's minimum
+        token threshold), so the caller can fall back to uncached mode.
+        """
+        key = (model, hashlib.sha256(system_text.encode()).hexdigest()[:16])
+        if key in self._cache_store:
+            return self._cache_store[key]
+        try:
+            cache = self._client.caches.create(
+                model=model,
+                config=genai_types.CreateCachedContentConfig(
+                    system_instruction=system_text,
+                    ttl="3600s",
+                ),
+            )
+            self._cache_store[key] = cache.name
+            return cache.name
+        except Exception:
+            return None
+
     def chat(
         self,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         model: str = "gemini-2.5-flash",
         temperature: float = 1.0,
@@ -448,16 +517,45 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
         **kwargs: Any,
     ) -> str:
         """Call the Gemini API."""
-        full_prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-        generation_config = genai_types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+        system_text: Optional[str] = None
+        contents: List[Dict[str, Any]] = []
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            if isinstance(content, list):
+                text = "".join(
+                    block.get("text", "") for block in content if block.get("type") == "text"
+                )
+            else:
+                text = str(content)
+            if role == "system":
+                system_text = text
+            else:
+                gemini_role = "model" if role == "assistant" else role
+                contents.append({"role": gemini_role, "parts": [{"text": text}]})
+
+        cache_name: Optional[str] = None
+        if self.prompt_cache and system_text:
+            cache_name = self._get_or_create_cache(model, system_text)
+
+        if cache_name:
+            generation_config = genai_types.GenerateContentConfig(
+                cached_content=cache_name,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            )
+        else:
+            generation_config = genai_types.GenerateContentConfig(
+                system_instruction=system_text,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            )
+
         sig = inspect.signature(self._client.models.generate_content)
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
         response = self._client.models.generate_content(
             model=model,
-            contents=full_prompt,
+            contents=contents,
             config=generation_config,
             **supported_kwargs,
         )

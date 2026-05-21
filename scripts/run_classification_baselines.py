@@ -647,6 +647,11 @@ def run_once(
             print(f"[{idx}/{total}] skip {paper_id} (checkpoint)")
             continue
         skip_reason = record.get("_skip_reason")
+        if skip_reason and not getattr(baseline, "skip_if_no_text", True):
+            # Baseline declared it can work without body text — only skip if
+            # there is genuinely no metadata object to work from.
+            if record.get("_metadata") is not None:
+                skip_reason = None
         if skip_reason:
             print(f"[{idx}/{total}] skip {paper_id} ({skip_reason})")
             rows.append(

@@ -49,6 +49,7 @@ class Settings:
     fail_fast: bool = False
     record_failures: bool = True
     allow_delete_on_errors: bool = False
+    prompt_cache: bool = True
 
 
 # =========================
@@ -341,9 +342,9 @@ def build_classifier(settings: Settings):
         )
 
     if settings.llm_provider == "gemini":
-        client = GeminiClient()
+        client = GeminiClient(prompt_cache=settings.prompt_cache)
     elif settings.llm_provider == "openrouter":
-        client = OpenRouterClient()
+        client = OpenRouterClient(prompt_cache=settings.prompt_cache)
     elif settings.llm_provider == "openai":
         client = OpenAIClient()
     elif settings.llm_provider == "ollama":
@@ -1126,6 +1127,7 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--cross-encoder-model", type=str, default=None)
     ap.add_argument("--cross-encoder-top-k", type=int, default=None)
+    ap.add_argument("--no-prompt-cache", action="store_true", default=False)
     return ap.parse_args()
 
 
@@ -1182,6 +1184,8 @@ def merge_settings(settings: Settings, args: argparse.Namespace) -> Settings:
         d["cross_encoder_model"] = args.cross_encoder_model
     if args.cross_encoder_top_k is not None:
         d["cross_encoder_top_k"] = args.cross_encoder_top_k
+    if args.no_prompt_cache:
+        d["prompt_cache"] = False
     return Settings(**d)
 
 
