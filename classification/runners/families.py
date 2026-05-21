@@ -14,11 +14,39 @@ FAMILY_BASELINES = {
     "zero_shot": ("majority", "prototype_similarity", *base.ZERO_SHOT_TOPIC_BASELINES),
     "unsupervised": base.UNSUPERVISED_TOPIC_BASELINES,
     "supervised": (*base.SUPERVISED_BASELINES, *base.BERTOPIC_SEMISUPERVISED_BASELINES),
+    "frozen": base.SUPERVISED_FROZEN_BASELINES,
     "llm": ("metadata_llm",),
     # Legacy aliases kept so old invocations don't break.
     "simple": ("majority", "prototype_similarity"),
     "topic": base.TOPIC_MODEL_BASELINES,
 }
+
+
+def _add_frozen_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--supervised-frozen-model",
+        default=None,
+        help="HF model id for the frozen encoder (e.g. allenai/scibert_scivocab_uncased).",
+    )
+    parser.add_argument(
+        "--supervised-frozen-text-source",
+        choices=["metadata", "full_text"],
+        default=None,
+        help="Encode 'title [SEP] abstract' (metadata) or the full paper text in chunks (full_text).",
+    )
+    parser.add_argument(
+        "--supervised-frozen-pooling",
+        choices=["mean", "cls"],
+        default=None,
+    )
+    parser.add_argument("--supervised-frozen-max-length", type=int, default=None)
+    parser.add_argument("--supervised-frozen-batch-size", type=int, default=None)
+    parser.add_argument(
+        "--supervised-frozen-no-normalize",
+        action="store_true",
+        help="Disable per-fold StandardScaler on the embeddings.",
+    )
+    parser.add_argument("--supervised-frozen-cache-dir", default=None)
 
 
 def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
@@ -84,6 +112,18 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
         )
         parser.add_argument("--supervised-cv-folds", type=int, default=None)
         parser.add_argument("--supervised-threshold", type=float, default=None)
+        # Frozen transformer embedding baselines
+        _add_frozen_args(parser)
+    if family == "frozen":
+        parser.add_argument(
+            "--supervised-cv-mode",
+            action="append",
+            choices=["kfold", "leave_one_out"],
+            default=None,
+        )
+        parser.add_argument("--supervised-cv-folds", type=int, default=None)
+        parser.add_argument("--supervised-threshold", type=float, default=None)
+        _add_frozen_args(parser)
     if family == "llm":
         parser.add_argument(
             "--llm-provider",
@@ -146,6 +186,12 @@ def settings_from_family_args(
         "bertopic_semisupervised_label_fraction",
         "supervised_cv_folds",
         "supervised_threshold",
+        "supervised_frozen_model",
+        "supervised_frozen_text_source",
+        "supervised_frozen_pooling",
+        "supervised_frozen_max_length",
+        "supervised_frozen_batch_size",
+        "supervised_frozen_cache_dir",
         "llm_provider",
         "llm_model",
         "llm_temperature",
@@ -168,6 +214,8 @@ def settings_from_family_args(
         data["topic_k_values"] = ()
     if hasattr(args, "supervised_cv_mode") and args.supervised_cv_mode is not None:
         data["supervised_cv_modes"] = tuple(args.supervised_cv_mode)
+    if getattr(args, "supervised_frozen_no_normalize", False):
+        data["supervised_frozen_normalize"] = False
     if args.overwrite:
         data["overwrite"] = True
     data["classifier_kinds"] = base.expand_arg_values(

@@ -33,10 +33,15 @@ SUPERVISED_TOPIC_BASELINES = (
     "supervised_nmf_logreg",
 )
 SUPERVISED_BERTOPIC_BASELINES = ("supervised_bertopic",)
+SUPERVISED_FROZEN_BASELINES = (
+    "supervised_frozen_logreg",
+    "supervised_frozen_linear_svm",
+)
 SUPERVISED_BASELINES = (
     *SUPERVISED_CLASSIFIER_BASELINES,
     *SUPERVISED_TOPIC_BASELINES,
     *SUPERVISED_BERTOPIC_BASELINES,
+    *SUPERVISED_FROZEN_BASELINES,
 )
 
 
@@ -50,6 +55,10 @@ def is_supervised_topic_baseline(baseline_kind: str) -> bool:
 
 def is_supervised_bertopic_baseline(baseline_kind: str) -> bool:
     return baseline_kind in SUPERVISED_BERTOPIC_BASELINES
+
+
+def is_supervised_frozen_baseline(baseline_kind: str) -> bool:
+    return baseline_kind in SUPERVISED_FROZEN_BASELINES
 
 
 def label_names_for_task(classifier_kind: str) -> tuple[str, ...]:
@@ -188,12 +197,16 @@ class SupervisedCVBaseline:
         )
         return BaselinePrediction(result=result)
 
+    def _build_corpus(self) -> list[str]:
+        """Return one text per record. Subclasses may override to change the source."""
+        return _safe_corpus(self.records)
+
     def _fit_predict(self) -> None:
         if self.baseline_kind in SUPERVISED_BERTOPIC_BASELINES:
             self._fit_predict_bertopic()
             return
 
-        corpus = _safe_corpus(self.records)
+        corpus = self._build_corpus()
         splits = _cv_splits(
             len(corpus),
             cv_mode=self.cv_mode,
@@ -426,7 +439,7 @@ class SupervisedCVBaseline:
             if len(unique) == 1:
                 out[:, label_idx] = float(unique[0])
                 continue
-            if self.baseline_kind == "supervised_tfidf_linear_svm":
+            if self.baseline_kind in ("supervised_tfidf_linear_svm", "supervised_frozen_linear_svm"):
                 model = LinearSVC(class_weight="balanced", random_state=self.random_state)
                 model.fit(x_train, y)
                 out[:, label_idx] = _sigmoid(model.decision_function(x_test))

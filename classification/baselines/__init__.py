@@ -18,11 +18,19 @@ from .supervised import (
     SUPERVISED_BASELINES,
     SUPERVISED_BERTOPIC_BASELINES,
     SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_FROZEN_BASELINES,
     SUPERVISED_TOPIC_BASELINES,
     SupervisedCVBaseline,
     is_supervised_bertopic_baseline,
     is_supervised_baseline,
+    is_supervised_frozen_baseline,
     is_supervised_topic_baseline,
+)
+from .frozen_embeddings import (
+    DEFAULT_FROZEN_CACHE_DIR,
+    DEFAULT_FROZEN_MODEL,
+    FrozenTransformerEmbedder,
+    SupervisedFrozenEmbeddingBaseline,
 )
 from .topic_models import (
     BERTOPIC_BASELINES,
@@ -51,7 +59,12 @@ __all__ = [
     "SUPERVISED_BERTOPIC_BASELINES",
     "SUPERVISED_BASELINES",
     "SUPERVISED_CLASSIFIER_BASELINES",
+    "SUPERVISED_FROZEN_BASELINES",
     "SUPERVISED_TOPIC_BASELINES",
+    "FrozenTransformerEmbedder",
+    "SupervisedFrozenEmbeddingBaseline",
+    "DEFAULT_FROZEN_MODEL",
+    "DEFAULT_FROZEN_CACHE_DIR",
     "TOPIC_MODEL_BASELINES",
     "UNSUPERVISED_TOPIC_BASELINES",
     "ZERO_SHOT_TOPIC_BASELINES",
@@ -68,5 +81,6 @@ __all__ = [
     "task_slug",
     "is_supervised_bertopic_baseline",
     "is_supervised_baseline",
+    "is_supervised_frozen_baseline",
     "is_supervised_topic_baseline",
 ]

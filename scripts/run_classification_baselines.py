@@ -38,27 +38,32 @@ for candidate in (ROOT, SRC):
 
 from classification.baselines import (
     BERTOPIC_SEMISUPERVISED_BASELINES,
+    FrozenTransformerEmbedder,
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
     PrototypeSimilarityBaseline,
     SUPERVISED_BASELINES,
     SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_FROZEN_BASELINES,
     SUPERVISED_TOPIC_BASELINES,
+    SupervisedCVBaseline,
+    SupervisedFrozenEmbeddingBaseline,
     TOPIC_MODEL_BASELINES,
+    TopicModelBaseline,
     UNSUPERVISED_TOPIC_BASELINES,
     ZERO_SHOT_TOPIC_BASELINES,
-    SupervisedCVBaseline,
-    TopicModelBaseline,
     build_llm_generator,
     classifier_config,
     ground_truth_column,
+    is_supervised_baseline,
+    is_supervised_frozen_baseline,
+    is_supervised_topic_baseline,
     metadata_from_mapping,
     result_to_tsv_row,
     stable_hash,
     task_slug,
-    is_supervised_baseline,
-    is_supervised_topic_baseline,
 )
+from classification.baselines.common import slugify
 from classification.baselines.llm import (
     usage_delta,
     usage_snapshot_from_baseline,
@@ -89,6 +94,7 @@ BASELINE_CHOICES = (
     "all_supervised",
     "all_supervised_classifiers",
     "all_supervised_topics",
+    "all_supervised_frozen",
 )
 
 
@@ -127,6 +133,13 @@ class Settings:
     supervised_cv_modes: tuple[str, ...] = ("kfold",)
     supervised_cv_folds: int = 5
     supervised_threshold: float = 0.5
+    supervised_frozen_model: str = "allenai/scibert_scivocab_uncased"
+    supervised_frozen_text_source: str = "metadata"  # "metadata" or "full_text"
+    supervised_frozen_pooling: str = "mean"  # "mean" or "cls"
+    supervised_frozen_max_length: int = 512
+    supervised_frozen_batch_size: int = 8
+    supervised_frozen_normalize: bool = True
+    supervised_frozen_cache_dir: str = "outputs/.frozen_embedding_cache"
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.0
@@ -202,7 +215,11 @@ def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
             if is_supervised_topic_baseline(baseline_kind)
             else ""
         )
-        return f"{baseline_kind}{topic_slug}-{cv_slug}"
+        frozen_slug = ""
+        if is_supervised_frozen_baseline(baseline_kind):
+            model_slug = slugify(settings.supervised_frozen_model)
+            frozen_slug = f"-enc_{model_slug}-src_{settings.supervised_frozen_text_source}"
+        return f"{baseline_kind}{topic_slug}{frozen_slug}-{cv_slug}"
     return baseline_kind
 
 
@@ -235,6 +252,11 @@ def build_run_dir(
         "supervised_cv_modes": settings.supervised_cv_modes,
         "supervised_cv_folds": settings.supervised_cv_folds,
         "supervised_threshold": settings.supervised_threshold,
+        "supervised_frozen_model": settings.supervised_frozen_model,
+        "supervised_frozen_text_source": settings.supervised_frozen_text_source,
+        "supervised_frozen_pooling": settings.supervised_frozen_pooling,
+        "supervised_frozen_max_length": settings.supervised_frozen_max_length,
+        "supervised_frozen_normalize": settings.supervised_frozen_normalize,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_temperature": settings.llm_temperature,
@@ -300,6 +322,29 @@ def build_baseline(
             random_state=settings.topic_random_state,
             leave_one_out=settings.majority_fit_mode == "leave_one_out",
             semisupervised_label_fraction=settings.bertopic_semisupervised_label_fraction,
+        )
+    if is_supervised_frozen_baseline(baseline_kind):
+        gt_col = ground_truth_column(classifier_kind)
+        embedder = FrozenTransformerEmbedder(
+            model_name=settings.supervised_frozen_model,
+            pooling=settings.supervised_frozen_pooling,
+            max_length=settings.supervised_frozen_max_length,
+            batch_size=settings.supervised_frozen_batch_size,
+            cache_dir=settings.supervised_frozen_cache_dir or None,
+        )
+        return SupervisedFrozenEmbeddingBaseline(
+            embedder=embedder,
+            text_source=settings.supervised_frozen_text_source,
+            normalize_features=settings.supervised_frozen_normalize,
+            classifier_kind=classifier_kind,
+            baseline_kind=baseline_kind,
+            records=records,
+            ground_truth_records=ground_truth_records,
+            ground_truth_column=gt_col,
+            cv_mode=settings.supervised_cv_modes[0],
+            cv_folds=settings.supervised_cv_folds,
+            random_state=settings.topic_random_state,
+            threshold=settings.supervised_threshold,
         )
     if is_supervised_baseline(baseline_kind):
         gt_col = ground_truth_column(classifier_kind)
@@ -779,6 +824,8 @@ def expand_arg_values(values: Iterable[str] | None, *, all_values: tuple[str, ..
             out.extend(SUPERVISED_CLASSIFIER_BASELINES)
         elif value == "all_supervised_topics":
             out.extend(SUPERVISED_TOPIC_BASELINES)
+        elif value == "all_supervised_frozen":
+            out.extend(SUPERVISED_FROZEN_BASELINES)
         else:
             out.append(normalize_baseline_kind(value))
     deduped = []
