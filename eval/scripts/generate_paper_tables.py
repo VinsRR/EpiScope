@@ -157,6 +157,14 @@ def _fmt_pct(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
 
+def _latex_label(label: str) -> str:
+    """Escape characters in a label name that are special in LaTeX text mode.
+
+    Underscores are the main offender (e.g. NORTH_AMERICA, NO_EMPIRICAL_DATA).
+    """
+    return label.replace("_", r"\_")
+
+
 def _lookup(df: pd.DataFrame, task: str, model: str, temperature: str, col: str) -> float:
     """Look up a single scalar from a summary DataFrame."""
     mask = (
@@ -518,7 +526,7 @@ def _app_tab_lbl_f1(per_label_summary: pd.DataFrame, task: str) -> str:
                 # Let's keep the space variant consistent with gen_tab_metrics_summary
                 cells[-1] = _fmt_mean_std(mean, std)
 
-        label_display = f"{label} ({support})"
+        label_display = f"{_latex_label(label)} ({support})"
         lines.append(
             f"{label_display:<29}& {cells[0]:<16} & {cells[1]:<16}"
             f" & {cells[2]:<16} & {cells[3]:<16} \\\\"
@@ -645,7 +653,7 @@ def gen_combined_prf_table(per_label_summary: pd.DataFrame) -> str:
                 task_col = " "
 
             lines.append(
-                f"{task_col} & {label} & {support}"
+                f"{task_col} & {_latex_label(label)} & {support}"
                 f" & {p_str} & {r_str} & {f_str} \\\\"
             )
 

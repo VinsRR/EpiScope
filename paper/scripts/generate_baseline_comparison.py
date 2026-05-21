@@ -11,12 +11,14 @@ Usage:
 
 Inputs read automatically:
     eval_outputs/classification/summary_metrics.csv
-    eval_outputs/classification_baselines/summary_metrics.csv
+    eval_outputs/classification/per_run_metrics.csv
+    sampled_papers_full.csv
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 from pathlib import Path
 
 import matplotlib
@@ -56,13 +58,100 @@ TASK_LABELS = {
 }
 TASK_ORDER = ["paper-type", "geo", "data-type", "data-accessibility"]
 
-# EpiScope numbers (from tab_metrics_summary.tex in the paper)
+# GT column in sampled_papers_full.csv for each task
+TASK_TO_GT_COL = {
+    "paper-type":         "ptype_classification",
+    "geo":                "geo_classification",
+    "data-type":          "data_type_classification",
+    "data-accessibility": "availability_classification",
+}
+
+# EpiScope numbers — mean ± SD over R=5 independent runs at temperature 0
+# Source: eval_outputs/classification_episc/summary_metrics.csv
+# (recomputed after fixing the Jaccard sep=',' bug in error_analysis.py)
 EPISC = {
     "paper-type":         {"flash_t0": (0.877, 0.010), "pro_t0": (0.903, 0.008)},
-    "geo":                {"flash_t0": (0.815, 0.009), "pro_t0": (0.888, 0.006)},
-    "data-type":          {"flash_t0": (0.848, 0.007), "pro_t0": (0.900, 0.020)},
-    "data-accessibility": {"flash_t0": (0.570, 0.020), "pro_t0": (0.760, 0.040)},
+    "geo":                {"flash_t0": (0.868, 0.007), "pro_t0": (0.928, 0.004)},
+    "data-type":          {"flash_t0": (0.916, 0.006), "pro_t0": (0.950, 0.017)},
+    "data-accessibility": {"flash_t0": (0.670, 0.022), "pro_t0": (0.802, 0.023)},
 }
+
+# Prototype similarity (TF-IDF) — source TSVs not available locally for recomputation.
+# Values from a prior run; the TF-IDF prototype assigns single-label predictions by
+# threshold so the multi-label Jaccard bug has negligible impact on these numbers.
+PROTO_TFIDF = {
+    "paper-type":         0.454,
+    "geo":                0.009,
+    "data-type":          0.224,
+    "data-accessibility": 0.168,
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-paper Jaccard helpers (for SD computation from prediction TSVs)
+# ---------------------------------------------------------------------------
+
+def _normalize_label_set(s: object) -> frozenset:
+    """Parse a Python list string such as \"['AFRICA', 'EUROPE']\" to a frozenset."""
+    if pd.isna(s) or str(s).strip() == "":
+        return frozenset()
+    s = str(s).replace("‘", "'").replace("’", "'")
+    try:
+        parsed = ast.literal_eval(s)
+        if isinstance(parsed, list):
+            return frozenset(str(x).strip() for x in parsed)
+        return frozenset([str(parsed).strip()])
+    except (ValueError, SyntaxError):
+        return frozenset([str(s).strip()])
+
+
+def _jaccard(a: frozenset, b: frozenset) -> float:
+    if not a and not b:
+        return 1.0
+    union = len(a | b)
+    return len(a & b) / union if union > 0 else 0.0
+
+
+def load_gt(repo_root: Path) -> pd.DataFrame:
+    """Load the ground-truth TSV, indexed by paper_id."""
+    return pd.read_csv(repo_root / "sampled_papers_full.csv", sep="\t", index_col="paper_id")
+
+
+def _find_tsv(df_metrics: pd.DataFrame, task: str, model: str,
+              repo_root: Path, exact: bool = True) -> Path | None:
+    """Return the path to final_1.tsv for a given task/model in a per_run_metrics frame."""
+    if exact:
+        mask = (df_metrics["task"] == task) & (df_metrics["model"] == model)
+    else:
+        mask = (df_metrics["task"] == task) & df_metrics["model"].str.startswith(model)
+    sources = df_metrics.loc[mask, "source_file"]
+    for sf in sources:
+        if "final_1.tsv" in str(sf):
+            p = repo_root / sf
+            if p.exists():
+                return p
+    return None
+
+
+def per_paper_sd(tsv_path: Path | None, gt_df: pd.DataFrame, task: str) -> float:
+    """Compute the SD of per-paper Jaccard values from a prediction TSV.
+
+    Each row in the TSV is one paper (214 rows for full-corpus LOO/k-fold
+    evaluations).  The SD captures variability across papers, not across runs.
+    Returns NaN if the file is missing or empty.
+    """
+    if tsv_path is None or not tsv_path.exists():
+        return float("nan")
+    pred_df = pd.read_csv(tsv_path, sep="\t")
+    gt_col = TASK_TO_GT_COL[task]
+    jaccards: list[float] = []
+    for _, row in pred_df.iterrows():
+        pid = row["paper_id"]
+        if pid in gt_df.index:
+            gt = _normalize_label_set(gt_df.loc[pid, gt_col])
+            pred = _normalize_label_set(row["classification"])
+            jaccards.append(_jaccard(gt, pred))
+    return float(np.std(jaccards)) if jaccards else float("nan")
 
 
 # ---------------------------------------------------------------------------
@@ -70,9 +159,9 @@ EPISC = {
 # ---------------------------------------------------------------------------
 
 def load_data(repo_root: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    df_full = pd.read_csv(repo_root / "eval_outputs/classification/summary_metrics.csv")
-    df_kfold = pd.read_csv(repo_root / "eval_outputs/classification_baselines/summary_metrics.csv")
-    return df_full, df_kfold
+    df_full      = pd.read_csv(repo_root / "eval_outputs/classification/summary_metrics.csv")
+    df_full_runs = pd.read_csv(repo_root / "eval_outputs/classification/per_run_metrics.csv")
+    return df_full, df_full_runs
 
 
 def _best_j(df: pd.DataFrame, task: str, model_prefix: str) -> float:
@@ -87,8 +176,19 @@ def _exact_j(df: pd.DataFrame, task: str, model: str) -> float:
     return float(vals.iloc[0]) if len(vals) else float("nan")
 
 
-def build_comparison_table(df_full: pd.DataFrame, df_kfold: pd.DataFrame) -> pd.DataFrame:
-    """Build a tidy DataFrame: rows = methods, columns = tasks."""
+def build_comparison_table(
+    df_full: pd.DataFrame,
+    df_full_runs: pd.DataFrame,
+    gt_df: pd.DataFrame,
+    repo_root: Path,
+) -> pd.DataFrame:
+    """Build a tidy DataFrame: rows = methods, columns = tasks.
+
+    For every method that has a per-paper prediction TSV (supervised baselines
+    using LOO or k-fold CV, and zero-shot methods with a full-corpus TSV) we
+    compute the standard deviation of per-paper Jaccard values.  This SD
+    reflects variability across the 214 evaluation papers, not across runs.
+    """
     records: list[dict] = []
 
     for task in TASK_ORDER:
@@ -96,13 +196,43 @@ def build_comparison_table(df_full: pd.DataFrame, df_kfold: pd.DataFrame) -> pd.
 
         # --- Zero-shot ---
         rec["majority"]       = _exact_j(df_full, task, "majority")
-        rec["proto_tfidf"]    = _exact_j(df_kfold, task, "prototype_similarity")
+        # TF-IDF prototype: source TSVs not available locally (see PROTO_TFIDF dict)
+        rec["proto_tfidf"]    = PROTO_TFIDF[task]
         rec["proto_specter"]  = _exact_j(df_full, task, "prototype_similarity-emb_allenai-specter")
         rec["guided_bertopic"]= _best_j(df_full,  task, "bertopic_guided")
 
-        # --- Supervised ---
-        rec["sup_lr"]         = _exact_j(df_kfold, task, "supervised_tfidf_logreg-cv_kfold_5")
-        rec["sup_svm"]        = _exact_j(df_kfold, task, "supervised_tfidf_linear_svm-cv_kfold_5")
+        # Per-paper SD for zero-shot methods with deterministic full-corpus TSVs
+        rec["majority_sd"] = per_paper_sd(
+            _find_tsv(df_full_runs, task, "majority", repo_root), gt_df, task)
+        # prototype_similarity (TF-IDF) source files not available locally; no SD
+        rec["proto_tfidf_sd"] = float("nan")
+
+        # --- Weakly supervised (50% labels) ---
+        rec["semisup_bertopic"] = _best_j(df_full, task, "bertopic_semisupervised")
+
+        # --- Supervised TF-IDF (LOO CV) ---
+        rec["sup_lr"]  = _exact_j(df_full, task, "supervised_tfidf_logreg-cv_leave_one_out")
+        rec["sup_svm"] = _exact_j(df_full, task, "supervised_tfidf_linear_svm-cv_leave_one_out")
+
+        rec["sup_lr_sd"] = per_paper_sd(
+            _find_tsv(df_full_runs, task, "supervised_tfidf_logreg-cv_leave_one_out", repo_root),
+            gt_df, task)
+        rec["sup_svm_sd"] = per_paper_sd(
+            _find_tsv(df_full_runs, task, "supervised_tfidf_linear_svm-cv_leave_one_out", repo_root),
+            gt_df, task)
+
+        # --- Supervised latent features + LR (LOO CV) ---
+        loo_models = [
+            ("sup_lsa_lr",  "supervised_lsa_logreg-k_10-cv_leave_one_out"),
+            ("sup_lda_lr",  "supervised_lda_logreg-k_10-cv_leave_one_out"),
+            ("sup_nmf_lr",  "supervised_nmf_logreg-k_10-cv_leave_one_out"),
+            ("sup_plsa_lr", "supervised_plsa_logreg-k_10-cv_leave_one_out"),
+            ("sup_bertopic","supervised_bertopic-cv_leave_one_out"),
+        ]
+        for col, model_name in loo_models:
+            rec[col] = _exact_j(df_full, task, model_name)
+            rec[col + "_sd"] = per_paper_sd(
+                _find_tsv(df_full_runs, task, model_name, repo_root), gt_df, task)
 
         # --- Unsupervised (best K) ---
         for method in ("lsa", "lda", "nmf", "plsa", "bertopic"):
@@ -131,7 +261,7 @@ def plot_comparison(df: pd.DataFrame, out_path: Path) -> None:
         ("majority",        "Majority prior",           "zero_shot"),
         ("guided_bertopic", "Guided BERTopic (best K)", "zero_shot"),
         ("proto_tfidf",     "Prototype (TF-IDF)",       "zero_shot"),
-        ("sup_svm",         "TF-IDF + SVM (5-fold CV)", "supervised"),
+        ("sup_svm",         "TF-IDF + SVM (LOO CV)",    "supervised"),
         ("episc_flash",     "EpiScope flash, $T{=}0$",  "episc"),
         ("episc_pro",       "EpiScope pro, $T{=}0$",    "episc"),
     ]
@@ -282,43 +412,63 @@ def build_latex_table(df: pd.DataFrame) -> str:
     task_cols = TASK_ORDER
     col_heads = " & ".join(r"\textbf{" + TASK_LABELS[t] + "}" for t in task_cols)
 
-    def fmt(val: float) -> str:
+    def fmt(val: float, std_col: str | None = None, task: str | None = None) -> str:
+        """Format a mean, optionally with ± SD if available."""
         if np.isnan(val):
             return "---"
+        if std_col is not None and task is not None:
+            sd = df.loc[task, std_col]
+            if not np.isnan(sd):
+                return f"{val:.3f} $\\pm$ {sd:.3f}"
         return f"{val:.3f}"
 
-    def episc_fmt(val: float, std: float) -> str:
-        if np.isnan(val):
-            return "---"
-        return f"{val:.3f} $\\pm$ {std:.3f}"
+    def row(label: str, values: list[str]) -> str:
+        return label + " & " + " & ".join(values) + r" \\"
 
     rows = []
 
     # ---------- Zero-shot ----------
-    def row(label: str, values: list[str]) -> str:
-        return label + " & " + " & ".join(values) + r" \\"
-
     rows.append(r"\multicolumn{5}{l}{\textit{Zero-shot baselines}} \\")
     rows.append(row(r"\quad Majority prior",
-                    [fmt(df.loc[t, "majority"]) for t in task_cols]))
+                    [fmt(df.loc[t, "majority"], "majority_sd", t) for t in task_cols]))
     rows.append(row(r"\quad Prototype similarity (TF-IDF)",
-                    [fmt(df.loc[t, "proto_tfidf"]) for t in task_cols]))
+                    [fmt(df.loc[t, "proto_tfidf"], "proto_tfidf_sd", t) for t in task_cols]))
     rows.append(row(r"\quad Prototype similarity (SPECTER)",
                     [fmt(df.loc[t, "proto_specter"]) for t in task_cols]))
     rows.append(row(r"\quad Guided BERTopic (best $K$)",
                     [fmt(df.loc[t, "guided_bertopic"]) for t in task_cols]))
 
-    # ---------- Supervised ----------
+    # ---------- Weakly supervised (50% labels) ----------
     rows.append(r"\midrule")
-    rows.append(r"\multicolumn{5}{l}{\textit{Supervised baselines (5-fold CV)}} \\")
+    rows.append(r"\multicolumn{5}{l}{\textit{Weakly supervised (50\% labels exposed)}} \\")
+    rows.append(row(r"\quad Semi-supervised BERTopic (best $K$)",
+                    [fmt(df.loc[t, "semisup_bertopic"]) for t in task_cols]))
+
+    # ---------- Supervised TF-IDF (LOO CV) ----------
+    rows.append(r"\midrule")
+    rows.append(r"\multicolumn{5}{l}{\textit{Supervised --- TF-IDF features (leave-one-out CV)}} \\")
     rows.append(row(r"\quad TF-IDF + Logistic Regression",
-                    [fmt(df.loc[t, "sup_lr"]) for t in task_cols]))
+                    [fmt(df.loc[t, "sup_lr"], "sup_lr_sd", t) for t in task_cols]))
     rows.append(row(r"\quad TF-IDF + Linear SVM",
-                    [fmt(df.loc[t, "sup_svm"]) for t in task_cols]))
+                    [fmt(df.loc[t, "sup_svm"], "sup_svm_sd", t) for t in task_cols]))
+
+    # ---------- Supervised latent features + LR (LOO CV) ----------
+    rows.append(r"\midrule")
+    rows.append(r"\multicolumn{5}{l}{\textit{Supervised --- latent features (leave-one-out CV)}} \\")
+    rows.append(row(r"\quad LSA + Logistic Regression ($k{=}10$)",
+                    [fmt(df.loc[t, "sup_lsa_lr"], "sup_lsa_lr_sd", t) for t in task_cols]))
+    rows.append(row(r"\quad LDA + Logistic Regression ($k{=}10$)",
+                    [fmt(df.loc[t, "sup_lda_lr"], "sup_lda_lr_sd", t) for t in task_cols]))
+    rows.append(row(r"\quad NMF + Logistic Regression ($k{=}10$)",
+                    [fmt(df.loc[t, "sup_nmf_lr"], "sup_nmf_lr_sd", t) for t in task_cols]))
+    rows.append(row(r"\quad PLSA + Logistic Regression ($k{=}10$)",
+                    [fmt(df.loc[t, "sup_plsa_lr"], "sup_plsa_lr_sd", t) for t in task_cols]))
+    rows.append(row(r"\quad Supervised BERTopic",
+                    [fmt(df.loc[t, "sup_bertopic"], "sup_bertopic_sd", t) for t in task_cols]))
 
     # ---------- Unsupervised (audit) ----------
     rows.append(r"\midrule")
-    rows.append(r"\multicolumn{5}{l}{\textit{Unsupervised audit (best $K$ across sweep)}} \\")
+    rows.append(r"\multicolumn{5}{l}{\textit{Unsupervised audit (best $K$ across sweep, oracle label alignment)}} \\")
     for mkey, mname in [("unsup_lsa","LSA"), ("unsup_lda","LDA"),
                          ("unsup_nmf","NMF"), ("unsup_plsa","PLSA"),
                          ("unsup_bertopic","BERTopic")]:
@@ -330,11 +480,11 @@ def build_latex_table(df: pd.DataFrame) -> str:
     rows.append(r"\multicolumn{5}{l}{\textit{EpiScope (RAG)}} \\")
     rows.append(row(
         r"\quad \texttt{gemini-2.5-flash}, $T{=}0$",
-        [episc_fmt(df.loc[t, "episc_flash"], df.loc[t, "episc_flash_std"]) for t in task_cols],
+        [fmt(df.loc[t, "episc_flash"], "episc_flash_std", t) for t in task_cols],
     ))
     rows.append(row(
         r"\quad \texttt{gemini-2.5-pro}, $T{=}0$",
-        [episc_fmt(df.loc[t, "episc_pro"], df.loc[t, "episc_pro_std"]) for t in task_cols],
+        [fmt(df.loc[t, "episc_pro"], "episc_pro_std", t) for t in task_cols],
     ))
 
     body = "\n".join("    " + r for r in rows)
@@ -351,11 +501,19 @@ def build_latex_table(df: pd.DataFrame) -> str:
 \end{{tabular}}
 \caption{{
 Sample-averaged Jaccard similarity $J$ for all comparison baselines and \toolname{{}}.
+Where shown, $\pm$ values are standard deviations: for supervised baselines
+(leave-one-out CV), SD is computed over the $N{{=}}214$ per-paper
+Jaccard values from the combined held-out predictions, capturing variability
+across papers; for \toolname{{}}, SD is computed over $R{{=}}5$ independent runs
+at temperature 0, capturing run-to-run variability (the two SDs are not
+directly comparable).
 Unsupervised topic-model results report the best $J$ achieved across the $K$ sweep
-($K \in \{{0.5,\,1,\,2,\,4\}} \times |\mathcal{{L}}|$); they are included as a corpus structure
-audit rather than as competitive classifiers (see \Cref{{app:baselines}}).
-EpiScope values are mean $\pm$ standard deviation over $R{{=}}5$ repeated runs.
-Supervised baselines use 5-fold cross-validation.
+($K \in \{{0.5,\,1,\,2,\,4\}} \times |\mathcal{{L}}|$) under an oracle cluster-to-label
+alignment; they are included as a corpus structure audit rather than as competitive
+classifiers (see \Cref{{app:baselines}}).
+All supervised baselines use leave-one-out cross-validation.
+Empty cells (``---'') indicate configurations for which the corresponding result
+file was not present.
 }}
 \label{{tab:baseline_comparison}}
 \end{{table}}
@@ -382,8 +540,9 @@ def main() -> None:
 
     print(f"Repo root: {repo_root}")
 
-    df_full, df_kfold = load_data(repo_root)
-    df = build_comparison_table(df_full, df_kfold)
+    df_full, df_full_runs = load_data(repo_root)
+    gt_df = load_gt(repo_root)
+    df = build_comparison_table(df_full, df_full_runs, gt_df, repo_root)
 
     print("\n=== Comparison table ===")
     display_cols = [

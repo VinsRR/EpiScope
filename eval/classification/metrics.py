@@ -12,7 +12,7 @@ def _normalize_label_set(value: Any, sep: str = ";") -> set[str]:
     if value is None:
         return set()
 
-    if isinstance(value, (set, list, tuple)):
+    if isinstance(value, (set, frozenset, list, tuple)):
         out = set()
         for item in value:
             text = str(item).strip()

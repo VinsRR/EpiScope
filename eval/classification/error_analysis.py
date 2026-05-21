@@ -254,22 +254,33 @@ def per_run_metrics(
         if gt_col not in gt.columns:
             raise KeyError(f"Ground-truth file is missing expected column {gt_col!r}")
 
-        gt_dict = gt.set_index("paper_id")[gt_col].astype(str).to_dict()
-        pred_dict = eval_df.set_index("paper_id")["classification"].astype(str).to_dict()
+        # Parse label strings to frozensets before computing metrics so that
+        # _normalize_label_set() in metrics.py iterates over the elements
+        # directly instead of splitting a Python-list string on ",", which
+        # produces bracket-contaminated tokens and undercounts multi-label
+        # overlap (e.g. "['A', 'B']".split(",") → {"['A'", "'B']"} not {"A","B"}).
+        gt_dict = {
+            pid: parse_label_set(val)
+            for pid, val in gt.set_index("paper_id")[gt_col].items()
+        }
+        pred_dict = {
+            pid: parse_label_set(val)
+            for pid, val in eval_df.set_index("paper_id")["classification"].items()
+        }
 
         if pred_dict:
-            prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro", sep=",")
-            prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro", sep=",")
+            prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro")
+            prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro")
             metrics = {
-                "jaccard_samples": jaccard_samples(gt_dict, pred_dict, sep=","),
+                "jaccard_samples": jaccard_samples(gt_dict, pred_dict),
                 "micro_precision": prf_micro["precision"],
                 "micro_recall": prf_micro["recall"],
                 "micro_f1": prf_micro["f1"],
                 "macro_precision": prf_macro["precision"],
                 "macro_recall": prf_macro["recall"],
                 "macro_f1": prf_macro["f1"],
-                "hamming_loss": multilabel_hamming_loss(gt_dict, pred_dict, sep=","),
-                "subset_accuracy": subset_accuracy(gt_dict, pred_dict, sep=","),
+                "hamming_loss": multilabel_hamming_loss(gt_dict, pred_dict),
+                "subset_accuracy": subset_accuracy(gt_dict, pred_dict),
             }
         else:
             metrics = {
