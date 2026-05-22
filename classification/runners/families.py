@@ -11,11 +11,11 @@ import scripts.run_classification_baselines as base
 
 
 FAMILY_BASELINES = {
-    "zero_shot": ("majority", "prototype_similarity", *base.ZERO_SHOT_TOPIC_BASELINES),
+    "zero_shot": ("majority", "prototype_similarity", "nli_zero_shot", *base.ZERO_SHOT_TOPIC_BASELINES),
     "unsupervised": base.UNSUPERVISED_TOPIC_BASELINES,
     "supervised": (*base.SUPERVISED_BASELINES, *base.BERTOPIC_SEMISUPERVISED_BASELINES),
     "frozen": base.SUPERVISED_FROZEN_BASELINES,
-    "llm": ("metadata_llm",),
+    "llm": ("metadata_llm", "random_chunk_llm"),
     # Legacy aliases kept so old invocations don't break.
     "simple": ("majority", "prototype_similarity"),
     "topic": base.TOPIC_MODEL_BASELINES,
@@ -99,6 +99,36 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
                 "When set, uses dense embeddings instead of TF-IDF."
             ),
         )
+        parser.add_argument(
+            "--nli-model",
+            default=None,
+            help="HF NLI checkpoint for the nli_zero_shot baseline.",
+        )
+        parser.add_argument(
+            "--nli-hypothesis-source",
+            choices=["label_description", "label_name"],
+            default=None,
+            help=(
+                "What text to use as the NLI hypothesis. 'label_description' "
+                "(default) uses the template paragraphs from the classifier "
+                "config (same label-information access as EpiScope's prompt); "
+                "'label_name' uses the canonical Yin-et-al template."
+            ),
+        )
+        parser.add_argument(
+            "--nli-hypothesis-template",
+            default=None,
+            help="Template used when --nli-hypothesis-source=label_name. Must contain {label}.",
+        )
+        parser.add_argument(
+            "--nli-threshold",
+            type=float,
+            default=None,
+            help="P(entailment) threshold for multi-label NLI selection (default 0.5).",
+        )
+        parser.add_argument("--nli-max-length", type=int, default=None)
+        parser.add_argument("--nli-batch-size", type=int, default=None)
+        parser.add_argument("--nli-cache-dir", default=None)
         add_topic_args(parser, include_k_sweep=True)
     if family in ("unsupervised", "topic"):
         add_topic_args(parser, include_k_sweep=True)
@@ -132,6 +162,28 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
         )
         parser.add_argument("--llm-model", default=None)
         parser.add_argument("--llm-temperature", type=float, default=None)
+        parser.add_argument(
+            "--random-chunk-k",
+            type=int,
+            default=None,
+            help="Number of body chunks to sample for --baseline-kind random_chunk_llm.",
+        )
+        parser.add_argument(
+            "--random-chunk-seed",
+            type=int,
+            default=None,
+            help="Base seed for per-paper random chunk sampling.",
+        )
+        parser.add_argument(
+            "--qdrant-url",
+            default=None,
+            help="Qdrant URL (defaults to env QDRANT_URL).",
+        )
+        parser.add_argument(
+            "--qdrant-collection",
+            default=None,
+            help="Qdrant collection (defaults to env QDRANT_COLLECTION).",
+        )
     return parser
 
 
@@ -158,6 +210,8 @@ def settings_from_family_args(
         strategy_name=app_settings.strategy_name,
         mongo_uri=app_settings.mongo_uri,
         mongo_db_name=app_settings.mongo_db_name,
+        qdrant_url=app_settings.qdrant_url,
+        qdrant_collection=app_settings.qdrant_collection,
         baseline_kinds=FAMILY_BASELINES[family],
         base_output_dir=f"outputs/baselines/{canonical_family}",
     )
@@ -195,6 +249,17 @@ def settings_from_family_args(
         "llm_provider",
         "llm_model",
         "llm_temperature",
+        "random_chunk_k",
+        "random_chunk_seed",
+        "qdrant_url",
+        "qdrant_collection",
+        "nli_model",
+        "nli_hypothesis_source",
+        "nli_hypothesis_template",
+        "nli_threshold",
+        "nli_max_length",
+        "nli_batch_size",
+        "nli_cache_dir",
     ):
         if hasattr(args, field):
             value = getattr(args, field)

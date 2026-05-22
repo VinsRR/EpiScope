@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# Paired significance testing (paired bootstrap CI on Jaccard differences +
+# McNemar on exact-match indicators + Holm-Bonferroni correction per task)
+# lives in `eval.classification.significance` and is driven by
+# `eval/scripts/run_classification_significance.py`. The §6.1.2 / §6.1.3
+# paper claims that depend on these statistics consume that script's output.
+
 from typing import Any, Mapping, Sequence, Tuple
 
 import numpy as np

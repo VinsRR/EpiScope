@@ -38,10 +38,16 @@ for candidate in (ROOT, SRC):
 
 from classification.baselines import (
     BERTOPIC_SEMISUPERVISED_BASELINES,
+    DEFAULT_HYPOTHESIS_TEMPLATE,
+    DEFAULT_NLI_CACHE_DIR,
+    DEFAULT_NLI_MODEL,
     FrozenTransformerEmbedder,
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
+    NLIEntailmentScorer,
+    NLIZeroShotBaseline,
     PrototypeSimilarityBaseline,
+    RandomChunkLLMBaseline,
     SUPERVISED_BASELINES,
     SUPERVISED_CLASSIFIER_BASELINES,
     SUPERVISED_FROZEN_BASELINES,
@@ -73,10 +79,11 @@ from episcope.settings import AppSettings
 
 CLASSIFIER_KINDS = ("paper_type", "data_accessibility", "data_type", "geo")
 LIGHT_TOPIC_BASELINES = ("lsa", "plsa", "lda", "nmf")
-ZERO_SHOT_BASELINES = ("majority", "prototype_similarity", *ZERO_SHOT_TOPIC_BASELINES)
+ZERO_SHOT_BASELINES = ("majority", "prototype_similarity", "nli_zero_shot", *ZERO_SHOT_TOPIC_BASELINES)
 DEFAULT_BASELINES = ("majority", "prototype_similarity", *LIGHT_TOPIC_BASELINES)
 NON_LLM_BASELINES = (*ZERO_SHOT_BASELINES, *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
-BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
+LLM_BASELINES = ("metadata_llm", "random_chunk_llm")
+BASELINE_KINDS = (*NON_LLM_BASELINES, *LLM_BASELINES)
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
     "zero_shot_llm": "metadata_llm",
@@ -143,6 +150,20 @@ class Settings:
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.0
+    # Random-chunk LLM ablation (samples K chunks uniformly at random from
+    # the same per-paper Qdrant pool the RAG retriever sees).
+    random_chunk_k: int = 10
+    random_chunk_seed: int = 13
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "episcope_academic"
+    # NLI zero-shot baseline.
+    nli_model: str = DEFAULT_NLI_MODEL
+    nli_hypothesis_source: str = "label_description"  # or "label_name"
+    nli_hypothesis_template: str = DEFAULT_HYPOTHESIS_TEMPLATE
+    nli_threshold: float = 0.5
+    nli_max_length: int = 512
+    nli_batch_size: int = 8
+    nli_cache_dir: str = DEFAULT_NLI_CACHE_DIR
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -188,12 +209,28 @@ def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
     if baseline_kind == "prototype_similarity" and settings.prototype_embedding_model:
         safe = settings.prototype_embedding_model.replace("/", "-").replace(":", "-")
         return f"prototype_similarity-emb_{safe}"
+    if baseline_kind == "nli_zero_shot":
+        model_slug = slugify(settings.nli_model)
+        return (
+            f"nli_zero_shot-{model_slug}"
+            f"-src_{settings.nli_hypothesis_source}"
+            f"-thr_{settings.nli_threshold:g}"
+        )
     if baseline_kind == "metadata_llm":
         return (
             "metadata-llm-"
             + settings.llm_provider
             + "-"
             + settings.llm_model
+        )
+    if baseline_kind == "random_chunk_llm":
+        return (
+            "random-chunk-llm-"
+            + settings.llm_provider
+            + "-"
+            + settings.llm_model
+            + f"-k_{settings.random_chunk_k}"
+            + f"-seed_{settings.random_chunk_seed}"
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
         if baseline_kind == "bertopic_semisupervised":
@@ -260,6 +297,14 @@ def build_run_dir(
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_temperature": settings.llm_temperature,
+        "random_chunk_k": settings.random_chunk_k,
+        "random_chunk_seed": settings.random_chunk_seed,
+        "qdrant_collection": settings.qdrant_collection,
+        "nli_model": settings.nli_model,
+        "nli_hypothesis_source": settings.nli_hypothesis_source,
+        "nli_hypothesis_template": settings.nli_hypothesis_template,
+        "nli_threshold": settings.nli_threshold,
+        "nli_max_length": settings.nli_max_length,
     }
     run_id = f"{Path(settings.input_csv).stem}-{stable_hash(identity)}"
     run_dir = (
@@ -267,7 +312,7 @@ def build_run_dir(
         / task_slug(classifier_kind)
         / baseline_model_slug(settings, baseline_kind).replace("/", "-").replace(":", "-")
     )
-    if baseline_kind == "metadata_llm":
+    if baseline_kind in LLM_BASELINES:
         run_dir = run_dir / f"temperature_{settings.llm_temperature}"
     return run_dir / settings.strategy_name / settings.text_scope / run_id
 
@@ -306,6 +351,20 @@ def build_baseline(
             multilabel_ratio=settings.prototype_multilabel_ratio,
             min_score=settings.prototype_min_score,
             embedding_model=settings.prototype_embedding_model,
+        )
+    if baseline_kind == "nli_zero_shot":
+        scorer = NLIEntailmentScorer(
+            model_name=settings.nli_model,
+            max_length=settings.nli_max_length,
+            batch_size=settings.nli_batch_size,
+            cache_dir=settings.nli_cache_dir or None,
+        )
+        return NLIZeroShotBaseline(
+            classifier_kind=classifier_kind,
+            scorer=scorer,
+            hypothesis_source=settings.nli_hypothesis_source,
+            hypothesis_template=settings.nli_hypothesis_template,
+            threshold=settings.nli_threshold,
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
         gt_col = ground_truth_column(classifier_kind)
@@ -373,7 +432,37 @@ def build_baseline(
             classifier_kind=classifier_kind,
             generator=generator,
         )
+    if baseline_kind == "random_chunk_llm":
+        generator = build_llm_generator(
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+        )
+        qdrant_db = build_qdrant_db(settings)
+        return RandomChunkLLMBaseline(
+            classifier_kind=classifier_kind,
+            generator=generator,
+            qdrant_db=qdrant_db,
+            k=settings.random_chunk_k,
+            seed=settings.random_chunk_seed,
+        )
     raise ValueError(f"Unknown baseline_kind={baseline_kind!r}.")
+
+
+def build_qdrant_db(settings: Settings):
+    """Instantiate the Qdrant-backed vector store used by the random-chunk LLM baseline.
+
+    Defaults pull from AppSettings via the environment, and can be overridden
+    through Settings (set on the command line). Connection settings come from
+    the same .env that the real RAG pipeline uses, so the chunks the baseline
+    samples are exactly those the retriever sees in production runs.
+    """
+    from episcope.vectordb.qdrant import QdrantDB
+
+    return QdrantDB(
+        collection=settings.qdrant_collection,
+        url=settings.qdrant_url,
+    )
 
 
 def task_label_count(classifier_kind: str) -> int:
@@ -671,6 +760,8 @@ def run_once(
             records=fit_records,
             ground_truth_records=ground_truth_records,
         )
+        if hasattr(baseline, "set_repeat_idx"):
+            baseline.set_repeat_idx(repeat_idx)
 
     checkpoint = (
         pd.read_csv(paths["checkpoint_tsv"], sep="\t")

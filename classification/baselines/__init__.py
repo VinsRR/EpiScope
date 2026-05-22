@@ -11,8 +11,20 @@ from .common import (
     stable_hash,
     task_slug,
 )
-from .llm import MetadataOnlyLLMBaseline, build_llm_generator
+from .llm import (
+    MetadataOnlyLLMBaseline,
+    RandomChunkLLMBaseline,
+    build_llm_generator,
+    load_body_chunks_from_qdrant,
+)
 from .majority import MajorityLabelBaseline
+from .nli import (
+    DEFAULT_HYPOTHESIS_TEMPLATE,
+    DEFAULT_NLI_CACHE_DIR,
+    DEFAULT_NLI_MODEL,
+    NLIEntailmentScorer,
+    NLIZeroShotBaseline,
+)
 from .prototype import PrototypeSimilarityBaseline
 from .supervised import (
     SUPERVISED_BASELINES,
@@ -51,6 +63,13 @@ __all__ = [
     "SupervisedCVBaseline",
     "TopicModelBaseline",
     "MetadataOnlyLLMBaseline",
+    "NLIEntailmentScorer",
+    "NLIZeroShotBaseline",
+    "DEFAULT_HYPOTHESIS_TEMPLATE",
+    "DEFAULT_NLI_CACHE_DIR",
+    "DEFAULT_NLI_MODEL",
+    "RandomChunkLLMBaseline",
+    "load_body_chunks_from_qdrant",
     "OPTIONAL_TOPIC_BASELINES",
     "BERTOPIC_BASELINES",
     "BERTOPIC_SEMISUPERVISED_BASELINES",
