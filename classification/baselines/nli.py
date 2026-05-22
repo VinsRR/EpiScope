@@ -130,8 +130,10 @@ class NLIEntailmentScorer:
         self._memory_cache[key] = value
         path = self._disk_path(key)
         if path is not None:
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            np.save(tmp, np.float32(value))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            with open(tmp, "wb") as fh:
+                np.save(fh, np.float32(value))
             os.replace(tmp, path)
 
     def score(self, premise: str, hypotheses: Sequence[str]) -> np.ndarray:
