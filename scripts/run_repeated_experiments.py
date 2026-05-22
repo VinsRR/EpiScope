@@ -27,7 +27,7 @@ class Settings:
     subset_papers_csv_sep: str = "\t"
     ground_truth_csv_path: Optional[str] = "sampled_papers_full.csv"
     ground_truth_csv_sep: str = "\t"
-    mongo_uri_or_env: str = os.environ.get("MONGO_URI", "")  #"MONGO_URI"
+    mongo_uri_or_env: str = "mongodb+srv://vincenzoperri_db_user:2nYKbeM6Z4dVW2BF@cluster0.s82lhln.mongodb.net/" # os.environ.get("MONGO_URI", "")  #"MONGO_URI"
     mongo_db_name: str = "episcope_academic_db"
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
