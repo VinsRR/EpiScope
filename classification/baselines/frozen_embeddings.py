@@ -137,8 +137,10 @@ class FrozenTransformerEmbedder:
         self._memory_cache[key] = vec
         path = self._disk_path(key)
         if path is not None:
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            np.save(tmp, vec)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            with open(tmp, "wb") as fh:
+                np.save(fh, vec)
             os.replace(tmp, path)
 
     # -- pooling ------------------------------------------------------------
