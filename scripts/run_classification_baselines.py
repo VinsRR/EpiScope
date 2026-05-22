@@ -37,25 +37,39 @@ for candidate in (ROOT, SRC):
         sys.path.insert(0, str(candidate))
 
 from classification.baselines import (
+    BERTOPIC_SEMISUPERVISED_BASELINES,
+    DEFAULT_HYPOTHESIS_TEMPLATE,
+    DEFAULT_NLI_CACHE_DIR,
+    DEFAULT_NLI_MODEL,
+    FrozenTransformerEmbedder,
     MajorityLabelBaseline,
     MetadataOnlyLLMBaseline,
+    NLIEntailmentScorer,
+    NLIZeroShotBaseline,
     PrototypeSimilarityBaseline,
+    RandomChunkLLMBaseline,
     SUPERVISED_BASELINES,
     SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_FROZEN_BASELINES,
     SUPERVISED_TOPIC_BASELINES,
-    TOPIC_MODEL_BASELINES,
     SupervisedCVBaseline,
+    SupervisedFrozenEmbeddingBaseline,
+    TOPIC_MODEL_BASELINES,
     TopicModelBaseline,
+    UNSUPERVISED_TOPIC_BASELINES,
+    ZERO_SHOT_TOPIC_BASELINES,
     build_llm_generator,
     classifier_config,
     ground_truth_column,
+    is_supervised_baseline,
+    is_supervised_frozen_baseline,
+    is_supervised_topic_baseline,
     metadata_from_mapping,
     result_to_tsv_row,
     stable_hash,
     task_slug,
-    is_supervised_baseline,
-    is_supervised_topic_baseline,
 )
+from classification.baselines.common import slugify
 from classification.baselines.llm import (
     usage_delta,
     usage_snapshot_from_baseline,
@@ -65,9 +79,11 @@ from episcope.settings import AppSettings
 
 CLASSIFIER_KINDS = ("paper_type", "data_accessibility", "data_type", "geo")
 LIGHT_TOPIC_BASELINES = ("lsa", "plsa", "lda", "nmf")
+ZERO_SHOT_BASELINES = ("majority", "prototype_similarity", "nli_zero_shot", *ZERO_SHOT_TOPIC_BASELINES)
 DEFAULT_BASELINES = ("majority", "prototype_similarity", *LIGHT_TOPIC_BASELINES)
-NON_LLM_BASELINES = ("majority", "prototype_similarity", *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
-BASELINE_KINDS = (*NON_LLM_BASELINES, "metadata_llm")
+NON_LLM_BASELINES = (*ZERO_SHOT_BASELINES, *TOPIC_MODEL_BASELINES, *SUPERVISED_BASELINES)
+LLM_BASELINES = ("metadata_llm", "random_chunk_llm")
+BASELINE_KINDS = (*NON_LLM_BASELINES, *LLM_BASELINES)
 BASELINE_ALIASES = {
     "prototype": "prototype_similarity",
     "zero_shot_llm": "metadata_llm",
@@ -79,10 +95,13 @@ BASELINE_CHOICES = (
     "all",
     "all_default",
     "all_non_llm",
-    "all_topics",
+    "all_zero_shot",
+    "all_unsupervised",
+    "all_topics",         # kept as alias for all_unsupervised
     "all_supervised",
     "all_supervised_classifiers",
     "all_supervised_topics",
+    "all_supervised_frozen",
 )
 
 
@@ -109,6 +128,7 @@ class Settings:
     majority_fit_mode: str = "leave_one_out"
     prototype_multilabel_ratio: float = 0.92
     prototype_min_score: float = 0.03
+    prototype_embedding_model: str | None = "allenai-specter"
     topic_n_topics: int = 10
     topic_k_multipliers: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)
     topic_k_values: tuple[int, ...] = ()
@@ -120,9 +140,30 @@ class Settings:
     supervised_cv_modes: tuple[str, ...] = ("kfold",)
     supervised_cv_folds: int = 5
     supervised_threshold: float = 0.5
+    supervised_frozen_model: str = "allenai/scibert_scivocab_uncased"
+    supervised_frozen_text_source: str = "metadata"  # "metadata" or "full_text"
+    supervised_frozen_pooling: str = "mean"  # "mean" or "cls"
+    supervised_frozen_max_length: int = 512
+    supervised_frozen_batch_size: int = 8
+    supervised_frozen_normalize: bool = True
+    supervised_frozen_cache_dir: str = "outputs/.frozen_embedding_cache"
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.0
+    # Random-chunk LLM ablation (samples K chunks uniformly at random from
+    # the same per-paper Qdrant pool the RAG retriever sees).
+    random_chunk_k: int = 10
+    random_chunk_seed: int = 13
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "episcope_academic"
+    # NLI zero-shot baseline.
+    nli_model: str = DEFAULT_NLI_MODEL
+    nli_hypothesis_source: str = "label_description"  # or "label_name"
+    nli_hypothesis_template: str = DEFAULT_HYPOTHESIS_TEMPLATE
+    nli_threshold: float = 0.5
+    nli_max_length: int = 512
+    nli_batch_size: int = 8
+    nli_cache_dir: str = DEFAULT_NLI_CACHE_DIR
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -165,12 +206,31 @@ def paths_for_repeat(run_dir: Path, repeat_idx: int) -> dict[str, Path]:
 
 
 def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
+    if baseline_kind == "prototype_similarity" and settings.prototype_embedding_model:
+        safe = settings.prototype_embedding_model.replace("/", "-").replace(":", "-")
+        return f"prototype_similarity-emb_{safe}"
+    if baseline_kind == "nli_zero_shot":
+        model_slug = slugify(settings.nli_model)
+        return (
+            f"nli_zero_shot-{model_slug}"
+            f"-src_{settings.nli_hypothesis_source}"
+            f"-thr_{settings.nli_threshold:g}"
+        )
     if baseline_kind == "metadata_llm":
         return (
             "metadata-llm-"
             + settings.llm_provider
             + "-"
             + settings.llm_model
+        )
+    if baseline_kind == "random_chunk_llm":
+        return (
+            "random-chunk-llm-"
+            + settings.llm_provider
+            + "-"
+            + settings.llm_model
+            + f"-k_{settings.random_chunk_k}"
+            + f"-seed_{settings.random_chunk_seed}"
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
         if baseline_kind == "bertopic_semisupervised":
@@ -192,7 +252,11 @@ def baseline_model_slug(settings: Settings, baseline_kind: str) -> str:
             if is_supervised_topic_baseline(baseline_kind)
             else ""
         )
-        return f"{baseline_kind}{topic_slug}-{cv_slug}"
+        frozen_slug = ""
+        if is_supervised_frozen_baseline(baseline_kind):
+            model_slug = slugify(settings.supervised_frozen_model)
+            frozen_slug = f"-enc_{model_slug}-src_{settings.supervised_frozen_text_source}"
+        return f"{baseline_kind}{topic_slug}{frozen_slug}-{cv_slug}"
     return baseline_kind
 
 
@@ -213,6 +277,7 @@ def build_run_dir(
         "majority_fit_mode": settings.majority_fit_mode,
         "prototype_multilabel_ratio": settings.prototype_multilabel_ratio,
         "prototype_min_score": settings.prototype_min_score,
+        "prototype_embedding_model": settings.prototype_embedding_model,
         "topic_n_topics": settings.topic_n_topics,
         "topic_k_multipliers": settings.topic_k_multipliers,
         "topic_k_values": settings.topic_k_values,
@@ -224,9 +289,22 @@ def build_run_dir(
         "supervised_cv_modes": settings.supervised_cv_modes,
         "supervised_cv_folds": settings.supervised_cv_folds,
         "supervised_threshold": settings.supervised_threshold,
+        "supervised_frozen_model": settings.supervised_frozen_model,
+        "supervised_frozen_text_source": settings.supervised_frozen_text_source,
+        "supervised_frozen_pooling": settings.supervised_frozen_pooling,
+        "supervised_frozen_max_length": settings.supervised_frozen_max_length,
+        "supervised_frozen_normalize": settings.supervised_frozen_normalize,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "llm_temperature": settings.llm_temperature,
+        "random_chunk_k": settings.random_chunk_k,
+        "random_chunk_seed": settings.random_chunk_seed,
+        "qdrant_collection": settings.qdrant_collection,
+        "nli_model": settings.nli_model,
+        "nli_hypothesis_source": settings.nli_hypothesis_source,
+        "nli_hypothesis_template": settings.nli_hypothesis_template,
+        "nli_threshold": settings.nli_threshold,
+        "nli_max_length": settings.nli_max_length,
     }
     run_id = f"{Path(settings.input_csv).stem}-{stable_hash(identity)}"
     run_dir = (
@@ -234,7 +312,7 @@ def build_run_dir(
         / task_slug(classifier_kind)
         / baseline_model_slug(settings, baseline_kind).replace("/", "-").replace(":", "-")
     )
-    if baseline_kind == "metadata_llm":
+    if baseline_kind in LLM_BASELINES:
         run_dir = run_dir / f"temperature_{settings.llm_temperature}"
     return run_dir / settings.strategy_name / settings.text_scope / run_id
 
@@ -272,6 +350,21 @@ def build_baseline(
             records=records,
             multilabel_ratio=settings.prototype_multilabel_ratio,
             min_score=settings.prototype_min_score,
+            embedding_model=settings.prototype_embedding_model,
+        )
+    if baseline_kind == "nli_zero_shot":
+        scorer = NLIEntailmentScorer(
+            model_name=settings.nli_model,
+            max_length=settings.nli_max_length,
+            batch_size=settings.nli_batch_size,
+            cache_dir=settings.nli_cache_dir or None,
+        )
+        return NLIZeroShotBaseline(
+            classifier_kind=classifier_kind,
+            scorer=scorer,
+            hypothesis_source=settings.nli_hypothesis_source,
+            hypothesis_template=settings.nli_hypothesis_template,
+            threshold=settings.nli_threshold,
         )
     if baseline_kind in TOPIC_MODEL_BASELINES:
         gt_col = ground_truth_column(classifier_kind)
@@ -288,6 +381,29 @@ def build_baseline(
             random_state=settings.topic_random_state,
             leave_one_out=settings.majority_fit_mode == "leave_one_out",
             semisupervised_label_fraction=settings.bertopic_semisupervised_label_fraction,
+        )
+    if is_supervised_frozen_baseline(baseline_kind):
+        gt_col = ground_truth_column(classifier_kind)
+        embedder = FrozenTransformerEmbedder(
+            model_name=settings.supervised_frozen_model,
+            pooling=settings.supervised_frozen_pooling,
+            max_length=settings.supervised_frozen_max_length,
+            batch_size=settings.supervised_frozen_batch_size,
+            cache_dir=settings.supervised_frozen_cache_dir or None,
+        )
+        return SupervisedFrozenEmbeddingBaseline(
+            embedder=embedder,
+            text_source=settings.supervised_frozen_text_source,
+            normalize_features=settings.supervised_frozen_normalize,
+            classifier_kind=classifier_kind,
+            baseline_kind=baseline_kind,
+            records=records,
+            ground_truth_records=ground_truth_records,
+            ground_truth_column=gt_col,
+            cv_mode=settings.supervised_cv_modes[0],
+            cv_folds=settings.supervised_cv_folds,
+            random_state=settings.topic_random_state,
+            threshold=settings.supervised_threshold,
         )
     if is_supervised_baseline(baseline_kind):
         gt_col = ground_truth_column(classifier_kind)
@@ -316,7 +432,37 @@ def build_baseline(
             classifier_kind=classifier_kind,
             generator=generator,
         )
+    if baseline_kind == "random_chunk_llm":
+        generator = build_llm_generator(
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+        )
+        qdrant_db = build_qdrant_db(settings)
+        return RandomChunkLLMBaseline(
+            classifier_kind=classifier_kind,
+            generator=generator,
+            qdrant_db=qdrant_db,
+            k=settings.random_chunk_k,
+            seed=settings.random_chunk_seed,
+        )
     raise ValueError(f"Unknown baseline_kind={baseline_kind!r}.")
+
+
+def build_qdrant_db(settings: Settings):
+    """Instantiate the Qdrant-backed vector store used by the random-chunk LLM baseline.
+
+    Defaults pull from AppSettings via the environment, and can be overridden
+    through Settings (set on the command line). Connection settings come from
+    the same .env that the real RAG pipeline uses, so the chunks the baseline
+    samples are exactly those the retriever sees in production runs.
+    """
+    from episcope.vectordb.qdrant import QdrantDB
+
+    return QdrantDB(
+        collection=settings.qdrant_collection,
+        url=settings.qdrant_url,
+    )
 
 
 def task_label_count(classifier_kind: str) -> int:
@@ -614,6 +760,8 @@ def run_once(
             records=fit_records,
             ground_truth_records=ground_truth_records,
         )
+        if hasattr(baseline, "set_repeat_idx"):
+            baseline.set_repeat_idx(repeat_idx)
 
     checkpoint = (
         pd.read_csv(paths["checkpoint_tsv"], sep="\t")
@@ -635,6 +783,11 @@ def run_once(
             print(f"[{idx}/{total}] skip {paper_id} (checkpoint)")
             continue
         skip_reason = record.get("_skip_reason")
+        if skip_reason and not getattr(baseline, "skip_if_no_text", True):
+            # Baseline declared it can work without body text — only skip if
+            # there is genuinely no metadata object to work from.
+            if record.get("_metadata") is not None:
+                skip_reason = None
         if skip_reason:
             print(f"[{idx}/{total}] skip {paper_id} ({skip_reason})")
             rows.append(
@@ -752,14 +905,18 @@ def expand_arg_values(values: Iterable[str] | None, *, all_values: tuple[str, ..
             out.extend(all_values)
         elif value == "all_default":
             out.extend(DEFAULT_BASELINES)
-        elif value == "all_topics":
-            out.extend(TOPIC_MODEL_BASELINES)
+        elif value == "all_zero_shot":
+            out.extend(ZERO_SHOT_BASELINES)
+        elif value in {"all_unsupervised", "all_topics"}:
+            out.extend(UNSUPERVISED_TOPIC_BASELINES)
         elif value == "all_supervised":
             out.extend(SUPERVISED_BASELINES)
         elif value == "all_supervised_classifiers":
             out.extend(SUPERVISED_CLASSIFIER_BASELINES)
         elif value == "all_supervised_topics":
             out.extend(SUPERVISED_TOPIC_BASELINES)
+        elif value == "all_supervised_frozen":
+            out.extend(SUPERVISED_FROZEN_BASELINES)
         else:
             out.append(normalize_baseline_kind(value))
     deduped = []
@@ -811,6 +968,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prototype-multilabel-ratio", type=float, default=None)
     parser.add_argument("--prototype-min-score", type=float, default=None)
+    parser.add_argument(
+        "--prototype-embedding-model",
+        default=None,
+        help=(
+            "sentence-transformers model name for the prototype baseline. "
+            "When set, uses dense embeddings instead of TF-IDF (e.g. "
+            "'all-MiniLM-L6-v2' or 'allenai-specter')."
+        ),
+    )
     parser.add_argument("--topic-n-topics", type=int, default=None)
     parser.add_argument(
         "--topic-k-multiplier",
@@ -891,6 +1057,7 @@ def merge_settings(args: argparse.Namespace) -> Settings:
         "majority_fit_mode",
         "prototype_multilabel_ratio",
         "prototype_min_score",
+        "prototype_embedding_model",
         "topic_n_topics",
         "topic_max_features",
         "topic_min_df",

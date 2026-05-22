@@ -45,8 +45,8 @@ services:
 
   ui:
     build:
-      context: ./ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ui/Dockerfile
     container_name: episcope-ui
     env_file:
       - .env

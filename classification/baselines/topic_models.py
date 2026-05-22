@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import contextlib
-import io
 import logging
 import re
 from collections import Counter, defaultdict
@@ -31,10 +29,29 @@ from classification.baselines.common import (
 )
 
 SKLEARN_TOPIC_BASELINES = {"lsa", "plsa", "lda", "nmf"}
-BERTOPIC_BASELINES = {"bertopic", "bertopic_guided", "bertopic_semisupervised"}
-TOP2VEC_BASELINES = {"top2vec", "top2vec_contextual"}
-OPTIONAL_TOPIC_BASELINES = BERTOPIC_BASELINES | TOP2VEC_BASELINES
+
+BERTOPIC_UNSUPERVISED_BASELINES = {"bertopic"}
+BERTOPIC_ZERO_SHOT_BASELINES = {"bertopic_guided"}
+BERTOPIC_SEMISUPERVISED_BASELINES = {"bertopic_semisupervised"}
+BERTOPIC_BASELINES = (
+    BERTOPIC_UNSUPERVISED_BASELINES
+    | BERTOPIC_ZERO_SHOT_BASELINES
+    | BERTOPIC_SEMISUPERVISED_BASELINES
+)
+
+OPTIONAL_TOPIC_BASELINES = BERTOPIC_BASELINES
+
+# All methods dispatched to TopicModelBaseline — the implementation boundary.
 TOPIC_MODEL_BASELINES = (*sorted(SKLEARN_TOPIC_BASELINES), *sorted(OPTIONAL_TOPIC_BASELINES))
+
+# Semantic family groupings (used by runners).
+UNSUPERVISED_TOPIC_BASELINES: tuple[str, ...] = (
+    *sorted(SKLEARN_TOPIC_BASELINES),
+    *sorted(BERTOPIC_UNSUPERVISED_BASELINES),
+)
+ZERO_SHOT_TOPIC_BASELINES: tuple[str, ...] = (
+    *sorted(BERTOPIC_ZERO_SHOT_BASELINES),
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,67 +239,6 @@ def _build_bertopic_model(
     )
 
 
-def _top2vec_kwargs(*, n_documents: int, n_topics: int) -> dict[str, Any]:
-    n_neighbors = max(2, min(10, max(2, n_documents - 1)))
-    n_components = max(2, min(5, max(2, n_documents - 2)))
-    min_cluster_size = max(2, min(10, max(2, n_documents // max(2, n_topics))))
-    return {
-        "embedding_model": "doc2vec",
-        "speed": "fast-learn",
-        "workers": 1,
-        "index_topics": False,
-        "verbose": False,
-        "umap_args": {
-            "n_neighbors": n_neighbors,
-            "n_components": n_components,
-            "min_dist": 0.0,
-            "metric": "cosine",
-            "low_memory": True,
-        },
-        "hdbscan_args": {
-            "min_cluster_size": min_cluster_size,
-            "metric": "euclidean",
-            "cluster_selection_method": "eom",
-            "prediction_data": False,
-            "core_dist_n_jobs": 1,
-        },
-    }
-
-
-def _build_top2vec_model(
-    *,
-    documents: Sequence[str],
-    n_topics: int,
-    contextual: bool = False,
-):
-    from top2vec import Top2Vec
-
-    logging.getLogger("top2vec").setLevel(logging.WARNING)
-    kwargs = _top2vec_kwargs(n_documents=len(documents), n_topics=n_topics)
-    if contextual:
-        kwargs.update(
-            {
-                "embedding_model": "all-MiniLM-L6-v2",
-                "contextual_top2vec": True,
-            }
-        )
-    with contextlib.redirect_stderr(io.StringIO()):
-        try:
-            return Top2Vec(documents=list(documents), **kwargs)
-        except TypeError as exc:
-            logger.debug(
-                "Top2Vec rejected lightweight kwargs, retrying with minimal kwargs: %s",
-                exc,
-            )
-            fallback = {
-                "embedding_model": "all-MiniLM-L6-v2" if contextual else "doc2vec",
-                "speed": "fast-learn",
-                "workers": 1,
-            }
-            if contextual:
-                fallback["contextual_top2vec"] = True
-            return Top2Vec(documents=list(documents), **fallback)
-
 
 class TopicModelBaseline:
     """Unsupervised topic model followed by topic-to-label majority mapping."""
@@ -378,8 +334,6 @@ class TopicModelBaseline:
                 "topic_model_family": (
                     "bertopic"
                     if self.model_kind in BERTOPIC_BASELINES
-                    else "top2vec"
-                    if self.model_kind in TOP2VEC_BASELINES
                     else self.model_kind
                 ),
                 "topic_model_mode": self._topic_model_mode,
@@ -403,8 +357,6 @@ class TopicModelBaseline:
             doc_topic, terms = self._fit_nmf()
         elif self.model_kind in BERTOPIC_BASELINES:
             doc_topic, terms = self._fit_bertopic()
-        elif self.model_kind in TOP2VEC_BASELINES:
-            doc_topic, terms = self._fit_top2vec()
         else:
             raise ValueError(
                 f"Unknown topic baseline {self.model_kind!r}. "
@@ -500,8 +452,6 @@ class TopicModelBaseline:
             return "guided"
         if self.model_kind == "bertopic_semisupervised":
             return "semi_supervised"
-        if self.model_kind == "top2vec_contextual":
-            return "contextual"
         return "unsupervised"
 
     def _semisupervised_targets(self) -> tuple[list[int], dict[int, tuple[str, ...]]]:
@@ -574,44 +524,6 @@ class TopicModelBaseline:
             ]
             for topic in topic_index
         }
-        return doc_topic, terms
-
-    def _fit_top2vec(self) -> tuple[np.ndarray, dict[int, list[str]]]:
-        try:
-            from top2vec import Top2Vec
-        except ImportError as exc:
-            raise RuntimeError(
-                "Top2Vec baseline requires the optional 'top2vec' package. "
-                "Install it in this environment before running --baseline-kind top2vec."
-            ) from exc
-
-        corpus = _safe_corpus(self.records)
-        model = _build_top2vec_model(
-            documents=corpus,
-            n_topics=self.n_topics,
-            contextual=self.model_kind == "top2vec_contextual",
-        )
-        topic_nums, topic_scores, *_ = model.get_documents_topics(
-            doc_ids=list(range(len(corpus))),
-            num_topics=1,
-        )
-        topic_nums = np.asarray(topic_nums).reshape(-1)
-        topic_scores = np.asarray(topic_scores).reshape(-1)
-        topic_ids = sorted({int(topic) for topic in topic_nums})
-        topic_index = {topic: idx for idx, topic in enumerate(topic_ids)}
-        doc_topic = np.zeros((len(corpus), len(topic_ids)), dtype=float)
-        for row_idx, (topic, score) in enumerate(zip(topic_nums, topic_scores)):
-            doc_topic[row_idx, topic_index[int(topic)]] = float(score)
-        terms = {}
-        try:
-            topic_words, _, topic_ids_out = model.get_topics()
-            for words, topic_id in zip(topic_words, topic_ids_out):
-                if int(topic_id) in topic_index:
-                    terms[topic_index[int(topic_id)]] = [
-                        str(word) for word in words[:10]
-                    ]
-        except Exception:
-            terms = {}
         return doc_topic, terms
 
     def _count_matrix(self) -> tuple[Any, np.ndarray]:

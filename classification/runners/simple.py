@@ -1,15 +1,4 @@
-from __future__ import annotations
+"""Legacy entry point — use zero_shot.py instead."""
+from .zero_shot import main
 
-from collections.abc import Sequence
-
-from .families import run_family
-
-DESCRIPTION = "Run simple majority and prototype-similarity classification baselines."
-
-
-def main(argv: Sequence[str] | None = None) -> None:
-    run_family(argv, family="simple", description=DESCRIPTION)
-
-
-if __name__ == "__main__":
-    main()
+__all__ = ["main"]

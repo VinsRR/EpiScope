@@ -11,15 +11,13 @@ Evidence per input context to preserve traceability. The Evidence entries
 record the model/prompt used but keep the snippet as the raw context text
 (rather than LLM output), so downstream code can map answer → sources.
 
-Implements the :class:`AbstractGenerator` interface.
+Implements the :class:`Generator` interface.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence, Optional, Mapping, Callable
-import time
-
-from episcope.rag.interfaces import AbstractGenerator
+from episcope.rag.generation.base import Generator
 from episcope.rag.provenance import Provenance, Evidence
 from episcope.clients import LLMClient, OllamaClient
 
@@ -69,7 +67,7 @@ def build_messages_from_contexts(
     ]
 
 
-class LLMGenerator(AbstractGenerator):
+class LLMGenerator(Generator):
     """
     Use an LLM to generate an answer from retrieved contexts.
 
@@ -126,7 +124,7 @@ class LLMGenerator(AbstractGenerator):
 
     def generate(
         self,
-        contexts: Sequence[Dict[str, Any]] | Sequence[Any],
+        contexts: Sequence[Any],
         *,
         question: Optional[str] = None,
         extra_messages: Optional[Sequence[Mapping[str, str]]] = None,
@@ -147,7 +145,6 @@ class LLMGenerator(AbstractGenerator):
             messages.extend(extra_messages)
 
         # 2) Call provider
-        started = time.time()
         answer = self.client.chat(
             messages,
             model=self.model,
@@ -155,7 +152,6 @@ class LLMGenerator(AbstractGenerator):
             max_tokens=self.max_tokens,
             **kwargs,
         )
-        latency_s = time.time() - started  # kept local; attach if you log metrics
 
         # 3) Build evidences (one per context)
         evidences: List[Evidence] = []

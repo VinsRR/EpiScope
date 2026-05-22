@@ -11,11 +11,42 @@ import scripts.run_classification_baselines as base
 
 
 FAMILY_BASELINES = {
+    "zero_shot": ("majority", "prototype_similarity", "nli_zero_shot", *base.ZERO_SHOT_TOPIC_BASELINES),
+    "unsupervised": base.UNSUPERVISED_TOPIC_BASELINES,
+    "supervised": (*base.SUPERVISED_BASELINES, *base.BERTOPIC_SEMISUPERVISED_BASELINES),
+    "frozen": base.SUPERVISED_FROZEN_BASELINES,
+    "llm": ("metadata_llm", "random_chunk_llm"),
+    # Legacy aliases kept so old invocations don't break.
     "simple": ("majority", "prototype_similarity"),
     "topic": base.TOPIC_MODEL_BASELINES,
-    "supervised": base.SUPERVISED_BASELINES,
-    "llm": ("metadata_llm",),
 }
+
+
+def _add_frozen_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--supervised-frozen-model",
+        default=None,
+        help="HF model id for the frozen encoder (e.g. allenai/scibert_scivocab_uncased).",
+    )
+    parser.add_argument(
+        "--supervised-frozen-text-source",
+        choices=["metadata", "full_text"],
+        default=None,
+        help="Encode 'title [SEP] abstract' (metadata) or the full paper text in chunks (full_text).",
+    )
+    parser.add_argument(
+        "--supervised-frozen-pooling",
+        choices=["mean", "cls"],
+        default=None,
+    )
+    parser.add_argument("--supervised-frozen-max-length", type=int, default=None)
+    parser.add_argument("--supervised-frozen-batch-size", type=int, default=None)
+    parser.add_argument(
+        "--supervised-frozen-no-normalize",
+        action="store_true",
+        help="Disable per-fold StandardScaler on the embeddings.",
+    )
+    parser.add_argument("--supervised-frozen-cache-dir", default=None)
 
 
 def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
@@ -56,11 +87,50 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int, default=None)
     parser.add_argument("--checkpoint-every", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
-    if family == "simple":
+    if family in ("zero_shot", "simple"):
         parser.add_argument("--majority-fit-mode", choices=["leave_one_out", "all"], default=None)
         parser.add_argument("--prototype-multilabel-ratio", type=float, default=None)
         parser.add_argument("--prototype-min-score", type=float, default=None)
-    if family == "topic":
+        parser.add_argument(
+            "--prototype-embedding-model",
+            default=None,
+            help=(
+                "sentence-transformers model name for the prototype baseline. "
+                "When set, uses dense embeddings instead of TF-IDF."
+            ),
+        )
+        parser.add_argument(
+            "--nli-model",
+            default=None,
+            help="HF NLI checkpoint for the nli_zero_shot baseline.",
+        )
+        parser.add_argument(
+            "--nli-hypothesis-source",
+            choices=["label_description", "label_name"],
+            default=None,
+            help=(
+                "What text to use as the NLI hypothesis. 'label_description' "
+                "(default) uses the template paragraphs from the classifier "
+                "config (same label-information access as EpiScope's prompt); "
+                "'label_name' uses the canonical Yin-et-al template."
+            ),
+        )
+        parser.add_argument(
+            "--nli-hypothesis-template",
+            default=None,
+            help="Template used when --nli-hypothesis-source=label_name. Must contain {label}.",
+        )
+        parser.add_argument(
+            "--nli-threshold",
+            type=float,
+            default=None,
+            help="P(entailment) threshold for multi-label NLI selection (default 0.5).",
+        )
+        parser.add_argument("--nli-max-length", type=int, default=None)
+        parser.add_argument("--nli-batch-size", type=int, default=None)
+        parser.add_argument("--nli-cache-dir", default=None)
+        add_topic_args(parser, include_k_sweep=True)
+    if family in ("unsupervised", "topic"):
         add_topic_args(parser, include_k_sweep=True)
     if family == "supervised":
         add_topic_args(parser, include_k_sweep=False)
@@ -72,6 +142,18 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
         )
         parser.add_argument("--supervised-cv-folds", type=int, default=None)
         parser.add_argument("--supervised-threshold", type=float, default=None)
+        # Frozen transformer embedding baselines
+        _add_frozen_args(parser)
+    if family == "frozen":
+        parser.add_argument(
+            "--supervised-cv-mode",
+            action="append",
+            choices=["kfold", "leave_one_out"],
+            default=None,
+        )
+        parser.add_argument("--supervised-cv-folds", type=int, default=None)
+        parser.add_argument("--supervised-threshold", type=float, default=None)
+        _add_frozen_args(parser)
     if family == "llm":
         parser.add_argument(
             "--llm-provider",
@@ -80,6 +162,28 @@ def family_parser(*, family: str, description: str) -> argparse.ArgumentParser:
         )
         parser.add_argument("--llm-model", default=None)
         parser.add_argument("--llm-temperature", type=float, default=None)
+        parser.add_argument(
+            "--random-chunk-k",
+            type=int,
+            default=None,
+            help="Number of body chunks to sample for --baseline-kind random_chunk_llm.",
+        )
+        parser.add_argument(
+            "--random-chunk-seed",
+            type=int,
+            default=None,
+            help="Base seed for per-paper random chunk sampling.",
+        )
+        parser.add_argument(
+            "--qdrant-url",
+            default=None,
+            help="Qdrant URL (defaults to env QDRANT_URL).",
+        )
+        parser.add_argument(
+            "--qdrant-collection",
+            default=None,
+            help="Qdrant collection (defaults to env QDRANT_COLLECTION).",
+        )
     return parser
 
 
@@ -101,11 +205,15 @@ def settings_from_family_args(
     family: str,
 ) -> base.Settings:
     app_settings = AppSettings.from_env()
+    canonical_family = {"simple": "zero_shot", "topic": "unsupervised"}.get(family, family)
     settings = base.Settings(
         strategy_name=app_settings.strategy_name,
         mongo_uri=app_settings.mongo_uri,
         mongo_db_name=app_settings.mongo_db_name,
+        qdrant_url=app_settings.qdrant_url,
+        qdrant_collection=app_settings.qdrant_collection,
         baseline_kinds=FAMILY_BASELINES[family],
+        base_output_dir=f"outputs/baselines/{canonical_family}",
     )
     data: dict[str, Any] = dataclasses.asdict(settings)
     for field in (
@@ -123,6 +231,7 @@ def settings_from_family_args(
         "majority_fit_mode",
         "prototype_multilabel_ratio",
         "prototype_min_score",
+        "prototype_embedding_model",
         "topic_n_topics",
         "topic_max_features",
         "topic_min_df",
@@ -131,9 +240,26 @@ def settings_from_family_args(
         "bertopic_semisupervised_label_fraction",
         "supervised_cv_folds",
         "supervised_threshold",
+        "supervised_frozen_model",
+        "supervised_frozen_text_source",
+        "supervised_frozen_pooling",
+        "supervised_frozen_max_length",
+        "supervised_frozen_batch_size",
+        "supervised_frozen_cache_dir",
         "llm_provider",
         "llm_model",
         "llm_temperature",
+        "random_chunk_k",
+        "random_chunk_seed",
+        "qdrant_url",
+        "qdrant_collection",
+        "nli_model",
+        "nli_hypothesis_source",
+        "nli_hypothesis_template",
+        "nli_threshold",
+        "nli_max_length",
+        "nli_batch_size",
+        "nli_cache_dir",
     ):
         if hasattr(args, field):
             value = getattr(args, field)
@@ -153,6 +279,8 @@ def settings_from_family_args(
         data["topic_k_values"] = ()
     if hasattr(args, "supervised_cv_mode") and args.supervised_cv_mode is not None:
         data["supervised_cv_modes"] = tuple(args.supervised_cv_mode)
+    if getattr(args, "supervised_frozen_no_normalize", False):
+        data["supervised_frozen_normalize"] = False
     if args.overwrite:
         data["overwrite"] = True
     data["classifier_kinds"] = base.expand_arg_values(

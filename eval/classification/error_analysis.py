@@ -8,7 +8,7 @@ import pandas as pd
 from eval.common.io import read_ground_truth, read_results_tsv
 from eval.common.labels import label_set_key, parse_label_set
 from eval.common.paths import discover_result_files, parse_result_path
-from eval.common.tasks import TASK_TO_GT_COLUMN, ground_truth_column
+from eval.common.tasks import CANONICAL_TASK_NAMES, TASK_TO_GT_COLUMN, ground_truth_column
 
 
 SKIPPED_CLASSIFICATION = "__SKIPPED__"
@@ -37,7 +37,13 @@ def load_merged_predictions(
         var_name="gt_col",
         value_name="gt_raw",
     )
-    inverse = {column: task for task, column in TASK_TO_GT_COLUMN.items() if "-" in task}
+    # Build column→canonical-task-name mapping without duplicates.
+    # We must include "geo" (no hyphen), so we deduplicate by canonical name.
+    inverse: dict[str, str] = {}
+    for k, col in TASK_TO_GT_COLUMN.items():
+        canonical = CANONICAL_TASK_NAMES.get(k, k)
+        if col not in inverse:
+            inverse[col] = canonical
     gt_long["task"] = gt_long["gt_col"].map(inverse)
     gt_long["gt_set"] = gt_long["gt_raw"].map(parse_label_set)
     gt_long = gt_long.drop(columns=["gt_col", "gt_raw"])
@@ -142,7 +148,7 @@ def containment_pro_vs_flash(
     subset = merged[merged["temperature"] == temperature].copy()
 
     rows = []
-    for task in sorted({task for task in TASK_TO_GT_COLUMN if "-" in task}):
+    for task in sorted(set(CANONICAL_TASK_NAMES.values())):
         task_df = subset[subset["task"] == task]
 
         def ever_wrong_set(model_name: str) -> set[str]:
@@ -248,22 +254,33 @@ def per_run_metrics(
         if gt_col not in gt.columns:
             raise KeyError(f"Ground-truth file is missing expected column {gt_col!r}")
 
-        gt_dict = gt.set_index("paper_id")[gt_col].astype(str).to_dict()
-        pred_dict = eval_df.set_index("paper_id")["classification"].astype(str).to_dict()
+        # Parse label strings to frozensets before computing metrics so that
+        # _normalize_label_set() in metrics.py iterates over the elements
+        # directly instead of splitting a Python-list string on ",", which
+        # produces bracket-contaminated tokens and undercounts multi-label
+        # overlap (e.g. "['A', 'B']".split(",") → {"['A'", "'B']"} not {"A","B"}).
+        gt_dict = {
+            pid: parse_label_set(val)
+            for pid, val in gt.set_index("paper_id")[gt_col].items()
+        }
+        pred_dict = {
+            pid: parse_label_set(val)
+            for pid, val in eval_df.set_index("paper_id")["classification"].items()
+        }
 
         if pred_dict:
-            prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro", sep=",")
-            prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro", sep=",")
+            prf_micro = multilabel_prf(gt_dict, pred_dict, average="micro")
+            prf_macro = multilabel_prf(gt_dict, pred_dict, average="macro")
             metrics = {
-                "jaccard_samples": jaccard_samples(gt_dict, pred_dict, sep=","),
+                "jaccard_samples": jaccard_samples(gt_dict, pred_dict),
                 "micro_precision": prf_micro["precision"],
                 "micro_recall": prf_micro["recall"],
                 "micro_f1": prf_micro["f1"],
                 "macro_precision": prf_macro["precision"],
                 "macro_recall": prf_macro["recall"],
                 "macro_f1": prf_macro["f1"],
-                "hamming_loss": multilabel_hamming_loss(gt_dict, pred_dict, sep=","),
-                "subset_accuracy": subset_accuracy(gt_dict, pred_dict, sep=","),
+                "hamming_loss": multilabel_hamming_loss(gt_dict, pred_dict),
+                "subset_accuracy": subset_accuracy(gt_dict, pred_dict),
             }
         else:
             metrics = {

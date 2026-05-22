@@ -35,6 +35,8 @@ class InMemoryAcademicDB(AcademicDB):
 
     def _load_backup(self) -> None:
         """Load data from the backup file."""
+        if self._backup_file is None:
+            return
         try:
             with open(self._backup_file, "r", encoding="utf-8") as fh:
                 data = json.load(fh)

@@ -4,9 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from episcope.vectordb.faiss import FaissDB
 from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
+
+try:
+    import faiss  # noqa: F401
+
+    from episcope.vectordb.faiss import FaissDB
+except ImportError:
+    FaissDB = None
 
 
 def _point(point_id: str, text: str = "content"):
@@ -17,7 +23,19 @@ def _point(point_id: str, text: str = "content"):
     }
 
 
-@pytest.mark.parametrize("db_cls", [FileDB, FaissDB])
+@pytest.mark.parametrize(
+    "db_cls",
+    [
+        FileDB,
+        pytest.param(
+            FaissDB,
+            marks=pytest.mark.skipif(
+                FaissDB is None,
+                reason="faiss-cpu is not installed in the default package.",
+            ),
+        ),
+    ],
+)
 def test_local_vectordbs_preserve_namespace_after_reload(
     tmp_path: Path,
     db_cls,

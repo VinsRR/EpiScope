@@ -9,7 +9,9 @@ retrieval pipelines.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterable, Sequence, Dict, Optional, Any
+from typing import Iterable, Dict, Optional, Any
+
+from episcope.rag.generation.base import Generator
 
 
 class AbstractIndexer(ABC):
@@ -44,29 +46,5 @@ class AbstractIndexer(ABC):
         """
 
 
-class AbstractGenerator(ABC):
-    """Abstract base class for answer generation.
-
-    Generators combine retrieved contexts with a question to produce
-    an answer and optional provenance metadata.  The answer format
-    should be compatible with both API/CLI outputs and interactive
-    UIs.
-    """
-
-    @abstractmethod
-    def generate(
-        self, question: str, contexts: Sequence[Dict[str, Any]], **kwargs: Any
-    ) -> Any:
-        """Generate an answer given a question and supporting contexts.
-
-        Args:
-            question: The question to answer.
-            contexts: A sequence of context dictionaries returned by
-                a retriever.  Each context should at least contain a
-                ``content`` field with the text.
-            **kwargs: Additional parameters (e.g. model hints).
-
-        Returns:
-            Implementation‑specific answer object (e.g. a Provenance
-            instance).
-        """
+class AbstractGenerator(Generator):
+    """Backward-compatible alias for the canonical generation contract."""

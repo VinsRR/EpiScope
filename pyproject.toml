@@ -3,69 +3,53 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "episcope"
+name = "epi-scope"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi",
-    "uvicorn",
     "pydantic",
     "typer",
     "requests",
     "numpy",
-    "scikit-learn",
-    "pandas",
     "python-dotenv",
     "torch",
     "transformers",
     "sentence-transformers",
-    "faiss-cpu",
-    "qdrant-client",
+    "tqdm",
     "unstructured[pdf]",
+    "pypdf",
     "openai",
     "google-genai",
     "rapidfuzz",
     "lxml",
-    "pymongo",
 ]
 
 [project.optional-dependencies]
 ui = [
     "streamlit",
+    "pandas",
+    "requests",
+    "python-dotenv",
 ]
-eval = [
-    "ragas",
-]
-topic-baselines = [
-    "bertopic",
-    "top2vec",
-]
-table-extraction = [
-    "gmft",
-    "pymupdf",
-    "layoutparser",
-    "img2table",
-    "effdet",
+server = [
+    "fastapi",
+    "uvicorn",
+    "qdrant-client",
+    "pymongo",
 ]
 dev = [
-    "pytest",
-]
-all = [
-    "streamlit",
-    "ragas",
-    "bertopic",
-    "top2vec",
-    "gmft",
-    "pymupdf",
-    "layoutparser",
-    "img2table",
-    "effdet",
-    "pytest",
+    "pytest==9.0.3",
+    "ruff==0.15.11",
+    "ty==0.0.35",
+    "tox==4.54.0",
+    "build",
+    "twine",
 ]
 
 [project.scripts]
 episcope = "episcope.episcope:main"
+episcope-ui = "episcope.ui.launcher:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

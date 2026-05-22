@@ -48,8 +48,10 @@ class ClassificationRunner:
         self,
         metadata: PaperMetadata,
         chunks: List[SearchResult],
+        *,
+        expect_no_chunks: bool = False,
     ) -> LLMAttemptResult:
-        if not chunks:
+        if not chunks and not expect_no_chunks:
             logger.warning("No relevant chunks found for classification.")
 
         messages = self.prompt_builder.build_initial_prompt(metadata, chunks)

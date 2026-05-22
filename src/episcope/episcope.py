@@ -30,9 +30,14 @@ from episcope.rag.retrieval.candidates import (
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import PaperMetadata, Reference, StructuredSection
 from episcope.settings import AppSettings
-from episcope.vectordb.faiss import FaissDB
 from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
+from episcope.workspace import (
+    WorkspaceConfig,
+    create_workspace,
+    find_workspace,
+    load_workspace,
+)
 from episcope.workflows import PaperClassifier, PrecisionMiner
 from episcope.workflows.classification import (
     DataAccessibilityClassifierConfig,
@@ -163,6 +168,46 @@ def _ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _optional_workspace(path: Optional[Path]) -> Optional[WorkspaceConfig]:
+    if path is not None:
+        return load_workspace(path)
+    return find_workspace()
+
+
+def _workspace_enum(
+    workspace: Optional[WorkspaceConfig],
+    enum_cls,
+    current,
+    default,
+    workspace_value: str,
+):
+    if workspace is not None and current == default:
+        return enum_cls(workspace_value)
+    return current
+
+
+def _workspace_value(
+    workspace: Optional[WorkspaceConfig],
+    current,
+    default,
+    workspace_value,
+):
+    if workspace is not None and current == default:
+        return workspace_value
+    return current
+
+
+def _workspace_path(
+    workspace: Optional[WorkspaceConfig],
+    current: Path,
+    default: Path,
+    workspace_value: str,
+) -> Path:
+    if workspace is not None and current == default:
+        return workspace.resolve_path(workspace_value)
+    return current
+
+
 def _build_chunker(
     chunker_kind: ChunkerKind,
     *,
@@ -193,6 +238,8 @@ def _build_vector_db(
         index_dir.mkdir(parents=True, exist_ok=True)
         return FileDB(str(index_dir))
     if backend == IndexBackend.faiss:
+        from episcope.vectordb.faiss import FaissDB
+
         index_dir.mkdir(parents=True, exist_ok=True)
         return FaissDB(str(index_dir))
     if backend == IndexBackend.qdrant:
@@ -583,6 +630,43 @@ def _resolve_paper_from_store(
     }
 
 
+@app.command("init")
+def init_workspace(
+    path: Path = typer.Argument(
+        Path("."),
+        help="Workspace directory to create. Defaults to the current directory.",
+    ),
+    name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        help="Human-readable workspace name. Defaults to the directory name.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite an existing episcope.toml in the workspace directory.",
+    ),
+) -> None:
+    """Create an EpiScope workspace with local-first defaults."""
+    try:
+        workspace = create_workspace(path, name=name, force=force)
+    except Exception as exc:
+        _abort(str(exc))
+
+    _echo_json(
+        {
+            "status": "ok",
+            "workspace": str(workspace.root),
+            "config": str(workspace.config_path),
+            "papers_dir": str(workspace.resolve_path(workspace.papers_dir)),
+            "index_dir": str(workspace.resolve_path(workspace.index_dir)),
+            "metadata_path": str(workspace.resolve_path(workspace.metadata_path)),
+            "outputs_dir": str(workspace.resolve_path(workspace.outputs_dir)),
+            "logs_dir": str(workspace.resolve_path(workspace.logs_dir)),
+        }
+    )
+
+
 @app.command("inspect")
 def inspect_document(
     file_path: Path = typer.Argument(..., exists=True, help="Document file to parse."),
@@ -613,6 +697,12 @@ def inspect_document(
 @app.command()
 def index(
     path: Path = typer.Argument(..., exists=True, help="File or directory to index."),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
     paper_id: Optional[str] = typer.Option(
         None,
         "--paper-id",
@@ -697,6 +787,95 @@ def index(
 ) -> None:
     """Index documents into local or Qdrant-backed storage and persist metadata."""
     try:
+        workspace_config = _optional_workspace(workspace)
+        strategy_name = _workspace_value(
+            workspace_config,
+            strategy_name,
+            _DEFAULT_STRATEGY_NAME,
+            workspace_config.strategy_name if workspace_config else None,
+        )
+        loader = _workspace_enum(
+            workspace_config,
+            LoaderKind,
+            loader,
+            LoaderKind.unstructured,
+            workspace_config.loader if workspace_config else "",
+        )
+        index_backend = _workspace_enum(
+            workspace_config,
+            IndexBackend,
+            index_backend,
+            IndexBackend.file,
+            workspace_config.index_backend if workspace_config else "",
+        )
+        index_dir = _workspace_path(
+            workspace_config,
+            index_dir,
+            _DEFAULT_INDEX_DIR,
+            workspace_config.index_dir if workspace_config else "",
+        )
+        metadata_backend = _workspace_enum(
+            workspace_config,
+            MetadataBackend,
+            metadata_backend,
+            MetadataBackend.memory,
+            workspace_config.metadata_backend if workspace_config else "",
+        )
+        db_backup = _workspace_path(
+            workspace_config,
+            db_backup,
+            _DEFAULT_DB_BACKUP,
+            workspace_config.metadata_path if workspace_config else "",
+        )
+        mongo_db_name = _workspace_value(
+            workspace_config,
+            mongo_db_name,
+            _SETTINGS.mongo_db_name,
+            workspace_config.mongo_db_name if workspace_config else None,
+        )
+        qdrant_url = _workspace_value(
+            workspace_config,
+            qdrant_url,
+            _SETTINGS.qdrant_url,
+            workspace_config.qdrant_url if workspace_config else None,
+        )
+        qdrant_collection = _workspace_value(
+            workspace_config,
+            qdrant_collection,
+            _SETTINGS.qdrant_collection,
+            workspace_config.qdrant_collection if workspace_config else None,
+        )
+        embed_model = _workspace_value(
+            workspace_config,
+            embed_model,
+            _DEFAULT_EMBED_MODEL,
+            workspace_config.embed_model if workspace_config else None,
+        )
+        chunker = _workspace_enum(
+            workspace_config,
+            ChunkerKind,
+            chunker,
+            ChunkerKind.paragraph,
+            workspace_config.chunker if workspace_config else "",
+        )
+        min_chunk_size = _workspace_value(
+            workspace_config,
+            min_chunk_size,
+            _DEFAULT_MIN_CHUNK_SIZE,
+            workspace_config.min_chunk_size if workspace_config else None,
+        )
+        chunk_size = _workspace_value(
+            workspace_config,
+            chunk_size,
+            600,
+            workspace_config.chunk_size if workspace_config else None,
+        )
+        chunk_overlap = _workspace_value(
+            workspace_config,
+            chunk_overlap,
+            100,
+            workspace_config.chunk_overlap if workspace_config else None,
+        )
         papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
         embedder = EmbedderFactory.get_embedder(embed_model)
         vectordb = _build_vector_db(
@@ -730,6 +909,7 @@ def index(
     _echo_json(
         {
             "status": "ok",
+            "workspace": str(workspace_config.root) if workspace_config else None,
             "strategy_name": strategy_name,
             "index_backend": index_backend,
             "metadata_backend": metadata_backend,
@@ -741,6 +921,12 @@ def index(
 
 @app.command()
 def papers(
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
     strategy_name: str = typer.Option(
         _DEFAULT_STRATEGY_NAME,
         "--strategy-name",
@@ -770,6 +956,32 @@ def papers(
 ) -> None:
     """List available paper ids in the configured metadata store."""
     try:
+        workspace_config = _optional_workspace(workspace)
+        strategy_name = _workspace_value(
+            workspace_config,
+            strategy_name,
+            _DEFAULT_STRATEGY_NAME,
+            workspace_config.strategy_name if workspace_config else None,
+        )
+        metadata_backend = _workspace_enum(
+            workspace_config,
+            MetadataBackend,
+            metadata_backend,
+            MetadataBackend.memory,
+            workspace_config.metadata_backend if workspace_config else "",
+        )
+        db_backup = _workspace_path(
+            workspace_config,
+            db_backup,
+            _DEFAULT_DB_BACKUP,
+            workspace_config.metadata_path if workspace_config else "",
+        )
+        mongo_db_name = _workspace_value(
+            workspace_config,
+            mongo_db_name,
+            _SETTINGS.mongo_db_name,
+            workspace_config.mongo_db_name if workspace_config else None,
+        )
         academic_db = _build_metadata_db(
             metadata_backend,
             db_backup=db_backup,
@@ -782,6 +994,7 @@ def papers(
 
     _echo_json(
         {
+            "workspace": str(workspace_config.root) if workspace_config else None,
             "strategy_name": strategy_name,
             "metadata_backend": metadata_backend,
             "count": len(doc_ids),
@@ -793,6 +1006,12 @@ def papers(
 @app.command()
 def explore(
     query: str = typer.Argument(..., help="Question or search query."),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
     path: Optional[Path] = typer.Option(
         None,
         "--path",
@@ -864,6 +1083,86 @@ def explore(
     """Retrieve relevant chunks from a transient or previously indexed corpus."""
     tempdir = None
     try:
+        workspace_config = _optional_workspace(workspace)
+        loader = _workspace_enum(
+            workspace_config,
+            LoaderKind,
+            loader,
+            LoaderKind.unstructured,
+            workspace_config.loader if workspace_config else "",
+        )
+        embed_model = _workspace_value(
+            workspace_config,
+            embed_model,
+            _DEFAULT_EMBED_MODEL,
+            workspace_config.embed_model if workspace_config else None,
+        )
+        chunker = _workspace_enum(
+            workspace_config,
+            ChunkerKind,
+            chunker,
+            ChunkerKind.paragraph,
+            workspace_config.chunker if workspace_config else "",
+        )
+        min_chunk_size = _workspace_value(
+            workspace_config,
+            min_chunk_size,
+            _DEFAULT_MIN_CHUNK_SIZE,
+            workspace_config.min_chunk_size if workspace_config else None,
+        )
+        chunk_size = _workspace_value(
+            workspace_config,
+            chunk_size,
+            600,
+            workspace_config.chunk_size if workspace_config else None,
+        )
+        chunk_overlap = _workspace_value(
+            workspace_config,
+            chunk_overlap,
+            100,
+            workspace_config.chunk_overlap if workspace_config else None,
+        )
+        index_backend = _workspace_enum(
+            workspace_config,
+            IndexBackend,
+            index_backend,
+            IndexBackend.file,
+            workspace_config.index_backend if workspace_config else "",
+        )
+        index_dir = _workspace_path(
+            workspace_config,
+            index_dir,
+            _DEFAULT_INDEX_DIR,
+            workspace_config.index_dir if workspace_config else "",
+        )
+        qdrant_url = _workspace_value(
+            workspace_config,
+            qdrant_url,
+            _SETTINGS.qdrant_url,
+            workspace_config.qdrant_url if workspace_config else None,
+        )
+        qdrant_collection = _workspace_value(
+            workspace_config,
+            qdrant_collection,
+            _SETTINGS.qdrant_collection,
+            workspace_config.qdrant_collection if workspace_config else None,
+        )
+        retrieval_mode = _workspace_enum(
+            workspace_config,
+            RetrievalMode,
+            retrieval_mode,
+            RetrievalMode.dense_only,
+            workspace_config.retrieval_mode if workspace_config else "",
+        )
+        llm_provider = _workspace_enum(
+            workspace_config,
+            LLMProvider,
+            llm_provider,
+            LLMProvider.nollm,
+            workspace_config.llm_provider if workspace_config else "",
+        )
+        if workspace_config is not None and llm_model is None:
+            llm_model = workspace_config.llm_model
         if path is not None:
             if retrieval_mode != RetrievalMode.dense_only:
                 raise ValueError(
@@ -904,6 +1203,7 @@ def explore(
         )
         payload: dict[str, Any] = {
             "query": query,
+            "workspace": str(workspace_config.root) if workspace_config else None,
             "paper_id": paper_id,
             "retrieval_mode": retrieval_mode,
             "retrieval_count": len(results),
@@ -929,8 +1229,14 @@ def ask(
     question: str = typer.Argument(
         ..., help="Question to answer from a local document or folder."
     ),
-    path: Path = typer.Option(
-        ...,
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
+    path: Optional[Path] = typer.Option(
+        None,
         "--path",
         "-p",
         exists=True,
@@ -967,15 +1273,80 @@ def ask(
     """Ask a question over local papers without requiring MongoDB or Qdrant."""
     tempdir = None
     try:
-        tempdir, papers, retriever = _transient_retriever_for_path(
-            path,
-            loader_kind=loader,
-            embed_model=embed_model,
-            chunker_kind=chunker,
-            min_chunk_size=min_chunk_size,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+        workspace_config = _optional_workspace(workspace)
+        loader = _workspace_enum(
+            workspace_config,
+            LoaderKind,
+            loader,
+            LoaderKind.unstructured,
+            workspace_config.loader if workspace_config else "",
         )
+        embed_model = _workspace_value(
+            workspace_config,
+            embed_model,
+            _DEFAULT_EMBED_MODEL,
+            workspace_config.embed_model if workspace_config else None,
+        )
+        chunker = _workspace_enum(
+            workspace_config,
+            ChunkerKind,
+            chunker,
+            ChunkerKind.paragraph,
+            workspace_config.chunker if workspace_config else "",
+        )
+        min_chunk_size = _workspace_value(
+            workspace_config,
+            min_chunk_size,
+            _DEFAULT_MIN_CHUNK_SIZE,
+            workspace_config.min_chunk_size if workspace_config else None,
+        )
+        chunk_size = _workspace_value(
+            workspace_config,
+            chunk_size,
+            600,
+            workspace_config.chunk_size if workspace_config else None,
+        )
+        chunk_overlap = _workspace_value(
+            workspace_config,
+            chunk_overlap,
+            100,
+            workspace_config.chunk_overlap if workspace_config else None,
+        )
+        llm_provider = _workspace_enum(
+            workspace_config,
+            LLMProvider,
+            llm_provider,
+            LLMProvider.gemini,
+            workspace_config.llm_provider if workspace_config else "",
+        )
+        if workspace_config is not None and llm_model is None:
+            llm_model = workspace_config.llm_model
+
+        papers: list[LoadedPaper] = []
+        if path is not None:
+            tempdir, papers, retriever = _transient_retriever_for_path(
+                path,
+                loader_kind=loader,
+                embed_model=embed_model,
+                chunker_kind=chunker,
+                min_chunk_size=min_chunk_size,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+        elif workspace_config is not None:
+            vectordb = _build_vector_db(
+                IndexBackend(workspace_config.index_backend),
+                index_dir=workspace_config.resolve_path(workspace_config.index_dir),
+                qdrant_collection=workspace_config.qdrant_collection,
+                qdrant_url=workspace_config.qdrant_url,
+            )
+            retriever = _build_retriever(
+                vectordb,
+                retrieval_mode=RetrievalMode(workspace_config.retrieval_mode),
+            )
+        else:
+            raise ValueError("Provide --path or run inside/pass --workspace.")
+
         results = list(retriever.retrieve(question, top_k=top_k))
         generator = _build_generator(llm_provider, llm_model, temperature)
         provenance = generator.generate(results, question=question)
@@ -991,6 +1362,7 @@ def ask(
         ]
         payload: dict[str, Any] = {
             "question": question,
+            "workspace": str(workspace_config.root) if workspace_config else None,
             "answer": provenance.answer,
             "papers": _paper_summaries(papers),
             "source_count": len(results),
@@ -1009,6 +1381,12 @@ def classify(
     paper_id: Optional[str] = typer.Argument(
         None,
         help="Indexed paper id. Omit this when using --file for transient local classification.",
+    ),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
     ),
     file_path: Optional[Path] = typer.Option(
         None,
@@ -1077,6 +1455,111 @@ def classify(
     """Run a paper classification workflow with local-first defaults."""
     tempdir = None
     try:
+        workspace_config = _optional_workspace(workspace)
+        strategy_name = _workspace_value(
+            workspace_config,
+            strategy_name,
+            _DEFAULT_STRATEGY_NAME,
+            workspace_config.strategy_name if workspace_config else None,
+        )
+        loader = _workspace_enum(
+            workspace_config,
+            LoaderKind,
+            loader,
+            LoaderKind.unstructured,
+            workspace_config.loader if workspace_config else "",
+        )
+        embed_model = _workspace_value(
+            workspace_config,
+            embed_model,
+            _DEFAULT_EMBED_MODEL,
+            workspace_config.embed_model if workspace_config else None,
+        )
+        chunker = _workspace_enum(
+            workspace_config,
+            ChunkerKind,
+            chunker,
+            ChunkerKind.paragraph,
+            workspace_config.chunker if workspace_config else "",
+        )
+        min_chunk_size = _workspace_value(
+            workspace_config,
+            min_chunk_size,
+            _DEFAULT_MIN_CHUNK_SIZE,
+            workspace_config.min_chunk_size if workspace_config else None,
+        )
+        chunk_size = _workspace_value(
+            workspace_config,
+            chunk_size,
+            600,
+            workspace_config.chunk_size if workspace_config else None,
+        )
+        chunk_overlap = _workspace_value(
+            workspace_config,
+            chunk_overlap,
+            100,
+            workspace_config.chunk_overlap if workspace_config else None,
+        )
+        index_backend = _workspace_enum(
+            workspace_config,
+            IndexBackend,
+            index_backend,
+            IndexBackend.file,
+            workspace_config.index_backend if workspace_config else "",
+        )
+        index_dir = _workspace_path(
+            workspace_config,
+            index_dir,
+            _DEFAULT_INDEX_DIR,
+            workspace_config.index_dir if workspace_config else "",
+        )
+        metadata_backend = _workspace_enum(
+            workspace_config,
+            MetadataBackend,
+            metadata_backend,
+            MetadataBackend.memory,
+            workspace_config.metadata_backend if workspace_config else "",
+        )
+        db_backup = _workspace_path(
+            workspace_config,
+            db_backup,
+            _DEFAULT_DB_BACKUP,
+            workspace_config.metadata_path if workspace_config else "",
+        )
+        mongo_db_name = _workspace_value(
+            workspace_config,
+            mongo_db_name,
+            _SETTINGS.mongo_db_name,
+            workspace_config.mongo_db_name if workspace_config else None,
+        )
+        qdrant_url = _workspace_value(
+            workspace_config,
+            qdrant_url,
+            _SETTINGS.qdrant_url,
+            workspace_config.qdrant_url if workspace_config else None,
+        )
+        qdrant_collection = _workspace_value(
+            workspace_config,
+            qdrant_collection,
+            _SETTINGS.qdrant_collection,
+            workspace_config.qdrant_collection if workspace_config else None,
+        )
+        retrieval_mode = _workspace_enum(
+            workspace_config,
+            RetrievalMode,
+            retrieval_mode,
+            RetrievalMode.dense_only,
+            workspace_config.retrieval_mode if workspace_config else "",
+        )
+        llm_provider = _workspace_enum(
+            workspace_config,
+            LLMProvider,
+            llm_provider,
+            LLMProvider.gemini,
+            workspace_config.llm_provider if workspace_config else "",
+        )
+        if workspace_config is not None and llm_model is None:
+            llm_model = workspace_config.llm_model
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -1135,6 +1618,12 @@ def precision_miner(
         None,
         help="Indexed paper id. Omit this when using --file for transient local extraction.",
     ),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
     file_path: Optional[Path] = typer.Option(
         None,
         "--file",
@@ -1188,6 +1677,111 @@ def precision_miner(
     """Run a precision-miner workflow with local-first defaults."""
     tempdir = None
     try:
+        workspace_config = _optional_workspace(workspace)
+        strategy_name = _workspace_value(
+            workspace_config,
+            strategy_name,
+            _DEFAULT_STRATEGY_NAME,
+            workspace_config.strategy_name if workspace_config else None,
+        )
+        loader = _workspace_enum(
+            workspace_config,
+            LoaderKind,
+            loader,
+            LoaderKind.unstructured,
+            workspace_config.loader if workspace_config else "",
+        )
+        embed_model = _workspace_value(
+            workspace_config,
+            embed_model,
+            _DEFAULT_EMBED_MODEL,
+            workspace_config.embed_model if workspace_config else None,
+        )
+        chunker = _workspace_enum(
+            workspace_config,
+            ChunkerKind,
+            chunker,
+            ChunkerKind.paragraph,
+            workspace_config.chunker if workspace_config else "",
+        )
+        min_chunk_size = _workspace_value(
+            workspace_config,
+            min_chunk_size,
+            _DEFAULT_MIN_CHUNK_SIZE,
+            workspace_config.min_chunk_size if workspace_config else None,
+        )
+        chunk_size = _workspace_value(
+            workspace_config,
+            chunk_size,
+            600,
+            workspace_config.chunk_size if workspace_config else None,
+        )
+        chunk_overlap = _workspace_value(
+            workspace_config,
+            chunk_overlap,
+            100,
+            workspace_config.chunk_overlap if workspace_config else None,
+        )
+        index_backend = _workspace_enum(
+            workspace_config,
+            IndexBackend,
+            index_backend,
+            IndexBackend.file,
+            workspace_config.index_backend if workspace_config else "",
+        )
+        index_dir = _workspace_path(
+            workspace_config,
+            index_dir,
+            _DEFAULT_INDEX_DIR,
+            workspace_config.index_dir if workspace_config else "",
+        )
+        metadata_backend = _workspace_enum(
+            workspace_config,
+            MetadataBackend,
+            metadata_backend,
+            MetadataBackend.memory,
+            workspace_config.metadata_backend if workspace_config else "",
+        )
+        db_backup = _workspace_path(
+            workspace_config,
+            db_backup,
+            _DEFAULT_DB_BACKUP,
+            workspace_config.metadata_path if workspace_config else "",
+        )
+        mongo_db_name = _workspace_value(
+            workspace_config,
+            mongo_db_name,
+            _SETTINGS.mongo_db_name,
+            workspace_config.mongo_db_name if workspace_config else None,
+        )
+        qdrant_url = _workspace_value(
+            workspace_config,
+            qdrant_url,
+            _SETTINGS.qdrant_url,
+            workspace_config.qdrant_url if workspace_config else None,
+        )
+        qdrant_collection = _workspace_value(
+            workspace_config,
+            qdrant_collection,
+            _SETTINGS.qdrant_collection,
+            workspace_config.qdrant_collection if workspace_config else None,
+        )
+        retrieval_mode = _workspace_enum(
+            workspace_config,
+            RetrievalMode,
+            retrieval_mode,
+            RetrievalMode.dense_only,
+            workspace_config.retrieval_mode if workspace_config else "",
+        )
+        llm_provider = _workspace_enum(
+            workspace_config,
+            LLMProvider,
+            llm_provider,
+            LLMProvider.gemini,
+            workspace_config.llm_provider if workspace_config else "",
+        )
+        if workspace_config is not None and llm_model is None:
+            llm_model = workspace_config.llm_model
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,

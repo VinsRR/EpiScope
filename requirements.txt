@@ -1,25 +1,20 @@
 fastapi
 uvicorn
 pydantic
-qdrant-client==1.13.3
-unstructured[pdf]
-llama-index
-fastembed
-sentence-transformers
-faiss-cpu
-ollama
-streamlit
 typer
+requests
+numpy
 python-dotenv
-openai # might be required for some LLM providers
-# pymongo is optional; if installed the MongoAcademicDB will use it
-pymongo # if we use mongo, we ll also need MongoDB running, and Atlas or some other way to host it (MongoDB for VS code)
-google-genai # Gemini provider SDK
-# grobid-client-python-0.0.18 # if using Grobid for PDF to TEI conversion
-gmft # for precision miner's table extraction
-pymupdf # for precision miner's table extraction
-rapidfuzz # for precision miner's table extraction
-layoutparser # for precision miner's table extraction
-img2table # for precision miner's table extraction
-effdet # for precision miner's table extraction
-scikit-learn
+torch
+transformers
+sentence-transformers
+tqdm
+faiss-cpu
+qdrant-client
+unstructured[pdf]
+pypdf
+openai
+google-genai
+rapidfuzz
+lxml
+pymongo

@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from episcope.rag.generation.base import Generator
 from episcope.rag.provenance import Provenance
-from episcope.schemas import PaperMetadata, SearchResult
+from episcope.schemas import SearchResult
 from episcope.workflows.classification.config import DataAccessibilityClassifierConfig
 from episcope.workflows.classification.evidence_reranking import GlobalCrossEncoderReranker
 from episcope.workflows.classification.workflow import PaperClassifier

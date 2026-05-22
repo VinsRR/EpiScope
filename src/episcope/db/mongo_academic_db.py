@@ -3,18 +3,20 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from .academic_db import AcademicDB
+from ..settings import env
+
+pymongo: Any
+MongoClient: Any
 try:
     import pymongo
-    from pymongo import MongoClient
+    from pymongo import MongoClient as MongoClient
 
     _PYMONGO_AVAILABLE = True
 except ImportError:
     pymongo = None
     MongoClient = None
     _PYMONGO_AVAILABLE = False
-
-from .academic_db import AcademicDB
-from ..settings import env
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class MongoAcademicDB(AcademicDB):
 
     def __init__(
         self,
-        uri: str = None,
+        uri: Optional[str] = None,
         db_name: str = "AcademicCorpus",
     ) -> None:
         """Initialise a new MongoDB-backed database manager.

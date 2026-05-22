@@ -13,7 +13,6 @@ from sklearn.preprocessing import normalize
 from classification.baselines.common import metadata_from_mapping, metadata_text
 from classification.baselines.topic_models import (
     _build_bertopic_model,
-    _build_top2vec_model,
     _component_terms,
     _effective_n_topics,
     _topic_matrix_from_assignments,
@@ -138,32 +137,6 @@ class TopicExplorer:
                 topic_index[int(topic)]: [word for word, _ in topic_model.get_topic(topic) or []][:10]
                 for topic in topic_index
             }
-            return doc_topic, terms
-        if model_kind in {"top2vec", "top2vec_contextual"}:
-            model = _build_top2vec_model(
-                documents=documents,
-                n_topics=self.n_topics,
-                contextual=model_kind == "top2vec_contextual",
-            )
-            topic_nums, topic_scores, *_ = model.get_documents_topics(
-                doc_ids=list(range(len(documents))),
-                num_topics=1,
-            )
-            topic_nums = np.asarray(topic_nums).reshape(-1)
-            topic_scores = np.asarray(topic_scores).reshape(-1)
-            topic_ids = sorted({int(topic) for topic in topic_nums})
-            topic_index = {topic: idx for idx, topic in enumerate(topic_ids)}
-            doc_topic = np.zeros((len(documents), len(topic_ids)), dtype=float)
-            for row_idx, (topic, score) in enumerate(zip(topic_nums, topic_scores)):
-                doc_topic[row_idx, topic_index[int(topic)]] = float(score)
-            terms: dict[int, list[str]] = {}
-            try:
-                topic_words, _, topic_ids_out = model.get_topics()
-                for words, topic_id in zip(topic_words, topic_ids_out):
-                    if int(topic_id) in topic_index:
-                        terms[topic_index[int(topic_id)]] = [str(word) for word in words[:10]]
-            except Exception:
-                terms = {}
             return doc_topic, terms
         raise ValueError(f"Unknown exploratory topic model {self.model_kind!r}.")
 

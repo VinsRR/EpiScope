@@ -21,7 +21,11 @@ from episcope.workflows.classification.schemas import DataType, GeoRegion
 
 
 class PrototypeSimilarityBaseline:
-    """TF-IDF nearest-prototype classifier using config template paragraphs."""
+    """Nearest-prototype classifier using config template paragraphs.
+
+    Uses TF-IDF by default; pass ``embedding_model`` (a sentence-transformers
+    model name) to encode prototypes and documents with dense embeddings instead.
+    """
 
     name = "prototype_similarity"
 
@@ -33,19 +37,46 @@ class PrototypeSimilarityBaseline:
         multilabel_ratio: float = 0.92,
         min_score: float = 0.03,
         max_labels: int = 3,
+        embedding_model: str | None = None,
     ) -> None:
         self.classifier_kind = classifier_kind
         self.config = classifier_config(classifier_kind)
         self.multilabel_ratio = multilabel_ratio
         self.min_score = min_score
         self.max_labels = max_labels
+        self.embedding_model = embedding_model
         self.prototype_texts: list[str] = []
         self.prototype_labels: list[Any] = []
         self._build_prototypes()
         if not self.prototype_texts:
             self.vectorizer = None
             self.prototype_matrix = None
+            self._encoder = None
             return
+        if embedding_model is not None:
+            self._init_sentence_encoder()
+        else:
+            self._init_tfidf(records)
+
+    def _init_sentence_encoder(self) -> None:
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "The sentence-embedding prototype baseline requires the "
+                "'sentence-transformers' package. Install it before using "
+                "--prototype-embedding-model."
+            ) from exc
+        self.vectorizer = None
+        self._encoder = SentenceTransformer(self.embedding_model)
+        self.prototype_matrix = self._encoder.encode(
+            self.prototype_texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+
+    def _init_tfidf(self, records: Sequence[Mapping[str, object]]) -> None:
+        self._encoder = None
         corpus = [
             metadata_text(metadata_from_mapping(record), record)
             for record in records
@@ -102,8 +133,14 @@ class PrototypeSimilarityBaseline:
             )
             return BaselinePrediction(result=result)
 
-        doc_vector = self.vectorizer.transform([text])
-        similarities = cosine_similarity(doc_vector, self.prototype_matrix)[0]
+        if self._encoder is not None:
+            doc_vec = self._encoder.encode(
+                [text], convert_to_numpy=True, normalize_embeddings=True
+            )
+            similarities = cosine_similarity(doc_vec, self.prototype_matrix)[0]
+        else:
+            doc_vector = self.vectorizer.transform([text])
+            similarities = cosine_similarity(doc_vector, self.prototype_matrix)[0]
         label_scores: dict[Any, float] = {}
         for label, score in zip(self.prototype_labels, similarities):
             label_scores[label] = max(label_scores.get(label, 0.0), float(score))
@@ -135,13 +172,14 @@ class PrototypeSimilarityBaseline:
         probabilities = {
             getattr(label, "name", str(label)): score / total for label, score in ranked
         }
+        method = f"sentence-embedding ({self.embedding_model})" if self._encoder is not None else "TF-IDF"
         result = result_from_labels(
             self.classifier_kind,
             labels,
             confidence=float(confidence),
             reasoning=(
-                "Prototype-similarity baseline: selected labels whose metadata "
-                "TF-IDF representation was closest to label template paragraphs."
+                f"Prototype-similarity baseline ({method}): selected labels whose "
+                "text representation was closest to label template paragraphs."
             ),
             class_probabilities=probabilities,
             extras={

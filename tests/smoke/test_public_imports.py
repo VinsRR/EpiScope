@@ -3,6 +3,7 @@ from __future__ import annotations
 
 def test_public_workflow_imports() -> None:
     from episcope.rag.retrieval import BaseRetriever, Retriever
+    from episcope.services import EpiScopeRuntime, RuntimeConfig
     from episcope.workflows.classification import (
         ClassificationDecision,
         DetailedClassificationResult,
@@ -15,6 +16,8 @@ def test_public_workflow_imports() -> None:
 
     assert BaseRetriever is not None
     assert Retriever is not None
+    assert EpiScopeRuntime is not None
+    assert RuntimeConfig is not None
     assert PaperClassifier is not None
     assert ClassificationDecision is not None
     assert DetailedClassificationResult is not None

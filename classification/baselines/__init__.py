@@ -11,25 +11,48 @@ from .common import (
     stable_hash,
     task_slug,
 )
-from .llm import MetadataOnlyLLMBaseline, build_llm_generator
+from .llm import (
+    MetadataOnlyLLMBaseline,
+    RandomChunkLLMBaseline,
+    build_llm_generator,
+    load_body_chunks_from_qdrant,
+)
 from .majority import MajorityLabelBaseline
+from .nli import (
+    DEFAULT_HYPOTHESIS_TEMPLATE,
+    DEFAULT_NLI_CACHE_DIR,
+    DEFAULT_NLI_MODEL,
+    NLIEntailmentScorer,
+    NLIZeroShotBaseline,
+)
 from .prototype import PrototypeSimilarityBaseline
 from .supervised import (
     SUPERVISED_BASELINES,
     SUPERVISED_BERTOPIC_BASELINES,
     SUPERVISED_CLASSIFIER_BASELINES,
+    SUPERVISED_FROZEN_BASELINES,
     SUPERVISED_TOPIC_BASELINES,
     SupervisedCVBaseline,
     is_supervised_bertopic_baseline,
     is_supervised_baseline,
+    is_supervised_frozen_baseline,
     is_supervised_topic_baseline,
+)
+from .frozen_embeddings import (
+    DEFAULT_FROZEN_CACHE_DIR,
+    DEFAULT_FROZEN_MODEL,
+    FrozenTransformerEmbedder,
+    SupervisedFrozenEmbeddingBaseline,
 )
 from .topic_models import (
     BERTOPIC_BASELINES,
+    BERTOPIC_SEMISUPERVISED_BASELINES,
+    BERTOPIC_ZERO_SHOT_BASELINES,
     OPTIONAL_TOPIC_BASELINES,
     SKLEARN_TOPIC_BASELINES,
-    TOP2VEC_BASELINES,
     TOPIC_MODEL_BASELINES,
+    UNSUPERVISED_TOPIC_BASELINES,
+    ZERO_SHOT_TOPIC_BASELINES,
     TopicModelBaseline,
 )
 
@@ -40,15 +63,30 @@ __all__ = [
     "SupervisedCVBaseline",
     "TopicModelBaseline",
     "MetadataOnlyLLMBaseline",
+    "NLIEntailmentScorer",
+    "NLIZeroShotBaseline",
+    "DEFAULT_HYPOTHESIS_TEMPLATE",
+    "DEFAULT_NLI_CACHE_DIR",
+    "DEFAULT_NLI_MODEL",
+    "RandomChunkLLMBaseline",
+    "load_body_chunks_from_qdrant",
     "OPTIONAL_TOPIC_BASELINES",
     "BERTOPIC_BASELINES",
+    "BERTOPIC_SEMISUPERVISED_BASELINES",
+    "BERTOPIC_ZERO_SHOT_BASELINES",
     "SKLEARN_TOPIC_BASELINES",
     "SUPERVISED_BERTOPIC_BASELINES",
     "SUPERVISED_BASELINES",
     "SUPERVISED_CLASSIFIER_BASELINES",
+    "SUPERVISED_FROZEN_BASELINES",
     "SUPERVISED_TOPIC_BASELINES",
-    "TOP2VEC_BASELINES",
+    "FrozenTransformerEmbedder",
+    "SupervisedFrozenEmbeddingBaseline",
+    "DEFAULT_FROZEN_MODEL",
+    "DEFAULT_FROZEN_CACHE_DIR",
     "TOPIC_MODEL_BASELINES",
+    "UNSUPERVISED_TOPIC_BASELINES",
+    "ZERO_SHOT_TOPIC_BASELINES",
     "build_llm_generator",
     "classifier_config",
     "default_labels",
@@ -62,5 +100,6 @@ __all__ = [
     "task_slug",
     "is_supervised_bertopic_baseline",
     "is_supervised_baseline",
+    "is_supervised_frozen_baseline",
     "is_supervised_topic_baseline",
 ]
