@@ -12,7 +12,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 from eval.common.io import read_ground_truth, read_results_tsv
 from eval.common.paths import discover_result_files, parse_result_path
-from eval.common.tasks import CANONICAL_TASK_NAMES, TASK_TO_GT_COLUMN, ground_truth_column
+from eval.common.tasks import CANONICAL_TASK_NAMES, TASK_TO_GT_COLUMN
 
 
 # ---------------------------------------------------------------------------

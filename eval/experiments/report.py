@@ -28,7 +28,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -40,7 +40,6 @@ import pandas as pd
 
 from classification.experiments.config import (
     ExperimentConfig,
-    SignificancePair,
     load_experiment_config,
 )
 from eval.classification.error_analysis import (

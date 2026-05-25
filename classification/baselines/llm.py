@@ -4,7 +4,7 @@ import hashlib
 import logging
 import random
 from collections.abc import Mapping, Sequence
-from typing import Any, List, Optional
+from typing import Any, List
 
 from episcope.clients import GeminiClient, OllamaClient, OpenAIClient, OpenRouterClient
 from episcope.rag.generation.llm_generator import LLMGenerator

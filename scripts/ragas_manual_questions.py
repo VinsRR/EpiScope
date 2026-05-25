@@ -1,4 +1,6 @@
-import csv, json, random
+import csv
+import json
+import random
 from pathlib import Path
 
 random_seed = 42

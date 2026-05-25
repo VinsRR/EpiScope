@@ -146,7 +146,6 @@ class FrozenTransformerEmbedder:
     # -- pooling ------------------------------------------------------------
 
     def _pool(self, last_hidden_state, attention_mask) -> "np.ndarray":
-        import torch
 
         if self.pooling == "cls":
             pooled = last_hidden_state[:, 0, :]

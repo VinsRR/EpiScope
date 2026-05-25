@@ -15,7 +15,7 @@ the ablation figure without per-experiment edits.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import matplotlib
 

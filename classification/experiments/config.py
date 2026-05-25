@@ -48,7 +48,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from eval.common.config import load_json_config
 
@@ -178,7 +178,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     default_text_scope = str(data.get("default_text_scope") or "full_text")
     default_repeats = int(data.get("default_repeats") or 1)
     random_state = int(data.get("random_state") or 13)
-    output_root = str(data.get("output_root") or f"outputs/baselines")
+    output_root = str(data.get("output_root") or "outputs/baselines")
     eval_root = str(data.get("eval_root") or f"eval_outputs/classification/{name}")
     description = str(data.get("description") or "")
 

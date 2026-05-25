@@ -12,7 +12,7 @@ import hashlib
 import os
 import json
 import inspect
-from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Tuple, Union
+from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Tuple
 from dataclasses import dataclass, field
 
 import requests

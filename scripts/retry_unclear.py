@@ -667,7 +667,6 @@ def main() -> None:
 
     # Group TSVs by their run directory so we only build the classifier once
     # per unique (run_dir, classifier_kind) combination.
-    from itertools import groupby
 
     tsv_by_run: Dict[Path, List[Path]] = {}
     for tsv in tsv_files:
@@ -691,8 +690,8 @@ def main() -> None:
         print(f"Model    : {run_settings.llm_model}  T={run_settings.llm_temperature}  (source: {model_source})")
         if not meta_found:
             print(
-                f"  [WARN] No checkpoint_meta_*.json found — model name inferred from "
-                f"Settings default or --llm-model override. Pass --llm-model if incorrect."
+                "  [WARN] No checkpoint_meta_*.json found — model name inferred from "
+                "Settings default or --llm-model override. Pass --llm-model if incorrect."
             )
         print(f"Files    : {[p.name for p in run_tsvs]}")
         print(f"{'='*70}")

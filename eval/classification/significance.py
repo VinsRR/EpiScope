@@ -23,7 +23,7 @@ existing classification eval pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd

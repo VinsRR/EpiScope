@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--out-dir",
-        default="eval_outputs/classification",
+        default="eval_outputs/classification_baselines",
         help="Directory where evaluation CSVs will be written.",
     )
     parser.add_argument(

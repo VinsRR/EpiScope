@@ -37,7 +37,6 @@ for candidate in (ROOT, SRC):
         sys.path.insert(0, str(candidate))
 
 from classification.baselines import (
-    BERTOPIC_SEMISUPERVISED_BASELINES,
     DEFAULT_HYPOTHESIS_TEMPLATE,
     DEFAULT_NLI_CACHE_DIR,
     DEFAULT_NLI_MODEL,
