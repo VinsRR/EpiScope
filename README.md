@@ -5,7 +5,7 @@ EpiScope is a Python package for retrieval-backed analysis of scientific papers,
 Today, the codebase is centered around three main entry points:
 
 - a FastAPI backend in `src/episcope/api.py`
-- a Streamlit UI in `ui/streamlit_app.py`
+- a Streamlit UI in `src/episcope/ui/streamlit_app.py`
 - reusable Python workflows under `src/episcope/workflows`
 
 ## What Is In The Package Today
@@ -85,13 +85,25 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
 Why both files?
 
 - `pyproject.toml` contains the packaging metadata for the installable `episcope` package
-- `requirements.txt` is currently the more complete local runtime/development stack, including API, UI, retrieval, and provider integrations
+- `requirements.txt` is currently the more complete local runtime/development stack, including API, UI, retrieval, provider integrations, and the `unstructured` PDF extras used by the default ingestion path
+
+The PyPI distribution is named `epi-scope`; the Python import package remains
+`episcope`.
+
+Recommended install shapes:
+
+```bash
+pip install epi-scope           # local-first CLI
+pip install "epi-scope[ui]"     # CLI plus packaged Streamlit UI
+pip install "epi-scope[server]" # CLI plus API/Qdrant/Mongo integration
+pip install "epi-scope[dev]"    # development tools
+```
 
 If you only want to build the package from the repository root:
 
@@ -135,6 +147,87 @@ Current provider values supported by the API and UI:
 - `ollama`
 
 The default runtime settings live in `src/episcope/settings.py`.
+
+## Start Here For Epidemiologists
+
+If you want to try EpiScope on a paper without setting up databases, use the CLI path first. It builds a temporary local index for the file or folder you provide, so you do not need MongoDB or Qdrant.
+
+Inspect a document:
+
+```bash
+episcope inspect /path/to/paper.pdf
+```
+
+Ask a question over one paper or a folder of papers:
+
+```bash
+episcope ask "What data sources were used in this study?" --path /path/to/paper.pdf
+```
+
+Run retrieval without generating an answer:
+
+```bash
+episcope explore "What data sources were used?" --path /path/to/paper.pdf
+```
+
+Classify one paper:
+
+```bash
+episcope classify --file /path/to/paper.pdf --classifier-kind data_accessibility
+```
+
+Extract likely data sources:
+
+```bash
+episcope precision-miner --file /path/to/paper.pdf --miner-kind find_data_sources
+```
+
+Local notes:
+
+- local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which does not require a Gemini/OpenAI key
+- answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
+- use the API/UI/Docker path once you have a shared indexed corpus and want multiple users to work against the same backend
+
+For a longer command-by-command walkthrough, see the
+[wiki quickstart](docs/EpiScope.wiki/Local-CLI-Quickstart.md).
+
+## Workspaces
+
+For repeated local work, create an EpiScope workspace. A workspace is a normal
+folder that contains the project config, local metadata store, vector index,
+outputs, and logs.
+
+```bash
+episcope init my-review
+episcope index ./papers --workspace my-review
+episcope papers --workspace my-review
+episcope ask "Which papers mention GenBank?" --workspace my-review
+```
+
+This creates:
+
+```text
+my-review/
+  episcope.toml
+  papers/
+  metadata.json
+  index/
+  outputs/
+  logs/
+```
+
+If you run commands from inside the workspace directory, EpiScope discovers the
+nearest `episcope.toml` automatically:
+
+```bash
+cd my-review
+episcope papers
+episcope ask "Which studies use surveillance data?"
+```
+
+The workspace file stores local paths and defaults. Secrets such as
+`GEMINI_API_KEY`, `OPENAI_API_KEY`, and `MONGO_URI` should stay in your shell
+environment or local `.env`, not in `episcope.toml`.
 
 ## Running The API
 
@@ -192,7 +285,7 @@ Practical runtime notes:
 Start the Streamlit app from the repository root:
 
 ```bash
-streamlit run ui/streamlit_app.py
+episcope-ui
 ```
 
 The current UI includes three tabs:
@@ -220,6 +313,7 @@ This is the simplest setup and the best default for normal local development.
 It starts:
 
 - `qdrant`
+- `grobid`
 - `api`
 - `ui`
 
@@ -232,6 +326,8 @@ docker compose up --build
 Direct local URLs:
 
 - Qdrant: `http://127.0.0.1:6333`
+- GROBID API: `http://127.0.0.1:8070`
+- GROBID admin: `http://127.0.0.1:8071`
 - API: `http://127.0.0.1:8000`
 - UI: `http://127.0.0.1:8501`
 
@@ -248,6 +344,7 @@ This adds Caddy in front of the API and UI.
 It starts:
 
 - `qdrant`
+- `grobid`
 - `api`
 - `ui`
 - `proxy`
@@ -306,13 +403,14 @@ Use this mode when:
 The Docker Compose setup still does not provide:
 
 - MongoDB
-- GROBID
 
 That means:
 
 - `/explore` can work once Qdrant contains indexed data
 - `/classify` and `/precision-miner` still need an external Mongo instance via `MONGO_URI`
-- GROBID-backed PDF parsing still requires a separate GROBID setup if you want that path specifically
+- GROBID-backed ingestion is available out of the box at `http://127.0.0.1:8070`
+- the API container resolves GROBID internally via `GROBID_URL=http://grobid:8070`
+- local CLI usage can point at the same container with `GROBID_URL=http://127.0.0.1:8070` and `--loader grobid`
 
 ### Quick Summary
 
@@ -400,8 +498,8 @@ Useful entry points:
 
 A few parts of the repository are in transition:
 
-- the FastAPI app, Streamlit UI, workflows, and `src/episcope` package structure are the clearest current entry points
-- the `src/episcope/episcope.py` Typer CLI module is still present, but it points at older internal paths and should be treated as legacy until it is refreshed
+- the FastAPI app, Streamlit UI, CLI, workflows, and `src/episcope` package structure are the clearest current entry points
+- the `src/episcope/episcope.py` Typer CLI module is the installed `episcope` command
 - some older docs and notebooks may still reflect pre-flattening or pre-refactor module names
 
 When in doubt, prefer the package modules under `src/episcope/` and the tested imports in `tests/`.
