@@ -19,6 +19,8 @@ private/
 *.faiss
 *.csv
 *.pdf
+!notebooks/pdf_samples/
+!notebooks/pdf_samples/*.pdf
 *.numbers
 *.npy
 *.log
