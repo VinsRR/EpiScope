@@ -78,31 +78,46 @@ Notes:
 
 EpiScope requires Python 3.10+.
 
-For local development, the most reliable setup is:
+EpiScope is not published on PyPI yet. Install it directly from GitHub:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install "epi-scope @ git+https://github.com/VinsRR/EpiScope.git@main"
+```
+
+This installs the distribution named `epi-scope`; the Python import package is
+still named `episcope`:
+
+```bash
+python -c "import episcope; print(episcope.__name__)"
+```
+
+For a reproducible environment, prefer pinning a tag or commit instead of the
+moving `main` branch:
+
+```bash
+python -m pip install "epi-scope @ git+https://github.com/VinsRR/EpiScope.git@<tag-or-commit>"
+```
+
+For local development from a cloned checkout, use an editable install:
+
+```bash
+git clone https://github.com/VinsRR/EpiScope.git
+cd EpiScope
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Why both files?
-
-- `pyproject.toml` contains the packaging metadata for the installable `episcope` package
-- `requirements.txt` is currently the more complete local runtime/development stack, including API, UI, retrieval, provider integrations, and the `unstructured` PDF extras used by the default ingestion path
-
-The PyPI distribution is named `epi-scope`; the Python import package remains
-`episcope`.
-
-Recommended install shapes:
+Optional extras can be installed from either GitHub or a local checkout:
 
 ```bash
-pip install epi-scope           # local-first CLI
-pip install "epi-scope[ui]"     # CLI plus packaged Streamlit UI
-pip install "epi-scope[server]" # CLI plus API/Qdrant/Mongo integration
-pip install "epi-scope[dev]"    # development tools
+python -m pip install "epi-scope[ui] @ git+https://github.com/VinsRR/EpiScope.git@main"
+python -m pip install "epi-scope[server] @ git+https://github.com/VinsRR/EpiScope.git@main"
+python -m pip install "epi-scope[dev] @ git+https://github.com/VinsRR/EpiScope.git@main"
 ```
 
 If you only want to build the package from the repository root:
@@ -496,10 +511,10 @@ Useful entry points:
 
 ## Current Status Notes
 
-A few parts of the repository are in transition:
+A few practical orientation notes:
 
 - the FastAPI app, Streamlit UI, CLI, workflows, and `src/episcope` package structure are the clearest current entry points
 - the `src/episcope/episcope.py` Typer CLI module is the installed `episcope` command
-- some older docs and notebooks may still reflect pre-flattening or pre-refactor module names
+- the `notebooks/` folder contains an ordered learning path for local indexing, PDF ingestion, retrieval, and extraction workflows
 
 When in doubt, prefer the package modules under `src/episcope/` and the tested imports in `tests/`.
