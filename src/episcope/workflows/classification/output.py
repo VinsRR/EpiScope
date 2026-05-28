@@ -38,7 +38,7 @@ class ClassificationTrace:
 
 @dataclass
 class ClassificationTrainingRecord:
-    """Training-oriented artifacts collected during classification."""
+    """Artifacts collected during classification for inspection and evaluation."""
 
     paper_id: str
     result: ClassificationResult
@@ -52,79 +52,6 @@ class ClassificationTrainingRecord:
         if self.gold_label is None or not self.result.classification:
             return None
         return float(self.result.classification == self.gold_label)
-
-    def to_finetune_sample(self) -> Optional[Dict[str, Any]]:
-        if not self.prompt_messages or self.raw_llm_response is None:
-            return None
-        return {
-            "messages": [
-                *self.prompt_messages,
-                {"role": "assistant", "content": self.raw_llm_response},
-            ],
-            "paper_id": self.paper_id,
-            "label": self.result.classification,
-        }
-
-    def to_json_validity_sft_sample(
-        self,
-        *,
-        completion: Optional[str] = None,
-        record_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        target = completion if completion is not None else self.raw_llm_response
-        if not self.prompt_messages or target is None:
-            return None
-        sample = {
-            "messages": [
-                *self.prompt_messages,
-                {"role": "assistant", "content": target},
-            ],
-            "paper_id": self.paper_id,
-        }
-        if record_id is not None:
-            sample["record_id"] = record_id
-        return sample
-
-    def to_classification_core_sft_sample(
-        self,
-        *,
-        completion: Optional[str] = None,
-        record_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        sample = self.to_json_validity_sft_sample(
-            completion=completion, record_id=record_id
-        )
-        if sample is None:
-            return None
-        sample["label"] = self.result.classification
-        return sample
-
-    def to_rl_samples(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "prompt": sample.messages,
-                "completion": sample.completion,
-                "reward": sample.reward,
-                "parsed_ok": sample.parsed_ok,
-                "paper_id": self.paper_id,
-            }
-            for sample in self.all_samples
-            if sample.reward is not None
-        ]
-
-    def to_dpo_pair(self) -> Optional[Dict[str, Any]]:
-        chosen = next((sample for sample in self.all_samples if sample.parsed_ok), None)
-        rejected = next(
-            (sample for sample in self.all_samples if not sample.parsed_ok), None
-        )
-        if not chosen or not rejected:
-            return None
-        return {
-            "prompt": chosen.messages,
-            "chosen": chosen.completion,
-            "rejected": rejected.completion,
-            "paper_id": self.paper_id,
-        }
 
 
 @dataclass

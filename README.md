@@ -20,7 +20,6 @@ The current `src/episcope` package includes:
 - `vectordb/`: vector DB abstractions and Qdrant / FAISS-backed helpers
 - `workflows/classification/`: evidence-backed paper classification workflows
 - `workflows/precision_miner/`: targeted extraction workflows over retrieved evidence
-- `finetuning/`: trace capture, review, repository, and JSONL export utilities for supervised fine-tuning data
 - `settings.py`: environment-driven runtime configuration
 
 The main workflow families currently exposed by the package are:
@@ -53,7 +52,6 @@ EpiScope/
 │       ├── clients.py
 │       ├── settings.py
 │       ├── db/
-│       ├── finetuning/
 │       ├── rag/
 │       ├── schemas/
 │       ├── vectordb/
@@ -476,19 +474,6 @@ For example, classification and precision-miner workflows are typically construc
 - `episcope.rag.generation.llm_generator.LLMGenerator`
 - `episcope.vectordb.qdrant.QdrantDB`
 - `episcope.db.MongoAcademicDB` or `episcope.db.get_academic_db(...)`
-
-## Finetuning Utilities
-
-The `episcope.finetuning` package is now part of the repo and supports a trace-review workflow for classifier outputs.
-
-Key pieces:
-
-- `TrainingCaptureSink`: persist completed classification traces
-- `TrainingRepository`: store and load raw/reviewed records
-- `TraceReviewer`: review captured traces and approve them into buckets
-- `SFTExporter`: export approved records into JSONL training data
-
-This is currently covered by `tests/unit/finetuning/test_capture_review_export.py`.
 
 ## Testing
 

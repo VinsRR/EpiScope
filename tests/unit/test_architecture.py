@@ -69,7 +69,6 @@ def test_schemas_stay_independent_of_runtime_layers() -> None:
         "clients",
         "db",
         "episcope",
-        "finetuning",
         "rag",
         "services",
         "ui",

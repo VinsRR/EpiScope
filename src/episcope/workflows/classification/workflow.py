@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 from episcope.db.academic_db import AcademicDB
 from episcope.rag.generation.base import Generator
@@ -31,10 +31,6 @@ from episcope.rag.provenance import (
     Evidence,
     Provenance,
 )
-
-if TYPE_CHECKING:
-    from episcope.finetuning.capture import TrainingCaptureSink
-
 
 # ---------------------------------------------------------------------------
 # Classifier
@@ -112,7 +108,6 @@ class PaperClassifier(AbstractRAG):
         config: Optional[BaseClassifierConfig] = None,
         academic_db: Optional[AcademicDB] = None,
         evidence_reranker: Optional[EvidenceRerankingStrategy] = None,
-        training_capture_sink: Optional["TrainingCaptureSink"] = None,
     ):
         super().__init__(retriever, generator)
         self.config = config or PaperTypeClassifierConfig()
@@ -132,7 +127,6 @@ class PaperClassifier(AbstractRAG):
             prompt_builder=self.prompt_builder,
             response_parser=self.response_parser,
         )
-        self.training_capture_sink = training_capture_sink
 
     def run(
         self,
@@ -180,11 +174,6 @@ class PaperClassifier(AbstractRAG):
             trace=trace,
             training=training,
         )
-        if self.training_capture_sink is not None:
-            self.training_capture_sink.capture(
-                paper_id=paper_id,
-                detailed_result=detailed_result,
-            )
         return detailed_result
 
     # -------------------------------------------------------------------------

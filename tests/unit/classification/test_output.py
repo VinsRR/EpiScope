@@ -17,7 +17,7 @@ def _result() -> ClassificationResult:
     )
 
 
-def test_training_record_export_helpers_and_reward() -> None:
+def test_training_record_keeps_completion_samples_and_reward() -> None:
     record = ClassificationTrainingRecord(
         paper_id="paper-1",
         result=_result(),
@@ -40,19 +40,14 @@ def test_training_record_export_helpers_and_reward() -> None:
         gold_label=[DataAccessibility.OPEN],
     )
 
-    finetune = record.to_finetune_sample()
-    rl_samples = record.to_rl_samples()
-    dpo_pair = record.to_dpo_pair()
-
     assert record.reward == 1.0
-    assert finetune is not None
-    assert finetune["paper_id"] == "paper-1"
-    assert finetune["messages"][-1]["role"] == "assistant"
-    assert len(rl_samples) == 2
-    assert rl_samples[0]["parsed_ok"] is True
-    assert dpo_pair is not None
-    assert dpo_pair["chosen"] == '{"classification":["A"]}'
-    assert dpo_pair["rejected"] == "not json"
+    assert record.prompt_messages == [
+        {"role": "user", "content": "Classify this paper."}
+    ]
+    assert record.raw_llm_response == '{"classification":["A"]}'
+    assert len(record.all_samples) == 2
+    assert record.all_samples[0].parsed_ok is True
+    assert record.all_samples[1].completion == "not json"
 
 
 def test_training_record_handles_missing_prompt_or_gold_label() -> None:
@@ -62,6 +57,6 @@ def test_training_record_handles_missing_prompt_or_gold_label() -> None:
     )
 
     assert record.reward is None
-    assert record.to_finetune_sample() is None
-    assert record.to_rl_samples() == []
-    assert record.to_dpo_pair() is None
+    assert record.prompt_messages == []
+    assert record.raw_llm_response is None
+    assert record.all_samples == []
