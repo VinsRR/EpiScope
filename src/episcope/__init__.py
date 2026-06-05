@@ -1,6 +1,11 @@
 """Public package surface for EpiScope."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version as _version
+
+try:
+    __version__ = _version("epi-scope")
+except PackageNotFoundError:  # running from a source tree without installation
+    __version__ = "0.0.0+unknown"
 
 from episcope.db import mongo_academic_db, in_memory_academic_db
 from episcope import rag

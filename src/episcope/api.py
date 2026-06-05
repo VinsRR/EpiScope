@@ -6,9 +6,10 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from episcope import __version__
 from episcope.services import EpiScopeRuntime, RuntimeConfig
 
-app = FastAPI(title="EpiScope API", version="0.2.0")
+app = FastAPI(title="EpiScope API", version=__version__)
 
 
 def _json_ready(value: Any) -> Any:

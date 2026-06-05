@@ -61,14 +61,12 @@ EpiScope/
 ├── docs/
 ├── notebooks/
 ├── deploy/
-├── tableref/
 ├── pyproject.toml
 └── README.md
 ```
 
 Notes:
 
-- `tableref/` is a sibling packaged component in the repo, not part of the main `episcope` package.
 - `tests/` contains the active smoke, unit, and integration suites.
 - `docs/` and `notebooks/` contain supporting material, but the source of truth for behavior is the code in `src/episcope/`.
 
@@ -202,7 +200,7 @@ Local notes:
 - use the API/UI/Docker path once you have a shared indexed corpus and want multiple users to work against the same backend
 
 For a longer command-by-command walkthrough, see the
-[wiki quickstart](docs/EpiScope.wiki/Local-CLI-Quickstart.md).
+[wiki quickstart](https://github.com/VinsRR/EpiScope/wiki/Local-CLI-Quickstart).
 
 ## Workspaces
 
@@ -317,7 +315,7 @@ The UI talks to the FastAPI backend and exposes the same main runtime controls:
 
 ## Running With Docker Compose
 
-The root [docker-compose.yml](/Users/vins/Documents/Projects/EpiScope/docker-compose.yml) supports three practical modes.
+The root [docker-compose.yml](docker-compose.yml) supports three practical modes.
 
 ### 1. Local Dev Mode
 
@@ -492,7 +490,7 @@ PYTHONPATH=src pytest -q
 Useful entry points:
 
 - `tests/smoke/test_public_imports.py`
-- `tests/TESTING_GUIDE.md`
+- `tests/README.md`
 
 ## Current Status Notes
 
