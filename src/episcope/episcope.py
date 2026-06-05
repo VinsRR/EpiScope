@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+import requests
 import typer
 
 from episcope.db import InMemoryAcademicDB, MongoAcademicDB
@@ -29,7 +30,7 @@ from episcope.rag.retrieval.candidates import (
 )
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import PaperMetadata, Reference, StructuredSection
-from episcope.settings import AppSettings
+from episcope.settings import AppSettings, env
 from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
 from episcope.workspace import (
@@ -58,6 +59,29 @@ app = typer.Typer(
     help="EpiScope CLI with local-first defaults for indexing, retrieval, classification, and extraction.",
     no_args_is_help=True,
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from episcope import __version__
+
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show the EpiScope version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """EpiScope CLI with local-first defaults for indexing, retrieval, classification, and extraction."""
+
 
 _SETTINGS = AppSettings.from_env()
 _CLI_ROOT = Path(".episcope")
@@ -628,6 +652,275 @@ def _resolve_paper_from_store(
         "academic_db": academic_db,
         "tempdir": None,
     }
+
+
+_DOCTOR_STATUS_STYLES = {
+    "ok": ("✓", typer.colors.GREEN),
+    "warn": ("!", typer.colors.YELLOW),
+    "fail": ("✗", typer.colors.RED),
+    "skip": ("·", typer.colors.BRIGHT_BLACK),
+}
+
+
+def _probe_http(url: str, *, timeout: float = 3.0) -> tuple[bool, Optional[int], str]:
+    """Best-effort HTTP GET used by `doctor`; never raises."""
+    try:
+        resp = requests.get(url, timeout=timeout)
+        return True, resp.status_code, ""
+    except Exception as exc:
+        return False, None, type(exc).__name__
+
+
+def _check_mongo(uri: str) -> tuple[str, str, str]:
+    """Return (status, detail, hint) for a MongoDB connectivity probe."""
+    try:
+        from pymongo import MongoClient
+    except ImportError:
+        return "skip", "configured", "Install epi-scope[server] to verify connectivity."
+    try:
+        client = MongoClient(uri, serverSelectionTimeoutMS=2000)
+        try:
+            client.admin.command("ping")
+        finally:
+            client.close()
+        return "ok", "reachable", ""
+    except Exception as exc:
+        return (
+            "warn",
+            f"unreachable ({type(exc).__name__})",
+            "Only needed for the API/UI corpus path.",
+        )
+
+
+def _print_doctor_check(status: str, label: str, detail: str, hint: str) -> None:
+    symbol, color = _DOCTOR_STATUS_STYLES.get(status, ("?", None))
+    line = f"  {typer.style(symbol, fg=color)} {label}"
+    if detail:
+        line += f": {detail}"
+    typer.echo(line)
+    if hint:
+        typer.secho(f"      {hint}", fg=typer.colors.BRIGHT_BLACK)
+
+
+@app.command()
+def doctor(
+    probe: bool = typer.Option(
+        True,
+        "--probe/--no-probe",
+        help="Probe optional services (Qdrant, GROBID, MongoDB, Ollama) over the network.",
+    ),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the report as JSON instead of a human-readable checklist.",
+    ),
+) -> None:
+    """Check the local environment and report what is and is not ready to use."""
+    import platform
+    import sys
+
+    from episcope import __version__
+
+    settings = AppSettings.from_env()
+    checks: list[dict[str, Any]] = []
+
+    def add(
+        status: str,
+        label: str,
+        detail: str = "",
+        hint: str = "",
+        *,
+        section: str,
+    ) -> None:
+        checks.append(
+            {
+                "section": section,
+                "status": status,
+                "label": label,
+                "detail": detail,
+                "hint": hint,
+            }
+        )
+
+    # Environment ----------------------------------------------------------
+    py_ok = sys.version_info >= (3, 10)
+    add("ok", "EpiScope version", __version__, section="Environment")
+    add(
+        "ok" if py_ok else "fail",
+        "Python",
+        platform.python_version(),
+        "" if py_ok else "EpiScope requires Python 3.10 or newer.",
+        section="Environment",
+    )
+
+    # LLM ------------------------------------------------------------------
+    provider = settings.llm_provider
+    add("ok", "Provider", provider, section="LLM")
+    add("ok", "Model", settings.llm_model, section="LLM")
+    key_env = {
+        "gemini": "GEMINI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }.get(provider)
+    if provider == "ollama":
+        if probe:
+            ok, code, err = _probe_http(f"{settings.ollama_host}/api/tags")
+            add(
+                "ok" if ok else "fail",
+                "Ollama server",
+                f"{settings.ollama_host} (HTTP {code})"
+                if ok
+                else f"{settings.ollama_host} ({err})",
+                "" if ok else "Start Ollama or set OLLAMA_HOST.",
+                section="LLM",
+            )
+        else:
+            add(
+                "skip",
+                "Ollama server",
+                settings.ollama_host,
+                "Drop --no-probe to test connectivity.",
+                section="LLM",
+            )
+    elif key_env is not None:
+        has_key = bool(env(key_env))
+        add(
+            "ok" if has_key else "fail",
+            key_env,
+            "set" if has_key else "not set",
+            ""
+            if has_key
+            else (
+                f"Export {key_env} to use ask/classify/precision-miner "
+                f"with provider {provider!r}."
+            ),
+            section="LLM",
+        )
+    else:
+        add(
+            "warn",
+            "Credentials",
+            f"unknown provider {provider!r}",
+            "Set EPISCOPE_LLM_PROVIDER to one of: gemini, openai, openrouter, ollama.",
+            section="LLM",
+        )
+
+    # Services (optional for the local CLI path) ---------------------------
+    if probe:
+        ok, code, err = _probe_http(f"{settings.grobid_url}/api/isalive")
+        add(
+            "ok" if ok else "warn",
+            "GROBID",
+            f"{settings.grobid_url} (HTTP {code})"
+            if ok
+            else f"{settings.grobid_url} ({err})",
+            ""
+            if ok
+            else (
+                "Only needed for --loader grobid; the default "
+                "'unstructured' loader works without it."
+            ),
+            section="Services",
+        )
+
+        ok, code, err = _probe_http(
+            f"{settings.qdrant_url}/collections/{settings.qdrant_collection}"
+        )
+        if ok and code == 200:
+            add(
+                "ok",
+                "Qdrant",
+                f"{settings.qdrant_url} "
+                f"(collection {settings.qdrant_collection!r} present)",
+                section="Services",
+            )
+        elif ok:
+            add(
+                "warn",
+                "Qdrant",
+                f"{settings.qdrant_url} "
+                f"(collection {settings.qdrant_collection!r} missing, HTTP {code})",
+                "Only needed for the API/UI corpus path; the local CLI uses a file index.",
+                section="Services",
+            )
+        else:
+            add(
+                "warn",
+                "Qdrant",
+                f"{settings.qdrant_url} ({err})",
+                "Only needed for the API/UI corpus path; the local CLI uses a file index.",
+                section="Services",
+            )
+
+        if settings.mongo_uri:
+            status, detail, hint = _check_mongo(settings.mongo_uri)
+            add(status, "MongoDB", detail, hint, section="Services")
+        else:
+            add(
+                "warn",
+                "MongoDB",
+                "MONGO_URI not set",
+                "Only needed for the API/UI corpus path; the local CLI uses an in-memory store.",
+                section="Services",
+            )
+    else:
+        add("skip", "Service probes", "skipped (--no-probe)", section="Services")
+
+    # Workspace ------------------------------------------------------------
+    ws = None
+    ws_error: Optional[Exception] = None
+    try:
+        ws = _optional_workspace(workspace)
+    except Exception as exc:
+        ws_error = exc
+    if ws is not None:
+        add("ok", "Workspace", str(ws.root), section="Workspace")
+    elif ws_error is not None:
+        add(
+            "warn",
+            "Workspace",
+            f"could not load ({type(ws_error).__name__})",
+            section="Workspace",
+        )
+    else:
+        add(
+            "skip",
+            "Workspace",
+            "none discovered",
+            "Optional. Run `episcope init <name>` to create one.",
+            section="Workspace",
+        )
+
+    # Report ---------------------------------------------------------------
+    any_fail = any(check["status"] == "fail" for check in checks)
+
+    if json_output:
+        _echo_json({"ok": not any_fail, "checks": checks})
+        raise typer.Exit(code=1 if any_fail else 0)
+
+    current_section: Optional[str] = None
+    for check in checks:
+        if check["section"] != current_section:
+            current_section = check["section"]
+            typer.echo("")
+            typer.secho(current_section, bold=True)
+        _print_doctor_check(
+            check["status"], check["label"], check["detail"], check["hint"]
+        )
+
+    typer.echo("")
+    if any_fail:
+        typer.secho(
+            "Some required checks failed. See the hints above.", fg=typer.colors.RED
+        )
+        raise typer.Exit(code=1)
+    typer.secho("All required checks passed.", fg=typer.colors.GREEN)
 
 
 @app.command("init")

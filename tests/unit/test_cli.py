@@ -243,6 +243,43 @@ def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> Non
     assert payload["source_count"] >= 1
 
 
+def test_version_flag_prints_version() -> None:
+    import episcope
+
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert episcope.__version__ in result.stdout
+
+
+def test_doctor_reports_ok_when_provider_key_present(monkeypatch) -> None:
+    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    result = runner.invoke(app, ["doctor", "--no-probe", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    sections = {check["section"] for check in payload["checks"]}
+    assert {"Environment", "LLM"} <= sections
+
+
+def test_doctor_fails_when_provider_key_missing(monkeypatch) -> None:
+    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["doctor", "--no-probe", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert any(
+        check["status"] == "fail" and check["label"] == "OPENAI_API_KEY"
+        for check in payload["checks"]
+    )
+
+
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",

@@ -163,6 +163,16 @@ The default runtime settings live in `src/episcope/settings.py`.
 
 If you want to try EpiScope on a paper without setting up databases, use the CLI path first. It builds a temporary local index for the file or folder you provide, so you do not need MongoDB or Qdrant.
 
+First, check that your environment is ready (Python version, LLM key, and optional services):
+
+```bash
+episcope doctor
+```
+
+It prints a checklist and exits non-zero if a required check fails. Use
+`episcope doctor --no-probe` to skip the network probes, or `--json` for
+machine-readable output. Run `episcope --version` to print the installed version.
+
 Inspect a document:
 
 ```bash
