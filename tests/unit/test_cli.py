@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from episcope.episcope import app
@@ -9,6 +10,15 @@ from episcope.rag.provenance import Provenance
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _json_output_by_default(monkeypatch) -> None:
+    """Default CLI tests to JSON output so they can assert on structure.
+
+    Individual tests can still pass ``--format human`` to override this.
+    """
+    monkeypatch.setenv("EPISCOPE_OUTPUT_FORMAT", "json")
 
 
 class _FakeEmbedder:
@@ -252,11 +262,25 @@ def test_version_flag_prints_version() -> None:
     assert episcope.__version__ in result.stdout
 
 
+def test_inspect_human_format_overrides_env(tmp_path) -> None:
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(paper), "--format", "human"])
+
+    assert result.exit_code == 0
+    assert "Paper: paper" in result.stdout
+    assert "Sections:" in result.stdout
+
+
 def test_doctor_reports_ok_when_provider_key_present(monkeypatch) -> None:
     monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    result = runner.invoke(app, ["doctor", "--no-probe", "--json"])
+    result = runner.invoke(app, ["doctor", "--no-probe"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -269,7 +293,7 @@ def test_doctor_fails_when_provider_key_missing(monkeypatch) -> None:
     monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    result = runner.invoke(app, ["doctor", "--no-probe", "--json"])
+    result = runner.invoke(app, ["doctor", "--no-probe"])
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)

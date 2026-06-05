@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 import requests
 import typer
@@ -150,6 +150,11 @@ class EvidenceRerankerKind(str, Enum):
     within_label_cross_encoder = "within_label_cross_encoder"
 
 
+class OutputFormat(str, Enum):
+    human = "human"
+    json = "json"
+
+
 @dataclass
 class LoadedPaper:
     paper_id: str
@@ -181,6 +186,173 @@ def _json_ready(value: Any) -> Any:
 
 def _echo_json(value: Any) -> None:
     typer.echo(json.dumps(_json_ready(value), indent=2, ensure_ascii=False))
+
+
+def _format_option() -> Any:
+    return typer.Option(
+        OutputFormat.human,
+        "--format",
+        "-f",
+        envvar="EPISCOPE_OUTPUT_FORMAT",
+        help="Output format: 'human' (default) or 'json'. "
+        "Falls back to $EPISCOPE_OUTPUT_FORMAT when set.",
+    )
+
+
+def _emit(
+    payload: Any,
+    output_format: OutputFormat,
+    human: Callable[[Any], list[str]],
+) -> None:
+    """Render a command result as JSON or as a human-readable summary."""
+    if output_format == OutputFormat.json:
+        _echo_json(payload)
+        return
+    for line in human(payload):
+        typer.echo(line)
+
+
+def _truncate(text: str, limit: int = 200) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _format_score(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.3f}"
+    return "n/a"
+
+
+def _human_init(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    return [
+        f"Created workspace: {data['workspace']}",
+        f"  config:   {data['config']}",
+        f"  papers:   {data['papers_dir']}",
+        f"  index:    {data['index_dir']}",
+        f"  metadata: {data['metadata_path']}",
+        f"  outputs:  {data['outputs_dir']}",
+        f"  logs:     {data['logs_dir']}",
+    ]
+
+
+def _human_inspect(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    meta = data.get("metadata") or {}
+    lines = [
+        f"Paper: {data['paper_id']}",
+        f"Title: {meta.get('title') or '(untitled)'}",
+        f"Path:  {data['path']}",
+        f"Sections: {data['section_count']}   References: {data['reference_count']}",
+    ]
+    titles = [title for title in data.get("section_titles", []) if title]
+    if titles:
+        lines.append("Section titles: " + ", ".join(titles))
+    return lines
+
+
+def _human_index(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    papers = data.get("papers", [])
+    lines = [
+        f"Indexed {len(papers)} paper(s) into '{data['index_backend']}' "
+        f"(strategy: {data['strategy_name']}, embed: {data['embed_model']})"
+    ]
+    for paper in papers:
+        lines.append(
+            f"  - {paper['paper_id']}: {paper.get('title') or '(untitled)'} "
+            f"({paper['section_count']} sections, {paper['reference_count']} refs)"
+        )
+    return lines
+
+
+def _human_papers(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    ids = data.get("paper_ids", [])
+    context = f"strategy: {data['strategy_name']}, backend: {data['metadata_backend']}"
+    if not ids:
+        return [f"No papers found ({context})."]
+    lines = [f"{data['count']} paper(s) ({context}):"]
+    lines.extend(f"  - {paper_id}" for paper_id in ids)
+    return lines
+
+
+def _human_explore(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    chunks = data.get("retrieved_chunks", [])
+    lines = [
+        f"Query: {data['query']}",
+        f"Retrieved {data['retrieval_count']} chunk(s) [mode: {data['retrieval_mode']}]",
+    ]
+    for rank, chunk in enumerate(chunks, start=1):
+        label = chunk.get("section_title") or chunk.get("section_type") or "?"
+        lines.append(
+            f"  {rank}. [{chunk.get('paper_id', '?')} · {label}] "
+            f"(score {_format_score(chunk.get('rank_score'))})"
+        )
+        text = chunk.get("text") or ""
+        if text:
+            lines.append(f"     {_truncate(text)}")
+    if data.get("answer"):
+        lines.extend(["", "Answer:", data["answer"]])
+    return lines
+
+
+def _human_ask(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    lines = [f"Q: {data['question']}", "", f"A: {data['answer']}"]
+    sources = data.get("sources", [])
+    if sources:
+        lines.extend(["", f"Sources ({data.get('source_count', len(sources))}):"])
+        for source in sources:
+            label = source.get("section_title") or source.get("section_type") or ""
+            separator = f" · {label}" if label else ""
+            lines.append(
+                f"  - {source.get('paper_id', '?')}{separator} "
+                f"(score {_format_score(source.get('rank_score'))})"
+            )
+    return lines
+
+
+def _human_classify(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    decision = data.get("decision", data)
+    result = decision.get("result") or {}
+    labels = result.get("classification") or []
+    lines = [
+        f"Paper: {decision.get('paper_id', '?')}",
+        "Classification: "
+        + (", ".join(str(label) for label in labels) if labels else "(none)"),
+    ]
+    confidence = result.get("confidence")
+    if isinstance(confidence, (int, float)):
+        lines.append(f"Confidence: {confidence:.2f}")
+    extras = result.get("extras") or {}
+    if extras:
+        lines.append(f"Extras: {json.dumps(extras, ensure_ascii=False)}")
+    evidence = decision.get("top_evidence") or []
+    if evidence:
+        lines.append(f"Evidence chunks: {len(evidence)}")
+    return lines
+
+
+def _human_precision_miner(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    result = data.get("result") or {}
+    items = result.get("items", [])
+    lines = [f"Paper: {data.get('paper_id', '?')}"]
+    if result.get("description"):
+        lines.append(f"Summary: {result['description']}")
+    lines.append(f"Extracted {len(items)} item(s):")
+    for item in items:
+        url = item.get("url")
+        url_str = f" — {url}" if url and url != "N/A" else ""
+        lines.append(f"  - {item.get('name', '?')}{url_str}")
+        if item.get("explanation"):
+            lines.append(f"      {_truncate(item['explanation'], 160)}")
+    return lines
 
 
 def _abort(message: str) -> None:
@@ -715,11 +887,7 @@ def doctor(
         "-w",
         help="Workspace directory containing episcope.toml.",
     ),
-    json_output: bool = typer.Option(
-        False,
-        "--json",
-        help="Emit the report as JSON instead of a human-readable checklist.",
-    ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Check the local environment and report what is and is not ready to use."""
     import platform
@@ -900,7 +1068,7 @@ def doctor(
     # Report ---------------------------------------------------------------
     any_fail = any(check["status"] == "fail" for check in checks)
 
-    if json_output:
+    if output_format == OutputFormat.json:
         _echo_json({"ok": not any_fail, "checks": checks})
         raise typer.Exit(code=1 if any_fail else 0)
 
@@ -939,6 +1107,7 @@ def init_workspace(
         "--force",
         help="Overwrite an existing episcope.toml in the workspace directory.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Create an EpiScope workspace with local-first defaults."""
     try:
@@ -946,7 +1115,7 @@ def init_workspace(
     except Exception as exc:
         _abort(str(exc))
 
-    _echo_json(
+    _emit(
         {
             "status": "ok",
             "workspace": str(workspace.root),
@@ -956,7 +1125,9 @@ def init_workspace(
             "metadata_path": str(workspace.resolve_path(workspace.metadata_path)),
             "outputs_dir": str(workspace.resolve_path(workspace.outputs_dir)),
             "logs_dir": str(workspace.resolve_path(workspace.logs_dir)),
-        }
+        },
+        output_format,
+        _human_init,
     )
 
 
@@ -968,6 +1139,7 @@ def inspect_document(
         "--loader",
         help="Parsing backend. Unstructured is the local-first default.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Parse a file and print its extracted metadata and section counts."""
     try:
@@ -975,7 +1147,7 @@ def inspect_document(
     except Exception as exc:
         _abort(str(exc))
 
-    _echo_json(
+    _emit(
         {
             "paper_id": paper.paper_id,
             "path": str(paper.path),
@@ -983,7 +1155,9 @@ def inspect_document(
             "section_count": len(paper.sections),
             "reference_count": len(paper.references),
             "section_titles": [section.title for section in paper.sections[:10]],
-        }
+        },
+        output_format,
+        _human_inspect,
     )
 
 
@@ -1077,6 +1251,7 @@ def index(
         "--chunk-overlap",
         help="Chunk overlap when --chunker=fixed-size.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Index documents into local or Qdrant-backed storage and persist metadata."""
     try:
@@ -1199,7 +1374,7 @@ def index(
     except Exception as exc:
         _abort(str(exc))
 
-    _echo_json(
+    _emit(
         {
             "status": "ok",
             "workspace": str(workspace_config.root) if workspace_config else None,
@@ -1208,7 +1383,9 @@ def index(
             "metadata_backend": metadata_backend,
             "embed_model": embed_model,
             "papers": _paper_summaries(papers),
-        }
+        },
+        output_format,
+        _human_index,
     )
 
 
@@ -1246,6 +1423,7 @@ def papers(
         "--mongo-db-name",
         help="Mongo database name when --metadata-backend=mongo.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """List available paper ids in the configured metadata store."""
     try:
@@ -1285,14 +1463,16 @@ def papers(
     except Exception as exc:
         _abort(str(exc))
 
-    _echo_json(
+    _emit(
         {
             "workspace": str(workspace_config.root) if workspace_config else None,
             "strategy_name": strategy_name,
             "metadata_backend": metadata_backend,
             "count": len(doc_ids),
             "paper_ids": doc_ids,
-        }
+        },
+        output_format,
+        _human_papers,
     )
 
 
@@ -1372,6 +1552,7 @@ def explore(
         help="Optional explicit generation model.",
     ),
     temperature: float = typer.Option(0.0, "--temperature"),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Retrieve relevant chunks from a transient or previously indexed corpus."""
     tempdir = None
@@ -1509,7 +1690,7 @@ def explore(
             provenance = generator.generate(results, question=query)
             payload["answer"] = provenance.answer
             payload["provenance"] = provenance
-        _echo_json(payload)
+        _emit(payload, output_format, _human_explore)
     except Exception as exc:
         _abort(str(exc))
     finally:
@@ -1562,6 +1743,7 @@ def ask(
         "--show-context/--answer-only",
         help="Include full retrieved source chunks in the JSON output.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Ask a question over local papers without requiring MongoDB or Qdrant."""
     tempdir = None
@@ -1661,7 +1843,7 @@ def ask(
             "source_count": len(results),
             "sources": results if show_context else source_summaries,
         }
-        _echo_json(payload)
+        _emit(payload, output_format, _human_ask)
     except Exception as exc:
         _abort(str(exc))
     finally:
@@ -1744,6 +1926,7 @@ def classify(
         "--detailed/--compact",
         help="Emit the full trace/training payload instead of only the compact decision.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Run a paper classification workflow with local-first defaults."""
     tempdir = None
@@ -1897,7 +2080,7 @@ def classify(
                 resolved["paper_id"],
                 metadata=resolved["metadata"],
             )
-        _echo_json(result)
+        _emit(result, output_format, _human_classify)
     except Exception as exc:
         _abort(str(exc))
     finally:
@@ -1966,6 +2149,7 @@ def precision_miner(
         "--detailed/--compact",
         help="Emit provenance/trace/chunks instead of only the extraction result.",
     ),
+    output_format: OutputFormat = _format_option(),
 ) -> None:
     """Run a precision-miner workflow with local-first defaults."""
     tempdir = None
@@ -2117,7 +2301,7 @@ def precision_miner(
                     metadata=resolved["metadata"],
                 ),
             }
-        _echo_json(result)
+        _emit(result, output_format, _human_precision_miner)
     except Exception as exc:
         _abort(str(exc))
     finally:

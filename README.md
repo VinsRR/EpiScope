@@ -142,6 +142,7 @@ Common settings:
 - `EPISCOPE_API_PORT`
 - `EPISCOPE_API_BASE_URL`
 - `EPISCOPE_LOG_LEVEL`
+- `EPISCOPE_OUTPUT_FORMAT` (CLI default output format: `human` or `json`)
 
 Provider-specific credentials:
 
@@ -170,8 +171,10 @@ episcope doctor
 ```
 
 It prints a checklist and exits non-zero if a required check fails. Use
-`episcope doctor --no-probe` to skip the network probes, or `--json` for
-machine-readable output. Run `episcope --version` to print the installed version.
+`episcope doctor --no-probe` to skip the network probes. Every command prints a
+human-readable summary by default; pass `--format json` (or set
+`EPISCOPE_OUTPUT_FORMAT=json`) for machine-readable output. Run
+`episcope --version` to print the installed version.
 
 Inspect a document:
 
