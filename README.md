@@ -40,6 +40,13 @@ The currently supported precision-miner configs are:
 - `FindSupplementaryLinksConfig`
 - `IdentifyKeyReferencesConfig`
 
+These workflow *kinds* are registered in one place —
+[`src/episcope/workflows/registry.py`](src/episcope/workflows/registry.py). The
+CLI choices, the API request schema, and the Streamlit dropdowns all derive from
+that registry, so adding a new classifier or miner is a single entry there (plus
+its config and output schema), not edits spread across the CLI, API, runtime,
+and UI.
+
 ## Repository Layout
 
 This repository now uses a standard `src` layout:

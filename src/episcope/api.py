@@ -8,6 +8,12 @@ from pydantic import BaseModel, Field
 
 from episcope import __version__
 from episcope.services import EpiScopeRuntime, RuntimeConfig
+from episcope.workflows.registry import (
+    ClassifierKind,
+    PrecisionMinerKind,
+    classifier_catalog,
+    miner_catalog,
+)
 
 app = FastAPI(title="EpiScope API", version=__version__)
 
@@ -70,18 +76,14 @@ class BackendConfig(BaseModel):
 
 class ClassificationRequest(BaseModel):
     paper_id: str
-    classifier_kind: Literal["paper_type", "data_accessibility", "data_type", "geo"] = (
-        "data_accessibility"
-    )
+    classifier_kind: ClassifierKind = ClassifierKind("data_accessibility")
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
 
 class PrecisionMinerRequest(BaseModel):
     paper_id: str
-    miner_kind: Literal[
-        "find_data_sources", "find_supplementary_links", "identify_key_references"
-    ] = "find_data_sources"
+    miner_kind: PrecisionMinerKind = PrecisionMinerKind("find_data_sources")
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
@@ -103,6 +105,10 @@ def health() -> Dict[str, Any]:
         "service": "episcope-api",
         "defaults": _json_ready(runtime_health.defaults),
         "checks": runtime_health.checks,
+        "kinds": {
+            "classifiers": classifier_catalog(),
+            "miners": miner_catalog(),
+        },
     }
 
 

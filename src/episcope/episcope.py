@@ -41,17 +41,14 @@ from episcope.workspace import (
 )
 from episcope.workflows import PaperClassifier, PrecisionMiner
 from episcope.workflows.classification import (
-    DataAccessibilityClassifierConfig,
-    DataTypeClassifierConfig,
-    GeoClassifierConfig,
     GlobalCrossEncoderReranker,
-    PaperTypeClassifierConfig,
     WithinLabelCrossEncoderReranker,
 )
-from episcope.workflows.precision_miner import (
-    FindDataSourcesConfig,
-    FindSupplementaryLinksConfig,
-    IdentifyKeyReferencesConfig,
+from episcope.workflows.registry import (
+    ClassifierKind,
+    PrecisionMinerKind,
+    build_classifier_config,
+    build_precision_miner_config,
 )
 
 
@@ -129,19 +126,6 @@ class LLMProvider(str, Enum):
     openai = "openai"
     openrouter = "openrouter"
     ollama = "ollama"
-
-
-class ClassifierKind(str, Enum):
-    paper_type = "paper_type"
-    data_accessibility = "data_accessibility"
-    data_type = "data_type"
-    geo = "geo"
-
-
-class PrecisionMinerKind(str, Enum):
-    find_data_sources = "find_data_sources"
-    find_supplementary_links = "find_supplementary_links"
-    identify_key_references = "identify_key_references"
 
 
 class EvidenceRerankerKind(str, Enum):
@@ -544,29 +528,6 @@ def _build_retriever(
         return Retriever(vectordb=vectordb, use_rerank=False)
 
     raise ValueError(f"Unsupported retrieval mode: {retrieval_mode.value}")
-
-
-def _build_classifier_config(kind: ClassifierKind, top_k: int):
-    config_map = {
-        ClassifierKind.paper_type: PaperTypeClassifierConfig,
-        ClassifierKind.data_accessibility: DataAccessibilityClassifierConfig,
-        ClassifierKind.data_type: DataTypeClassifierConfig,
-        ClassifierKind.geo: GeoClassifierConfig,
-    }
-    config = config_map[kind]()
-    config.top_k = top_k
-    return config
-
-
-def _build_precision_miner_config(kind: PrecisionMinerKind, top_k: int):
-    config_map = {
-        PrecisionMinerKind.find_data_sources: FindDataSourcesConfig,
-        PrecisionMinerKind.find_supplementary_links: FindSupplementaryLinksConfig,
-        PrecisionMinerKind.identify_key_references: IdentifyKeyReferencesConfig,
-    }
-    config = config_map[kind]()
-    config.top_k = top_k
-    return config
 
 
 def _build_evidence_reranker(
@@ -1870,7 +1831,7 @@ def classify(
         help="Single file to classify without requiring a prebuilt index or metadata store.",
     ),
     classifier_kind: ClassifierKind = typer.Option(
-        ClassifierKind.data_accessibility,
+        ClassifierKind("data_accessibility"),
         "--classifier-kind",
         help="Data accessibility is the most lightweight default workflow.",
     ),
@@ -2063,7 +2024,7 @@ def classify(
             generator=generator,
             strategy_name=strategy_name,
             academic_db=resolved["academic_db"],
-            config=_build_classifier_config(classifier_kind, workflow_top_k),
+            config=build_classifier_config(classifier_kind, workflow_top_k),
             evidence_reranker=_build_evidence_reranker(
                 evidence_reranker,
                 cross_encoder_model=cross_encoder_model,
@@ -2107,7 +2068,7 @@ def precision_miner(
         help="Single file to analyze without requiring Mongo or Qdrant.",
     ),
     miner_kind: PrecisionMinerKind = typer.Option(
-        PrecisionMinerKind.find_data_sources,
+        PrecisionMinerKind("find_data_sources"),
         "--miner-kind",
         help="Find data sources is the lowest-friction default extraction workflow.",
     ),
@@ -2286,7 +2247,7 @@ def precision_miner(
             generator=generator,
             strategy_name=strategy_name,
             academic_db=resolved["academic_db"],
-            config=_build_precision_miner_config(miner_kind, workflow_top_k),
+            config=build_precision_miner_config(miner_kind, workflow_top_k),
         )
         if detailed:
             result = miner.run_detailed(

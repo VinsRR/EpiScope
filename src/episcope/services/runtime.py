@@ -24,17 +24,14 @@ from episcope.settings import AppSettings, env
 from episcope.vectordb.qdrant import QdrantDB
 from episcope.workflows import PaperClassifier, PrecisionMiner
 from episcope.workflows.classification import (
-    DataAccessibilityClassifierConfig,
-    DataTypeClassifierConfig,
-    GeoClassifierConfig,
     GlobalCrossEncoderReranker,
-    PaperTypeClassifierConfig,
     WithinLabelCrossEncoderReranker,
 )
-from episcope.workflows.precision_miner import (
-    FindDataSourcesConfig,
-    FindSupplementaryLinksConfig,
-    IdentifyKeyReferencesConfig,
+from episcope.workflows.registry import (
+    ClassifierKind,
+    PrecisionMinerKind,
+    build_classifier_config as _build_classifier_config,
+    build_precision_miner_config as _build_precision_miner_config,
 )
 
 LlmProvider = Literal["gemini", "openai", "openrouter", "ollama"]
@@ -43,10 +40,6 @@ RetrievalMode = Literal[
 ]
 EvidenceRerankerKind = Literal[
     "none", "global_cross_encoder", "within_label_cross_encoder"
-]
-ClassifierKind = Literal["paper_type", "data_accessibility", "data_type", "geo"]
-PrecisionMinerKind = Literal[
-    "find_data_sources", "find_supplementary_links", "identify_key_references"
 ]
 
 
@@ -155,7 +148,7 @@ class EpiScopeRuntime:
         self,
         paper_id: str,
         *,
-        classifier_kind: ClassifierKind = "data_accessibility",
+        classifier_kind: ClassifierKind = ClassifierKind("data_accessibility"),
         detailed: bool = True,
     ) -> Any:
         classifier = PaperClassifier(
@@ -174,7 +167,7 @@ class EpiScopeRuntime:
         self,
         paper_id: str,
         *,
-        miner_kind: PrecisionMinerKind = "find_data_sources",
+        miner_kind: PrecisionMinerKind = PrecisionMinerKind("find_data_sources"),
         detailed: bool = True,
     ) -> Any:
         miner = PrecisionMiner(
@@ -257,25 +250,10 @@ class EpiScopeRuntime:
         raise ValueError(f"Unsupported retrieval_mode={self.config.retrieval_mode!r}")
 
     def build_classifier_config(self, kind: ClassifierKind):
-        config_map = {
-            "paper_type": PaperTypeClassifierConfig,
-            "data_accessibility": DataAccessibilityClassifierConfig,
-            "data_type": DataTypeClassifierConfig,
-            "geo": GeoClassifierConfig,
-        }
-        config = config_map[kind]()
-        config.top_k = self.config.workflow_top_k
-        return config
+        return _build_classifier_config(kind, self.config.workflow_top_k)
 
     def build_precision_miner_config(self, kind: PrecisionMinerKind):
-        config_map = {
-            "find_data_sources": FindDataSourcesConfig,
-            "find_supplementary_links": FindSupplementaryLinksConfig,
-            "identify_key_references": IdentifyKeyReferencesConfig,
-        }
-        config = config_map[kind]()
-        config.top_k = self.config.workflow_top_k
-        return config
+        return _build_precision_miner_config(kind, self.config.workflow_top_k)
 
     def build_evidence_reranker(self):
         if self.config.evidence_reranker_kind == "none":

@@ -326,10 +326,21 @@ with classification_tab:
     st.subheader("Paper Classification")
     with st.form("classification-form"):
         paper_id = st.text_input("Paper ID")
+        classifier_specs = (health or {}).get("kinds", {}).get("classifiers", [])
+        classifier_options = [spec["key"] for spec in classifier_specs] or [
+            "data_accessibility",
+            "paper_type",
+            "data_type",
+            "geo",
+        ]
+        classifier_labels = {spec["key"]: spec["label"] for spec in classifier_specs}
         classifier_kind = st.selectbox(
             "Classifier Kind",
-            ["data_accessibility", "paper_type", "data_type", "geo"],
-            index=0,
+            classifier_options,
+            index=classifier_options.index("data_accessibility")
+            if "data_accessibility" in classifier_options
+            else 0,
+            format_func=lambda key: classifier_labels.get(key, key),
         )
         detailed = st.checkbox("Return Detailed Result", value=True)
         submitted = st.form_submit_button("Run Classification", use_container_width=True)
@@ -355,10 +366,18 @@ with precision_tab:
     st.subheader("Precision Miner")
     with st.form("precision-miner-form"):
         paper_id = st.text_input("Paper ID", key="precision-paper-id")
+        miner_specs = (health or {}).get("kinds", {}).get("miners", [])
+        miner_options = [spec["key"] for spec in miner_specs] or [
+            "find_data_sources",
+            "find_supplementary_links",
+            "identify_key_references",
+        ]
+        miner_labels = {spec["key"]: spec["label"] for spec in miner_specs}
         miner_kind = st.selectbox(
             "Miner Kind",
-            ["find_data_sources", "find_supplementary_links", "identify_key_references"],
+            miner_options,
             index=0,
+            format_func=lambda key: miner_labels.get(key, key),
         )
         detailed = st.checkbox("Return Detailed Result", value=True, key="precision-detailed")
         submitted = st.form_submit_button("Run Precision Miner", use_container_width=True)
