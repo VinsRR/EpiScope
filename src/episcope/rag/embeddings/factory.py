@@ -1,4 +1,7 @@
 import logging
+import os
+from typing import Optional
+
 from .base import Embedder
 from .huggingface import (
     HuggingFaceEmbedder,
@@ -11,55 +14,85 @@ from .gemini import GeminiEmbedder
 
 logger = logging.getLogger(__name__)
 
-# A set of known OpenAI embedding models to help the factory distinguish them
+# Known OpenAI embedding model identifiers (used only by auto-detection).
 OPENAI_EMBEDDING_MODELS = {
     "text-embedding-3-large",
     "text-embedding-3-small",
     "text-embedding-ada-002",
 }
 
+# Provider name -> dense embedder class. Adding a provider is one entry here.
+EMBEDDER_PROVIDERS = {
+    "huggingface": HuggingFaceEmbedder,
+    "openai": OpenAIEmbedder,
+    "gemini": GeminiEmbedder,
+    "ollama": OllamaEmbedder,
+}
+
 
 class EmbedderFactory:
-    """Instantiates the correct embedder based on the model name."""
+    """Instantiates the correct dense embedder for a model.
+
+    Selection is provider-driven, mirroring the LLM client side:
+
+    1. an explicit ``provider`` argument, else
+    2. the ``EPISCOPE_EMBED_PROVIDER`` environment variable, else
+    3. ``"auto"`` — infer the provider from the model name for common,
+       unambiguous cases.
+
+    When the provider cannot be determined this raises a ``ValueError`` — it
+    never silently falls back to a single provider.
+    """
 
     @staticmethod
-    def get_embedder(model_name: str, **kwargs) -> Embedder:
-        """
-        Factory method to get an embedder instance.
+    def get_embedder(
+        model_name: str,
+        *,
+        provider: Optional[str] = None,
+        **kwargs,
+    ) -> Embedder:
+        resolved = (
+            (provider or os.environ.get("EPISCOPE_EMBED_PROVIDER") or "auto")
+            .strip()
+            .lower()
+        )
+        if resolved == "auto":
+            resolved = EmbedderFactory._detect_provider(model_name)
 
-        The factory uses heuristics to determine the provider from the model name:
-        - Names with '/' are treated as HuggingFace models.
-        - Names starting with 'models/' are treated as Gemini models.
-        - Names matching a known OpenAI model list are treated as OpenAI models.
-        - All other names are assumed to be Ollama models.
+        embedder_cls = EMBEDDER_PROVIDERS.get(resolved)
+        if embedder_cls is None:
+            raise ValueError(
+                f"Unknown embedding provider {resolved!r}. Choose one of: "
+                f"{', '.join(sorted(EMBEDDER_PROVIDERS))} (or 'auto')."
+            )
+        logger.info(
+            "Creating %s for model '%s' (provider=%s).",
+            embedder_cls.__name__,
+            model_name,
+            resolved,
+        )
+        return embedder_cls(model=model_name, **kwargs)
 
-        Args:
-            model_name: The name of the model.
-            **kwargs: Additional arguments to pass to the embedder's constructor.
-
-        Returns:
-            An instance of an Embedder subclass.
-        """
-        if "/" in model_name and not model_name.startswith("models/"):
-            logger.info(
-                f"Detected HuggingFace model '{model_name}'. Creating HuggingFaceEmbedder."
-            )
-            return HuggingFaceEmbedder(model=model_name, **kwargs)
-        elif model_name in OPENAI_EMBEDDING_MODELS:
-            logger.info(
-                f"Detected OpenAI model '{model_name}'. Creating OpenAIEmbedder."
-            )
-            return OpenAIEmbedder(model=model_name, **kwargs)
-        elif "embedding-001" in model_name:
-            logger.info(
-                f"Detected Gemini model '{model_name}'. Creating GeminiEmbedder."
-            )
-            return GeminiEmbedder(model=model_name, **kwargs)
-        else:
-            logger.info(
-                f"Assuming Ollama model '{model_name}'. Creating OllamaEmbedder."
-            )
-            return OllamaEmbedder(model=model_name, **kwargs)
+    @staticmethod
+    def _detect_provider(model_name: str) -> str:
+        """Infer a provider from the model name for common cases, else raise."""
+        name = model_name.strip()
+        lowered = name.lower()
+        if "/" in name and not name.startswith("models/"):
+            return "huggingface"
+        if name.startswith("models/") or "gemini" in lowered:
+            return "gemini"
+        if (
+            name in OPENAI_EMBEDDING_MODELS
+            or name.startswith("text-embedding-3")
+            or "ada-002" in lowered
+        ):
+            return "openai"
+        raise ValueError(
+            f"Could not infer an embedding provider from model name {model_name!r}. "
+            f"Pass provider=... or set EPISCOPE_EMBED_PROVIDER to one of: "
+            f"{', '.join(sorted(EMBEDDER_PROVIDERS))}."
+        )
 
     @staticmethod
     def get_sparse_embedder(model_name: str, **kwargs) -> HuggingFaceSparseEmbedder:

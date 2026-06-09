@@ -80,7 +80,7 @@ def test_inspect_command_reads_text_file(tmp_path) -> None:
 def test_index_and_papers_use_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
 
     paper = tmp_path / "paper.txt"
@@ -127,7 +127,7 @@ def test_index_and_papers_use_local_defaults(tmp_path, monkeypatch) -> None:
 def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
         "episcope.episcope._build_generator",
@@ -193,7 +193,7 @@ def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
 def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
 
     paper = tmp_path / "paper.txt"
@@ -224,7 +224,7 @@ def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None
 def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
         "episcope.episcope._build_generator",
@@ -307,7 +307,7 @@ def test_doctor_fails_when_provider_key_missing(monkeypatch) -> None:
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
         "episcope.episcope._build_generator",
@@ -376,7 +376,7 @@ class _FakeStudyDesignGenerator:
 def test_classify_with_task_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
         "episcope.episcope._build_generator",
@@ -413,7 +413,7 @@ def test_classify_with_task_file(tmp_path, monkeypatch) -> None:
 def test_classify_with_workspace_task(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
-        lambda model_name: _FakeEmbedder(),
+        lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
         "episcope.episcope._build_generator",

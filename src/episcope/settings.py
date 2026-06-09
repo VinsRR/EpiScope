@@ -29,6 +29,7 @@ class AppSettings:
     grobid_url: str = "http://localhost:8070"
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
+    embed_provider: str = "auto"
     cross_encoder_model: Optional[str] = None
     ollama_host: str = "http://localhost:11434"
     api_host: str = "0.0.0.0"
@@ -53,6 +54,7 @@ class AppSettings:
             llm_provider=(env("EPISCOPE_LLM_PROVIDER", "gemini") or "gemini").lower(),
             llm_model=env("EPISCOPE_LLM_MODEL", "gemini-2.5-flash")
             or "gemini-2.5-flash",
+            embed_provider=(env("EPISCOPE_EMBED_PROVIDER", "auto") or "auto").lower(),
             cross_encoder_model=env("CROSS_ENCODER_MODEL"),
             ollama_host=env("OLLAMA_HOST", "http://localhost:11434")
             or "http://localhost:11434",

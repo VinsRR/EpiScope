@@ -49,6 +49,9 @@ def test_reusable_package_layers_do_not_import_adapters() -> None:
         source_part = _package_part(path)
         if source_part in ADAPTER_MODULES:
             continue
+        if path.name == "__main__.py":
+            # `python -m episcope` entry-point shim; part of the CLI adapter.
+            continue
         for imported in _absolute_imports(path):
             parts = imported.split(".")
             if (

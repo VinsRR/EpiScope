@@ -223,6 +223,7 @@ Common settings:
 - `QDRANT_COLLECTION`
 - `EPISCOPE_LLM_PROVIDER`
 - `EPISCOPE_LLM_MODEL`
+- `EPISCOPE_EMBED_PROVIDER` (embedding provider: `auto` | `huggingface` | `openai` | `gemini` | `ollama`)
 - `CROSS_ENCODER_MODEL`
 - `OLLAMA_HOST`
 - `EPISCOPE_API_HOST`

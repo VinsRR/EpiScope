@@ -928,6 +928,7 @@ def doctor(
     provider = settings.llm_provider
     add("ok", "Provider", provider, section="LLM")
     add("ok", "Model", settings.llm_model, section="LLM")
+    add("ok", "Embedding provider", settings.embed_provider, section="LLM")
     key_env = {
         "gemini": "GEMINI_API_KEY",
         "openai": "OPENAI_API_KEY",
@@ -1228,6 +1229,11 @@ def index(
         "--embed-model",
         help="Dense embedding model used for indexing. The default is local-first.",
     ),
+    embed_provider: str = typer.Option(
+        _SETTINGS.embed_provider,
+        "--embed-provider",
+        help="Embedding provider: auto (default), huggingface, openai, gemini, or ollama.",
+    ),
     chunker: ChunkerKind = typer.Option(
         ChunkerKind.paragraph,
         "--chunker",
@@ -1342,7 +1348,7 @@ def index(
             workspace_config.chunk_overlap if workspace_config else None,
         )
         papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
-        embedder = EmbedderFactory.get_embedder(embed_model)
+        embedder = EmbedderFactory.get_embedder(embed_model, provider=embed_provider)
         vectordb = _build_vector_db(
             index_backend,
             index_dir=index_dir,
