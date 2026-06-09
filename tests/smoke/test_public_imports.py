@@ -23,3 +23,12 @@ def test_public_workflow_imports() -> None:
     assert DetailedClassificationResult is not None
     assert PrecisionMiner is not None
     assert DetailedExtractionResult is not None
+
+
+def test_top_level_reexports() -> None:
+    import episcope
+    from episcope.workflows import PaperClassifier, PrecisionMiner
+
+    # The headline workflow classes are importable straight from `episcope`.
+    assert episcope.PaperClassifier is PaperClassifier
+    assert episcope.PrecisionMiner is PrecisionMiner

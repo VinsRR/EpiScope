@@ -12,12 +12,15 @@ from episcope import rag
 from episcope.rag import generation, indexing, ingestion, retrieval
 from episcope.services import EpiScopeRuntime, RuntimeConfig
 from episcope import workflows
+from episcope.workflows import PaperClassifier, PrecisionMiner
 from episcope import utils
 
 
 __all__ = [
     "EpiScopeRuntime",
     "RuntimeConfig",
+    "PaperClassifier",
+    "PrecisionMiner",
     "mongo_academic_db",
     "in_memory_academic_db",
     "rag",
