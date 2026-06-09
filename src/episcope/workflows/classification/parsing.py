@@ -24,6 +24,8 @@ class ClassificationResponseParser:
         raw = response_content.strip()
         parsed = self._parse_json(raw)
         classification = self._extract_classification(parsed)
+        if not self.config.multi_label and len(classification) > 1:
+            classification = classification[:1]
         extras = self._extract_extras(parsed)
         return ClassificationResult(
             classification=classification,

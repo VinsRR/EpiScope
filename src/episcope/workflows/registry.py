@@ -346,6 +346,7 @@ def build_classifier_config_from_spec(spec: TaskSpec) -> BaseClassifierConfig:
         ),
         output_schema=DeclarativeClassificationOutput,
         default_classification=[spec.default_label or codes[-1]],
+        multi_label=spec.multi_label,
         extra_output_fields={"definitions": definitions},
     )
 
@@ -391,6 +392,83 @@ def register_task(spec: TaskSpec, *, overwrite: bool = False) -> str:
         source="declarative",
     )
     return spec.key
+
+
+def validate_task_file(path: str | Path) -> TaskSpec:
+    """Parse and validate a JSON task spec file *without* registering it.
+
+    Raises ``ValueError`` / ``pydantic.ValidationError`` with a clear message
+    if the spec is malformed. Intended for ``episcope tasks validate``.
+    """
+    raw = Path(path).read_text(encoding="utf-8")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+    return TaskSpec.model_validate(data)
+
+
+def scaffold_task_spec(kind: str) -> str:
+    """Return a filled-in JSON scaffold for a new task spec.
+
+    ``kind`` must be ``"classifier"`` or ``"miner"``.  Every field is
+    present so the author can see what is available; optional fields are
+    set to representative placeholder values rather than omitted.
+    """
+    if kind == "classifier":
+        spec: Dict[str, Any] = {
+            "key": "my_classifier",
+            "kind": "classifier",
+            "label": "My classifier",
+            "description": "What this classifier detects.",
+            "top_k": 10,
+            "multi_label": True,
+            "default_label": "unclear",
+            "system_prompt": None,
+            "user_prompt_template": None,
+            "labels": [
+                {
+                    "code": "label_a",
+                    "name": "Label A",
+                    "definition": "Definition of label A.",
+                    "examples": [
+                        "A representative sentence that should retrieve label_a evidence."
+                    ],
+                },
+                {
+                    "code": "label_b",
+                    "name": "Label B",
+                    "definition": "Definition of label B.",
+                    "examples": [],
+                },
+                {
+                    "code": "unclear",
+                    "name": "Unclear",
+                    "definition": "Not enough information to classify.",
+                    "examples": [],
+                },
+            ],
+        }
+    elif kind == "miner":
+        spec = {
+            "key": "my_miner",
+            "kind": "miner",
+            "label": "My miner",
+            "description": "What this miner extracts.",
+            "top_k": 15,
+            "section_filters": None,
+            "system_prompt": None,
+            "user_prompt_template": None,
+            "retrieval_templates": [
+                "First retrieval question to find relevant evidence.",
+                "Second retrieval question using different wording.",
+            ],
+        }
+    else:
+        raise ValueError(
+            f"Unknown task kind {kind!r}. Choose 'classifier' or 'miner'."
+        )
+    return json.dumps(spec, indent=2, ensure_ascii=False)
 
 
 def load_task_file(path: str | Path, *, overwrite: bool = False) -> TaskSpec:

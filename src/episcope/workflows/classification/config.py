@@ -61,6 +61,10 @@ class BaseClassifierConfig:
     # How many times to re-ask the LLM if JSON does not validate.
     max_validation_retries: int = 3
 
+    # When False (declarative tasks with multi_label=False) the parser keeps
+    # only the first returned code even if the model emits several.
+    multi_label: bool = True
+
     # Extra output fields (legacy; prefer Pydantic schema fields).
     extra_output_fields: Dict[str, Any] = field(default_factory=dict)
 

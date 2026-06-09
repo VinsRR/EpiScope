@@ -3,13 +3,48 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
 from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.classification.config import BaseClassifierConfig
 from episcope.workflows.classification.utils import PromptMessage, result_score
+
+
+def _safe_format(
+    template: str,
+    *,
+    template_name: str,
+    supported: Tuple[str, ...],
+    **kwargs: Any,
+) -> str:
+    """Call ``template.format(**kwargs)`` and turn brace errors into clear messages.
+
+    If a user-supplied template contains an unrecognised ``{placeholder}`` or a
+    bare ``{``/``}`` that Python's formatter cannot parse, we catch the raw
+    ``KeyError`` / ``ValueError`` and re-raise as a ``ValueError`` that names
+    the broken template, the offending token, and the list of supported
+    placeholders — so non-experts can fix the spec without reading a traceback.
+
+    Tip for prompt authors: to include a literal brace in the template write
+    ``{{`` or ``}}`` (double the brace).
+    """
+    try:
+        return template.format(**kwargs)
+    except KeyError as exc:
+        raise ValueError(
+            f"The '{template_name}' template contains an unrecognised placeholder "
+            f"{exc} — check for a typo or a bare '{{' / '}}' in the text. "
+            f"Supported placeholders: {', '.join(supported)}. "
+            "To include a literal brace write '{{' or '}}'."
+        ) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"The '{template_name}' template has a formatting error: {exc}. "
+            f"Supported placeholders: {', '.join(supported)}. "
+            "To include a literal brace write '{{' or '}}'."
+        ) from exc
 
 
 # Matches a "**Relevant Extracts...**" heading followed by any subsequent blank
@@ -39,7 +74,11 @@ class ClassificationPromptBuilder:
         categories = "\n".join(
             f"{key} – {value}" for key, value in self.config.category_labels.items()
         )
-        user_prompt = self.config.user_prompt_template.format(
+        user_prompt = _safe_format(
+            self.config.user_prompt_template,
+            template_name="user_prompt_template",
+            supported=("categories", "title", "abstract", "keywords",
+                       "chunks_info", "schema", "<extra_output_fields keys>"),
             categories=categories,
             title=metadata.title,
             abstract=metadata.abstract or "N/A",
@@ -55,7 +94,10 @@ class ClassificationPromptBuilder:
             # rather than answering. Drop the header so the prompt looks like
             # a clean metadata-only request.
             user_prompt = _EXTRACTS_BLOCK_RE.sub("", user_prompt)
-        system_prompt = self.config.system_prompt.format(
+        system_prompt = _safe_format(
+            self.config.system_prompt,
+            template_name="system_prompt",
+            supported=("n_categories", "category_labels"),
             n_categories=len(self.config.category_labels),
             category_labels=", ".join(self.config.category_labels.values()),
         )

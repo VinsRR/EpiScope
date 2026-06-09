@@ -177,6 +177,9 @@ still named `episcope`:
 python -c "import episcope; print(episcope.__name__)"
 ```
 
+`python -m episcope` is an alias for the `episcope` CLI command and works even
+when the console script is not on `PATH`.
+
 For a reproducible environment, prefer pinning a tag or commit instead of the
 moving `main` branch:
 
@@ -298,6 +301,7 @@ Local notes:
 
 - local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which does not require a Gemini/OpenAI key
 - answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
+- classifier and miner kinds (including any user-defined ones) are listed by `episcope tasks`
 - use the API/UI/Docker path once you have a shared indexed corpus and want multiple users to work against the same backend
 
 For a longer command-by-command walkthrough, see the
@@ -326,6 +330,7 @@ my-review/
   index/
   outputs/
   logs/
+  tasks/
 ```
 
 If you run commands from inside the workspace directory, EpiScope discovers the

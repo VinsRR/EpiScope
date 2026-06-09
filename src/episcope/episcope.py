@@ -51,6 +51,8 @@ from episcope.workflows.registry import (
     load_task_file,
     load_tasks_dir,
     miner_catalog,
+    scaffold_task_spec,
+    validate_task_file,
 )
 
 
@@ -2332,26 +2334,82 @@ def precision_miner(
 
 @app.command("tasks")
 def tasks(
+    action: str = typer.Argument(
+        "list",
+        help=(
+            "Action to perform: "
+            "'list' (default) — show available kinds; "
+            "'new' — print a filled-in JSON scaffold for a new task; "
+            "'validate' — check a task file without running anything."
+        ),
+    ),
+    kind: Optional[str] = typer.Option(
+        None,
+        "--kind",
+        help="Task kind for 'new': 'classifier' or 'miner'.",
+    ),
+    task_file: Optional[Path] = typer.Option(
+        None,
+        "--task-file",
+        exists=True,
+        help="JSON task spec for 'validate'.",
+    ),
     workspace: Optional[Path] = typer.Option(
         None,
         "--workspace",
         "-w",
-        help="Workspace directory containing episcope.toml.",
+        help="Workspace directory containing episcope.toml (used by 'list').",
     ),
     output_format: OutputFormat = _format_option(),
 ) -> None:
-    """List available classifier and miner kinds (built-in and declarative)."""
+    """Manage declarative task specs (list / new / validate).
+
+    \b
+    Examples:
+      episcope tasks                                  # list all kinds
+      episcope tasks new --kind classifier            # print a scaffold
+      episcope tasks new --kind miner > my.json       # save it
+      episcope tasks validate --task-file my.json     # lint without running
+    """
     try:
-        workspace_config = _optional_workspace(workspace)
-        if workspace_config is not None:
-            load_tasks_dir(workspace_config.root / "tasks", overwrite=True)
+        if action == "list":
+            workspace_config = _optional_workspace(workspace)
+            if workspace_config is not None:
+                load_tasks_dir(workspace_config.root / "tasks", overwrite=True)
+            _emit(
+                {"classifiers": classifier_catalog(), "miners": miner_catalog()},
+                output_format,
+                _human_tasks,
+            )
+
+        elif action == "new":
+            if kind is None:
+                _abort("--kind is required for 'tasks new'. Choose 'classifier' or 'miner'.")
+                return  # unreachable; satisfies the type checker
+            typer.echo(scaffold_task_spec(kind))
+
+        elif action == "validate":
+            if task_file is None:
+                _abort("--task-file is required for 'tasks validate'.")
+                return  # unreachable; satisfies the type checker
+            spec = validate_task_file(task_file)
+            msg = (
+                f"OK  {task_file.name}\n"
+                f"    kind={spec.kind}  key={spec.key!r}  label={spec.label!r}"
+            )
+            if spec.kind == "classifier":
+                msg += f"\n    labels ({len(spec.labels)}): {', '.join(lbl.code for lbl in spec.labels)}"
+                msg += f"\n    multi_label={spec.multi_label}  default_label={spec.default_label!r}"
+            else:
+                msg += f"\n    retrieval_templates: {len(spec.retrieval_templates)}"
+            typer.secho(msg, fg=typer.colors.GREEN)
+
+        else:
+            _abort(
+                f"Unknown action {action!r}. Choose 'list', 'new', or 'validate'."
+            )
     except Exception as exc:
         _abort(str(exc))
-    _emit(
-        {"classifiers": classifier_catalog(), "miners": miner_catalog()},
-        output_format,
-        _human_tasks,
-    )
 
 
 @app.command()
