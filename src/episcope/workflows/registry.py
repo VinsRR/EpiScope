@@ -1,63 +1,75 @@
 """Single source of truth for classifier and precision-miner *kinds*.
 
 A "kind" is the short string that selects which workflow configuration to run
-(e.g. ``data_accessibility`` or ``find_data_sources``). This set used to be
-duplicated across the CLI (a Typer ``Enum``), the API (a Pydantic ``Literal``),
-the runtime (dispatch ``dict``s), and the Streamlit UI (hardcoded lists), and it
-had already drifted.
+(e.g. ``data_accessibility`` or ``find_data_sources``). Built-in kinds live in
+:data:`CLASSIFIERS` / :data:`MINERS`; the CLI, API, runtime, and UI all resolve
+kinds through this module, and the API publishes the catalog on ``/health`` so
+the UI never hardcodes anything.
 
-Everything now derives from the two registries below:
+User-defined tasks (config-as-data)
+-----------------------------------
+Tasks can also be declared as plain JSON via :class:`TaskSpec` and registered at
+runtime, so non-experts can add their own classifier or miner without writing
+Python. Two delivery paths are supported:
 
-* the CLI and API share the generated :data:`ClassifierKind` /
-  :data:`PrecisionMinerKind` enums,
-* the runtime builds configs via :func:`build_classifier_config` /
-  :func:`build_precision_miner_config`,
-* the API publishes :func:`classifier_catalog` / :func:`miner_catalog` on
-  ``/health`` so the UI can render dropdowns without hardcoding anything.
+* **Workspace tasks** — JSON files under ``<workspace>/tasks/*.json`` that the
+  CLI auto-discovers (and a server can load via ``EPISCOPE_TASKS_DIR``).
+* **Portable / inline specs** — a single spec file passed to the CLI
+  (``--task-file``) or sent inline in an API request, so the *same* definition
+  works across entrypoints without server-side state.
 
-To add a new kind:
-
-1. Add its config class (and output schema) under ``workflows/<family>/``.
-2. Add one :class:`WorkflowKind` entry to :data:`CLASSIFIERS` or :data:`MINERS`.
-
-That single entry updates the enums, builders, API schema, and UI dropdowns.
+A classifier task supplies a label set (codes, names, definitions, optional
+retrieval example sentences); valid codes are injected into the prompt and
+enforced when parsing. A miner task supplies retrieval templates and prompts
+(the extraction schema is fixed). Prompts default to sensible templates and are
+``str.format`` strings.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
 from dataclasses import dataclass
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List
+from functools import partial
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from episcope.workflows.classification.config import (
+    BaseClassifierConfig,
     DataAccessibilityClassifierConfig,
     DataTypeClassifierConfig,
     GeoClassifierConfig,
     PaperTypeClassifierConfig,
 )
+from episcope.workflows.classification.schemas import BaseClassificationSchema
 from episcope.workflows.precision_miner.config import (
     FindDataSourcesConfig,
     FindSupplementaryLinksConfig,
     IdentifyKeyReferencesConfig,
+    PrecisionMinerConfig,
 )
 
-if TYPE_CHECKING:
-    from episcope.workflows.classification.config import BaseClassifierConfig
-    from episcope.workflows.precision_miner.config import PrecisionMinerConfig
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class WorkflowKind:
     """One selectable workflow variant (a classifier or a miner).
 
-    ``factory`` is a zero-argument callable (normally the config class) that
-    returns a fresh config instance.
+    ``factory`` is a zero-argument callable (a config class for built-ins, or a
+    spec-bound builder for declarative tasks) that returns a fresh config.
+    ``source`` is ``"builtin"`` or ``"declarative"``.
     """
 
     key: str
     label: str
     factory: Callable[[], Any]
     description: str = ""
+    source: str = "builtin"
 
 
 CLASSIFIERS: Dict[str, WorkflowKind] = {
@@ -115,17 +127,17 @@ MINERS: Dict[str, WorkflowKind] = {
     )
 }
 
-
-# Generated enums: the single source consumed by the CLI (Typer) and API
-# (Pydantic). Members and values are the registry keys.
-ClassifierKind = Enum("ClassifierKind", {key: key for key in CLASSIFIERS}, type=str)
-PrecisionMinerKind = Enum(
-    "PrecisionMinerKind", {key: key for key in MINERS}, type=str
-)
+# Captured before any declarative task can be registered; built-in keys are
+# protected from being overridden by user tasks.
+BUILTIN_CLASSIFIER_KEYS = frozenset(CLASSIFIERS)
+BUILTIN_MINER_KEYS = frozenset(MINERS)
 
 
+# ---------------------------------------------------------------------------
+# Resolution / dispatch
+# ---------------------------------------------------------------------------
 def _normalize(kind: object) -> str:
-    return kind.value if isinstance(kind, Enum) else str(kind)
+    return str(getattr(kind, "value", kind))
 
 
 def build_classifier_config(kind: object, top_k: int) -> "BaseClassifierConfig":
@@ -155,16 +167,263 @@ def build_precision_miner_config(kind: object, top_k: int) -> "PrecisionMinerCon
 
 
 def classifier_catalog() -> List[Dict[str, str]]:
-    """Serializable ``[{key, label, description}]`` for clients (e.g. the UI)."""
-    return [
-        {"key": spec.key, "label": spec.label, "description": spec.description}
-        for spec in CLASSIFIERS.values()
-    ]
+    """Serializable ``[{key, label, description, source}]`` for clients."""
+    return [_catalog_entry(spec) for spec in CLASSIFIERS.values()]
 
 
 def miner_catalog() -> List[Dict[str, str]]:
-    """Serializable ``[{key, label, description}]`` for clients (e.g. the UI)."""
-    return [
-        {"key": spec.key, "label": spec.label, "description": spec.description}
-        for spec in MINERS.values()
-    ]
+    """Serializable ``[{key, label, description, source}]`` for clients."""
+    return [_catalog_entry(spec) for spec in MINERS.values()]
+
+
+def _catalog_entry(spec: WorkflowKind) -> Dict[str, str]:
+    return {
+        "key": spec.key,
+        "label": spec.label,
+        "description": spec.description,
+        "source": spec.source,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Declarative tasks (config-as-data)
+# ---------------------------------------------------------------------------
+class LabelSpec(BaseModel):
+    """One label in a declarative classifier task."""
+
+    code: str = Field(..., description="Value the model emits and that appears in results.")
+    name: str = Field("", description="Human-readable label for display.")
+    definition: str = Field("", description="Definition injected into the prompt.")
+    examples: List[str] = Field(
+        default_factory=list,
+        description="Prototypical sentences used to seed retrieval for this label.",
+    )
+
+    @field_validator("code")
+    @classmethod
+    def _non_empty_code(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("label code must be non-empty")
+        return value
+
+
+class TaskSpec(BaseModel):
+    """A user-defined classifier or miner task, expressed as data."""
+
+    key: str = Field(..., description="Unique kind name (a-z, 0-9, underscore).")
+    kind: Literal["classifier", "miner"]
+    label: str = Field("", description="Human-readable name; defaults from key.")
+    description: str = ""
+    top_k: Optional[int] = Field(None, description="Default retrieval depth.")
+
+    # Classifier fields
+    labels: List[LabelSpec] = Field(default_factory=list)
+    multi_label: bool = True
+    default_label: Optional[str] = Field(
+        None, description="Fallback label code when classification fails."
+    )
+
+    # Miner fields
+    retrieval_templates: List[str] = Field(default_factory=list)
+    section_filters: Optional[List[str]] = None
+
+    # Optional prompt overrides (str.format templates)
+    system_prompt: Optional[str] = None
+    user_prompt_template: Optional[str] = None
+
+    @field_validator("key")
+    @classmethod
+    def _valid_key(cls, value: str) -> str:
+        if not re.fullmatch(r"[a-z0-9_]+", value):
+            raise ValueError(
+                "key must contain only lowercase letters, digits, and underscores"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _validate(self) -> "TaskSpec":
+        if not self.label:
+            self.label = self.key.replace("_", " ").title()
+        if self.kind == "classifier":
+            if not self.labels:
+                raise ValueError(
+                    f"classifier task {self.key!r} must define at least one label"
+                )
+            codes = [label.code for label in self.labels]
+            if len(set(codes)) != len(codes):
+                raise ValueError(
+                    f"classifier task {self.key!r} has duplicate label codes"
+                )
+            if self.default_label is not None and self.default_label not in codes:
+                raise ValueError(
+                    f"default_label {self.default_label!r} is not one of the label codes"
+                )
+        return self
+
+
+DEFAULT_CLASSIFIER_SYSTEM_PROMPT = (
+    "You are a careful research assistant. Assign labels to a scientific paper "
+    "based only on the provided text."
+)
+
+DEFAULT_MINER_SYSTEM_PROMPT = (
+    "You are a careful research assistant extracting structured items from a "
+    "scientific paper based only on the provided text."
+)
+
+DEFAULT_MINER_USER_TEMPLATE = (
+    "Extract the requested items from the paper.\n\n"
+    "**Relevant Extracts:**\n{chunks_info}\n\n"
+    "**Instructions:**\n"
+    "1. Use only the evidence above.\n"
+    "2. For each item, provide a name, a URL if available, and a short explanation.\n"
+    "3. Return a single JSON object matching the schema. Do not include extra text.\n\n"
+    "**Schema:**\n{schema}\n"
+)
+
+
+def _classifier_user_template(multi_label: bool) -> str:
+    choose = (
+        "all applicable categories" if multi_label else "exactly one category"
+    )
+    return (
+        "You are classifying a scientific paper.\n\n"
+        f"**Categories (choose {choose} by code):**\n{{categories}}\n\n"
+        "**Definitions:**\n{definitions}\n\n"
+        "**Paper Content:**\n"
+        "Title: {title}\nAbstract: {abstract}\nKeywords: {keywords}\n\n"
+        "**Relevant Extracts (candidate evidence):**\n{chunks_info}\n\n"
+        "**Instructions:**\n"
+        "1. Base your decision only on the provided text.\n"
+        "2. Populate `classification` with the chosen category code(s).\n"
+        "3. Return a single JSON object matching the schema below. "
+        "Do not include any extra text.\n\n"
+        "**Schema:**\n{schema}\n"
+    )
+
+
+class DeclarativeClassificationOutput(BaseClassificationSchema):
+    """Generic output schema shared by all declarative classifier tasks.
+
+    Valid codes are conveyed to the model via the prompt; unknown codes are
+    dropped (in favour of the task's default label) when the response is parsed.
+    """
+
+    classification: List[str] = Field(
+        default_factory=list, description="Selected category code(s)."
+    )
+    primary_label: Optional[str] = Field(
+        default=None, description="Single dominant code, or null."
+    )
+    extras: Dict[str, Any] = Field(
+        default_factory=dict, description="Optional free-form extracted fields."
+    )
+
+
+def build_classifier_config_from_spec(spec: TaskSpec) -> BaseClassifierConfig:
+    """Build a runnable classifier config from a declarative :class:`TaskSpec`."""
+    if spec.kind != "classifier":
+        raise ValueError(f"Task {spec.key!r} is not a classifier task.")
+    codes = [label.code for label in spec.labels]
+    category_labels = {label.code: (label.name or label.code) for label in spec.labels}
+    classification_mapping = {label.code: label.code for label in spec.labels}
+    template_paragraphs = {
+        label.code: list(label.examples) for label in spec.labels if label.examples
+    }
+    definitions = "\n".join(
+        f"- {label.code}: {label.definition}"
+        for label in spec.labels
+        if label.definition
+    )
+    return BaseClassifierConfig(
+        top_k=spec.top_k or 10,
+        template_paragraphs=template_paragraphs,
+        classification_mapping=classification_mapping,
+        category_labels=category_labels,
+        system_prompt=spec.system_prompt or DEFAULT_CLASSIFIER_SYSTEM_PROMPT,
+        user_prompt_template=(
+            spec.user_prompt_template or _classifier_user_template(spec.multi_label)
+        ),
+        output_schema=DeclarativeClassificationOutput,
+        default_classification=[spec.default_label or codes[-1]],
+        extra_output_fields={"definitions": definitions},
+    )
+
+
+def build_miner_config_from_spec(spec: TaskSpec) -> PrecisionMinerConfig:
+    """Build a runnable miner config from a declarative :class:`TaskSpec`."""
+    if spec.kind != "miner":
+        raise ValueError(f"Task {spec.key!r} is not a miner task.")
+    return PrecisionMinerConfig(
+        top_k=spec.top_k or 15,
+        retrieval_templates=list(spec.retrieval_templates),
+        section_filters=spec.section_filters,
+        system_prompt=spec.system_prompt or DEFAULT_MINER_SYSTEM_PROMPT,
+        user_prompt_template=spec.user_prompt_template or DEFAULT_MINER_USER_TEMPLATE,
+    )
+
+
+def register_task(spec: TaskSpec, *, overwrite: bool = False) -> str:
+    """Register a declarative task into the live registry; returns its key."""
+    if spec.key in BUILTIN_CLASSIFIER_KEYS or spec.key in BUILTIN_MINER_KEYS:
+        raise ValueError(
+            f"Task key {spec.key!r} is a built-in kind and cannot be overridden."
+        )
+    target = CLASSIFIERS if spec.kind == "classifier" else MINERS
+    other = MINERS if spec.kind == "classifier" else CLASSIFIERS
+    if spec.key in other:
+        raise ValueError(
+            f"Task key {spec.key!r} is already used by a different workflow family."
+        )
+    if spec.key in target and not overwrite:
+        raise ValueError(
+            f"Task {spec.key!r} is already registered (pass overwrite=True to replace)."
+        )
+    if spec.kind == "classifier":
+        factory: Callable[[], Any] = partial(build_classifier_config_from_spec, spec)
+    else:
+        factory = partial(build_miner_config_from_spec, spec)
+    target[spec.key] = WorkflowKind(
+        key=spec.key,
+        label=spec.label,
+        factory=factory,
+        description=spec.description,
+        source="declarative",
+    )
+    return spec.key
+
+
+def load_task_file(path: str | Path, *, overwrite: bool = False) -> TaskSpec:
+    """Load, validate, and register a JSON task spec; returns the parsed spec."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    spec = TaskSpec.model_validate(data)
+    register_task(spec, overwrite=overwrite)
+    return spec
+
+
+def load_tasks_dir(path: str | Path, *, overwrite: bool = True) -> List[TaskSpec]:
+    """Register every ``*.json`` task spec in a directory (no-op if absent)."""
+    directory = Path(path)
+    if not directory.is_dir():
+        return []
+    specs: List[TaskSpec] = []
+    for task_file in sorted(directory.glob("*.json")):
+        specs.append(load_task_file(task_file, overwrite=overwrite))
+    return specs
+
+
+def _load_startup_tasks() -> None:
+    tasks_dir = os.environ.get("EPISCOPE_TASKS_DIR")
+    if not tasks_dir:
+        return
+    try:
+        loaded = load_tasks_dir(tasks_dir)
+        if loaded:
+            logger.info(
+                "Loaded %d task(s) from EPISCOPE_TASKS_DIR=%s", len(loaded), tasks_dir
+            )
+    except Exception as exc:  # best-effort: a bad tasks dir must not break imports
+        logger.warning("Failed to load EPISCOPE_TASKS_DIR=%s: %s", tasks_dir, exc)
+
+
+_load_startup_tasks()

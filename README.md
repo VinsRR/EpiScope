@@ -45,7 +45,87 @@ These workflow *kinds* are registered in one place —
 CLI choices, the API request schema, and the Streamlit dropdowns all derive from
 that registry, so adding a new classifier or miner is a single entry there (plus
 its config and output schema), not edits spread across the CLI, API, runtime,
-and UI.
+and UI. You can also add tasks **without writing Python** — see
+[Defining Your Own Tasks](#defining-your-own-tasks).
+
+## Defining Your Own Tasks
+
+You can add a classifier or precision-miner by describing it as a JSON *task
+spec* — no Python required. A classifier task lists its labels (each with a
+`code`, `name`, `definition`, and optional example sentences that seed
+retrieval); the model is told the valid codes (unknown codes are ignored when
+parsing). A miner task lists retrieval prompts; its extraction schema is fixed. Prompts default to sensible
+templates and can be overridden with `system_prompt` / `user_prompt_template`.
+
+Example classifier task (`study_design.json`):
+
+```json
+{
+  "key": "study_design",
+  "kind": "classifier",
+  "label": "Study design",
+  "description": "Primary epidemiological study design.",
+  "multi_label": false,
+  "default_label": "unclear",
+  "labels": [
+    {"code": "cohort", "name": "Cohort", "definition": "Follows groups over time.",
+     "examples": ["We followed a cohort of exposed individuals over 12 months."]},
+    {"code": "case_control", "name": "Case-control", "definition": "Compares cases to controls.",
+     "examples": ["Cases were matched to controls by age and sex."]},
+    {"code": "cross_sectional", "name": "Cross-sectional", "definition": "A snapshot at one time point.",
+     "examples": ["A cross-sectional survey was conducted in May 2020."]},
+    {"code": "unclear", "name": "Unclear", "definition": "Not enough information."}
+  ]
+}
+```
+
+Example miner task (`find_funding.json`):
+
+```json
+{
+  "key": "find_funding",
+  "kind": "miner",
+  "label": "Find funding sources",
+  "description": "Funding bodies and grant numbers.",
+  "section_filters": ["Acknowledgements", "Funding"],
+  "retrieval_templates": [
+    "Who funded this study?",
+    "What grant or award numbers are reported?"
+  ]
+}
+```
+
+Load and run a task in any of these ways:
+
+- **Workspace** (auto-discovered): drop the file in `<workspace>/tasks/` and run
+  it by key.
+
+  ```bash
+  episcope classify --file paper.pdf --workspace my-review --classifier-kind study_design
+  ```
+
+- **Portable / inline** (works from any entrypoint, no setup): pass the file
+  directly, or send the spec inline to the API.
+
+  ```bash
+  episcope classify --file paper.pdf --task-file study_design.json
+  ```
+
+  ```bash
+  curl -X POST http://localhost:8000/classify \
+    -H "Content-Type: application/json" \
+    -d '{"paper_id": "paper-123", "task": { /* task spec */ }}'
+  ```
+
+- **Startup directory**: point `EPISCOPE_TASKS_DIR` at a folder of task JSON
+  files; the CLI and API load them at startup, and they appear in `GET /health`
+  and the Streamlit dropdowns.
+
+List everything available (built-in and declarative):
+
+```bash
+episcope tasks
+```
 
 ## Repository Layout
 

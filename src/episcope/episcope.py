@@ -45,10 +45,12 @@ from episcope.workflows.classification import (
     WithinLabelCrossEncoderReranker,
 )
 from episcope.workflows.registry import (
-    ClassifierKind,
-    PrecisionMinerKind,
     build_classifier_config,
     build_precision_miner_config,
+    classifier_catalog,
+    load_task_file,
+    load_tasks_dir,
+    miner_catalog,
 )
 
 
@@ -339,6 +341,19 @@ def _human_precision_miner(payload: Any) -> list[str]:
     return lines
 
 
+def _human_tasks(payload: Any) -> list[str]:
+    data = _json_ready(payload)
+    lines: list[str] = []
+    for family, title in (("classifiers", "Classifiers"), ("miners", "Miners")):
+        lines.append(f"{title}:")
+        for item in data.get(family, []):
+            source = item.get("source", "builtin")
+            suffix = "" if source == "builtin" else f"  [{source}]"
+            lines.append(f"  - {item['key']}: {item.get('label', '')}{suffix}")
+        lines.append("")
+    return lines
+
+
 def _abort(message: str) -> None:
     typer.secho(message, fg=typer.colors.RED, err=True)
     raise typer.Exit(code=1)
@@ -386,6 +401,27 @@ def _workspace_path(
     if workspace is not None and current == default:
         return workspace.resolve_path(workspace_value)
     return current
+
+
+def _prepare_tasks(
+    workspace: Optional[WorkspaceConfig],
+    task_file: Optional[Path],
+    current_kind: str,
+    *,
+    expected: str,
+) -> str:
+    """Register workspace + inline declarative tasks; return the kind to run."""
+    if workspace is not None:
+        load_tasks_dir(workspace.root / "tasks", overwrite=True)
+    if task_file is not None:
+        spec = load_task_file(task_file, overwrite=True)
+        if spec.kind != expected:
+            raise ValueError(
+                f"--task-file defines a {spec.kind!r} task, "
+                f"but this command runs {expected!r} tasks."
+            )
+        return spec.key
+    return current_kind
 
 
 def _build_chunker(
@@ -1830,10 +1866,16 @@ def classify(
         exists=True,
         help="Single file to classify without requiring a prebuilt index or metadata store.",
     ),
-    classifier_kind: ClassifierKind = typer.Option(
-        ClassifierKind("data_accessibility"),
+    classifier_kind: str = typer.Option(
+        "data_accessibility",
         "--classifier-kind",
-        help="Data accessibility is the most lightweight default workflow.",
+        help="Built-in or workspace/declarative task key (see `episcope tasks`).",
+    ),
+    task_file: Optional[Path] = typer.Option(
+        None,
+        "--task-file",
+        exists=True,
+        help="JSON task spec to run for this call (overrides --classifier-kind).",
     ),
     strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
     loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
@@ -2019,6 +2061,9 @@ def classify(
         )
         tempdir = resolved["tempdir"]
         generator = _build_generator(llm_provider, llm_model, temperature)
+        classifier_kind = _prepare_tasks(
+            workspace_config, task_file, classifier_kind, expected="classifier"
+        )
         classifier = PaperClassifier(
             retriever=resolved["retriever"],
             generator=generator,
@@ -2067,10 +2112,16 @@ def precision_miner(
         exists=True,
         help="Single file to analyze without requiring Mongo or Qdrant.",
     ),
-    miner_kind: PrecisionMinerKind = typer.Option(
-        PrecisionMinerKind("find_data_sources"),
+    miner_kind: str = typer.Option(
+        "find_data_sources",
         "--miner-kind",
-        help="Find data sources is the lowest-friction default extraction workflow.",
+        help="Built-in or workspace/declarative task key (see `episcope tasks`).",
+    ),
+    task_file: Optional[Path] = typer.Option(
+        None,
+        "--task-file",
+        exists=True,
+        help="JSON task spec to run for this call (overrides --miner-kind).",
     ),
     strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
     loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
@@ -2242,6 +2293,9 @@ def precision_miner(
         )
         tempdir = resolved["tempdir"]
         generator = _build_generator(llm_provider, llm_model, temperature)
+        miner_kind = _prepare_tasks(
+            workspace_config, task_file, miner_kind, expected="miner"
+        )
         miner = PrecisionMiner(
             retriever=resolved["retriever"],
             generator=generator,
@@ -2268,6 +2322,30 @@ def precision_miner(
     finally:
         if tempdir is not None:
             tempdir.cleanup()
+
+
+@app.command("tasks")
+def tasks(
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
+    output_format: OutputFormat = _format_option(),
+) -> None:
+    """List available classifier and miner kinds (built-in and declarative)."""
+    try:
+        workspace_config = _optional_workspace(workspace)
+        if workspace_config is not None:
+            load_tasks_dir(workspace_config.root / "tasks", overwrite=True)
+    except Exception as exc:
+        _abort(str(exc))
+    _emit(
+        {"classifiers": classifier_catalog(), "miners": miner_catalog()},
+        output_format,
+        _human_tasks,
+    )
 
 
 @app.command()

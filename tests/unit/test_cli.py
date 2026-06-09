@@ -335,3 +335,143 @@ def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> N
     payload = json.loads(result.stdout)
     assert payload["paper_id"] == "paper"
     assert payload["result"]["classification"] == ["open"]
+
+
+def _study_design_spec() -> dict:
+    return {
+        "key": "study_design",
+        "kind": "classifier",
+        "label": "Study design",
+        "multi_label": False,
+        "default_label": "unclear",
+        "labels": [
+            {
+                "code": "cohort",
+                "name": "Cohort",
+                "definition": "Follows groups over time.",
+                "examples": ["We followed a cohort of exposed individuals."],
+            },
+            {
+                "code": "unclear",
+                "name": "Unclear",
+                "definition": "Not enough information.",
+            },
+        ],
+    }
+
+
+class _FakeStudyDesignGenerator:
+    model_id = "fake-study-design"
+
+    def generate(self, contexts, **kwargs):
+        return Provenance(
+            answer=(
+                '{"reasoning": "a cohort followed over time", '
+                '"confidence": 0.9, "classification": ["cohort"]}'
+            ),
+            evidences=[],
+        )
+
+
+def test_classify_with_task_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeStudyDesignGenerator(),
+    )
+
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nWe followed a cohort of exposed individuals for a year.",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "study_design.json"
+    spec_file.write_text(json.dumps(_study_design_spec()), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "classify",
+            "--file",
+            str(paper),
+            "--task-file",
+            str(spec_file),
+            "--embed-model",
+            "fake-embedder/1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["paper_id"] == "paper"
+    assert payload["result"]["classification"] == ["cohort"]
+
+
+def test_classify_with_workspace_task(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeStudyDesignGenerator(),
+    )
+
+    workspace = tmp_path / "ws"
+    init_result = runner.invoke(app, ["init", str(workspace)])
+    assert init_result.exit_code == 0
+    tasks_dir = workspace / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    (tasks_dir / "study_design.json").write_text(
+        json.dumps(_study_design_spec()), encoding="utf-8"
+    )
+
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nWe followed a cohort of exposed individuals for a year.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "classify",
+            "--file",
+            str(paper),
+            "--workspace",
+            str(workspace),
+            "--classifier-kind",
+            "study_design",
+            "--embed-model",
+            "fake-embedder/1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["result"]["classification"] == ["cohort"]
+
+
+def test_tasks_command_lists_builtin_and_declarative(tmp_path) -> None:
+    workspace = tmp_path / "ws"
+    runner.invoke(app, ["init", str(workspace)])
+    tasks_dir = workspace / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    (tasks_dir / "study_design.json").write_text(
+        json.dumps(_study_design_spec()), encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["tasks", "--workspace", str(workspace)])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    keys = {entry["key"] for entry in payload["classifiers"]}
+    assert "data_accessibility" in keys
+    assert "study_design" in keys
+    declared = next(
+        entry for entry in payload["classifiers"] if entry["key"] == "study_design"
+    )
+    assert declared["source"] == "declarative"

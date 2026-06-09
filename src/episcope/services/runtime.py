@@ -28,8 +28,6 @@ from episcope.workflows.classification import (
     WithinLabelCrossEncoderReranker,
 )
 from episcope.workflows.registry import (
-    ClassifierKind,
-    PrecisionMinerKind,
     build_classifier_config as _build_classifier_config,
     build_precision_miner_config as _build_precision_miner_config,
 )
@@ -148,7 +146,8 @@ class EpiScopeRuntime:
         self,
         paper_id: str,
         *,
-        classifier_kind: ClassifierKind = ClassifierKind("data_accessibility"),
+        classifier_kind: str = "data_accessibility",
+        config: Optional[Any] = None,
         detailed: bool = True,
     ) -> Any:
         classifier = PaperClassifier(
@@ -156,7 +155,7 @@ class EpiScopeRuntime:
             generator=self.build_generator(),
             strategy_name=self.config.strategy_name,
             academic_db=self.build_db(),
-            config=self.build_classifier_config(classifier_kind),
+            config=config or self.build_classifier_config(classifier_kind),
             evidence_reranker=self.build_evidence_reranker(),
         )
         if detailed:
@@ -167,7 +166,8 @@ class EpiScopeRuntime:
         self,
         paper_id: str,
         *,
-        miner_kind: PrecisionMinerKind = PrecisionMinerKind("find_data_sources"),
+        miner_kind: str = "find_data_sources",
+        config: Optional[Any] = None,
         detailed: bool = True,
     ) -> Any:
         miner = PrecisionMiner(
@@ -175,7 +175,7 @@ class EpiScopeRuntime:
             generator=self.build_generator(),
             strategy_name=self.config.strategy_name,
             academic_db=self.build_db(),
-            config=self.build_precision_miner_config(miner_kind),
+            config=config or self.build_precision_miner_config(miner_kind),
         )
         if detailed:
             return miner.run_detailed(paper_id)
@@ -249,10 +249,10 @@ class EpiScopeRuntime:
             return Retriever(vectordb=vdb, use_rerank=False)
         raise ValueError(f"Unsupported retrieval_mode={self.config.retrieval_mode!r}")
 
-    def build_classifier_config(self, kind: ClassifierKind):
+    def build_classifier_config(self, kind: str):
         return _build_classifier_config(kind, self.config.workflow_top_k)
 
-    def build_precision_miner_config(self, kind: PrecisionMinerKind):
+    def build_precision_miner_config(self, kind: str):
         return _build_precision_miner_config(kind, self.config.workflow_top_k)
 
     def build_evidence_reranker(self):

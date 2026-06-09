@@ -60,6 +60,7 @@ def create_workspace(
         config.index_dir,
         config.outputs_dir,
         config.logs_dir,
+        "tasks",
     ):
         config.resolve_path(directory).mkdir(parents=True, exist_ok=True)
     write_workspace_config(config)

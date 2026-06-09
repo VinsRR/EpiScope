@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 from episcope import __version__
 from episcope.services import EpiScopeRuntime, RuntimeConfig
 from episcope.workflows.registry import (
-    ClassifierKind,
-    PrecisionMinerKind,
+    TaskSpec,
+    build_classifier_config_from_spec,
+    build_miner_config_from_spec,
     classifier_catalog,
     miner_catalog,
 )
@@ -76,14 +77,16 @@ class BackendConfig(BaseModel):
 
 class ClassificationRequest(BaseModel):
     paper_id: str
-    classifier_kind: ClassifierKind = ClassifierKind("data_accessibility")
+    classifier_kind: str = "data_accessibility"
+    task: Optional[TaskSpec] = None
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
 
 class PrecisionMinerRequest(BaseModel):
     paper_id: str
-    miner_kind: PrecisionMinerKind = PrecisionMinerKind("find_data_sources")
+    miner_kind: str = "find_data_sources"
+    task: Optional[TaskSpec] = None
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
 
@@ -116,9 +119,15 @@ def health() -> Dict[str, Any]:
 def classify(request: ClassificationRequest) -> Dict[str, Any]:
     try:
         runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        inline_config = None
+        if request.task is not None:
+            if request.task.kind != "classifier":
+                raise ValueError("task.kind must be 'classifier' for /classify.")
+            inline_config = build_classifier_config_from_spec(request.task)
         result = runtime.classify(
             request.paper_id,
             classifier_kind=request.classifier_kind,
+            config=inline_config,
             detailed=request.detailed,
         )
         return _json_ready(result)
@@ -134,9 +143,15 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
 def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
     try:
         runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        inline_config = None
+        if request.task is not None:
+            if request.task.kind != "miner":
+                raise ValueError("task.kind must be 'miner' for /precision-miner.")
+            inline_config = build_miner_config_from_spec(request.task)
         result = runtime.precision_mine(
             request.paper_id,
             miner_kind=request.miner_kind,
+            config=inline_config,
             detailed=request.detailed,
         )
         return _json_ready(result)
