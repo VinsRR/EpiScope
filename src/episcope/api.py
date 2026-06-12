@@ -100,13 +100,24 @@ class ExplorerRequest(BaseModel):
     config: BackendConfig = Field(default_factory=BackendConfig)
 
 
+def _redact_secrets(defaults: Dict[str, Any]) -> Dict[str, Any]:
+    """Never expose connection strings (which may carry credentials) over HTTP.
+
+    ``checks.mongo_uri_configured`` already reports presence as a boolean.
+    """
+    safe = dict(defaults)
+    if safe.get("mongo_uri"):
+        safe["mongo_uri"] = "***configured***"
+    return safe
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     runtime_health = EpiScopeRuntime().health()
     return {
         "status": "ok",
         "service": "episcope-api",
-        "defaults": _json_ready(runtime_health.defaults),
+        "defaults": _redact_secrets(_json_ready(runtime_health.defaults)),
         "checks": runtime_health.checks,
         "kinds": {
             "classifiers": classifier_catalog(),

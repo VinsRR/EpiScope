@@ -2,11 +2,36 @@
 
 EpiScope is a Python package for retrieval-backed analysis of scientific papers, with a focus on evidence-aware workflows over epidemiology and public-health literature.
 
-Today, the codebase is centered around three main entry points:
+## What You Can Do
 
-- a FastAPI backend in `src/episcope/api.py`
-- a Streamlit UI in `src/episcope/ui/streamlit_app.py`
-- reusable Python workflows under `src/episcope/workflows`
+- **Index** a PDF or a folder of PDFs into a local vector store — no database or server required.
+- **Explore / ask** questions over the indexed evidence, with provenance back to the source chunks.
+- **Classify** papers (data availability, data type, geography, paper type) with evidence-backed labels.
+- **Extract** structured signals (data sources, supplementary links, key references).
+- **Define your own** classifier or miner as plain JSON — no Python required.
+- Use it four ways: the **`episcope` CLI**, **Python** (`import episcope`), a **FastAPI** server, and a **Streamlit** UI.
+
+## Fastest Way To Try It
+
+```bash
+python -m pip install "epi-scope @ git+https://github.com/VinsRR/EpiScope.git@main"
+episcope doctor                                       # check your environment first
+episcope ask "What data sources were used?" --path paper.pdf
+```
+
+See [Start Here For Epidemiologists](#start-here-for-epidemiologists) below for
+the full local walkthrough, the [notebooks](notebooks/) for the Python API, or
+the [project wiki](https://github.com/VinsRR/EpiScope/wiki) for the CLI, API,
+UI, and declarative-task guides.
+
+## Entry Points
+
+EpiScope can be used four ways:
+
+- the **`episcope` CLI** — the easiest local path (also `python -m episcope`)
+- reusable **Python** workflows under `src/episcope/workflows`
+- a **FastAPI** backend in `src/episcope/api.py`
+- a **Streamlit** UI in `src/episcope/ui/streamlit_app.py`
 
 ## What Is In The Package Today
 
@@ -422,6 +447,14 @@ The UI talks to the FastAPI backend and exposes the same main runtime controls:
 ## Running With Docker Compose
 
 The root [docker-compose.yml](docker-compose.yml) supports three practical modes.
+
+> **Prerequisite:** the `api` and `ui` services read an `.env` file, which is not
+> committed. Create one before the first run:
+>
+> ```bash
+> cp .env.example .env
+> # edit .env to add GEMINI_API_KEY (and MONGO_URI for classify/precision-miner)
+> ```
 
 ### 1. Local Dev Mode
 
