@@ -6,7 +6,11 @@ from typing import Optional
 
 import dotenv
 
-dotenv.load_dotenv()
+# Load `.env` from the current working directory (and its parents), which is
+# what users expect. The default `load_dotenv()` searches up from this file's
+# location instead, so an installed package would never find a user's project
+# `.env`.
+dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
 
 
 def env(

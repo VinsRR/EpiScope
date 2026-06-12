@@ -206,7 +206,13 @@ with st.sidebar:
         with st.expander("Backend Checks", expanded=False):
             json_block(checks)
     except Exception as exc:
-        st.error(f"API not reachable: {exc}")
+        st.error(f"API not reachable at {api_base_url}: {exc}")
+        st.info(
+            "The Streamlit UI is a thin client over the EpiScope API. Start the "
+            "API in a separate terminal, then set the URL above.\n\n"
+            "```\npip install \"epi-scope[server]\"\nepiscope serve --port 8000\n```\n\n"
+            "Or run the whole stack with Docker Compose (see the README)."
+        )
         st.stop()
 
     st.header("Model")

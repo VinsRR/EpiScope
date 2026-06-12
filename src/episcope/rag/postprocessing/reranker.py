@@ -135,7 +135,9 @@ class CrossEncoderReranker(Reranker):
     ) -> "CrossEncoderReranker":
         from sentence_transformers import CrossEncoder
 
-        model = CrossEncoder(model_name, device=device)
+        from episcope.rag.device import resolve_device
+
+        model = CrossEncoder(model_name, device=resolve_device(device))
         return cls(model, **kwargs)
 
 

@@ -19,10 +19,10 @@ episcope doctor                                       # check your environment f
 episcope ask "What data sources were used?" --path paper.pdf
 ```
 
-See [Start Here For Epidemiologists](#start-here-for-epidemiologists) below for
-the full local walkthrough, the [notebooks](notebooks/) for the Python API, or
-the [project wiki](https://github.com/VinsRR/EpiScope/wiki) for the CLI, API,
-UI, and declarative-task guides.
+See [Start Here If You Are New](#start-here-if-you-are-new) below for the full
+local walkthrough, the [notebooks](notebooks/) for the Python API, or the
+[project wiki](https://github.com/VinsRR/EpiScope/wiki) for the CLI, API, UI, and
+declarative-task guides.
 
 ## Entry Points
 
@@ -226,10 +226,15 @@ python -m pip install -e ".[dev]"
 Optional extras can be installed from either GitHub or a local checkout:
 
 ```bash
-python -m pip install "epi-scope[ui] @ git+https://github.com/VinsRR/EpiScope.git@main"
-python -m pip install "epi-scope[server] @ git+https://github.com/VinsRR/EpiScope.git@main"
-python -m pip install "epi-scope[dev] @ git+https://github.com/VinsRR/EpiScope.git@main"
+python -m pip install "epi-scope[server] @ git+https://github.com/VinsRR/EpiScope.git@main"   # FastAPI backend
+python -m pip install "epi-scope[ui] @ git+https://github.com/VinsRR/EpiScope.git@main"       # Streamlit frontend
+python -m pip install "epi-scope[all] @ git+https://github.com/VinsRR/EpiScope.git@main"      # both (API + UI)
+python -m pip install "epi-scope[dev] @ git+https://github.com/VinsRR/EpiScope.git@main"      # tests, lint, type-check
 ```
+
+The `ui` extra installs only the Streamlit frontend, which needs a running API;
+use `all` (or `server,ui`) if you want the full UI experience. See
+[Running The UI](#running-the-ui).
 
 If you only want to build the package from the repository root:
 
@@ -240,9 +245,38 @@ python -m build
 
 ## Configuration
 
-Runtime configuration is read from environment variables, with `.env` loaded automatically if present.
+Runtime configuration is read from environment variables. They can be set in
+your shell or, more conveniently, in a `.env` file.
 
-Common settings:
+### The `.env` File
+
+EpiScope automatically loads a file named `.env` from the working directory (and
+parent directories) at startup. It holds your **secrets** (API keys, database
+URIs) and any settings you want to persist, one `KEY=value` per line:
+
+```bash
+GEMINI_API_KEY=your-key-here
+# MONGO_URI=mongodb+srv://...        # only for the API/UI corpus path
+# EPISCOPE_DEVICE=cpu                # force CPU if your GPU is unsupported
+```
+
+Notes:
+
+- **It is not committed.** `.env` is in `.gitignore` because it usually contains
+  credentials. Never commit it or paste keys into commands or issues.
+- **It starts with a dot, so it is hidden** in most file managers and `ls`. Use
+  `ls -a` to see it. Copy the starter template to begin:
+
+  ```bash
+  cp .env.example .env
+  ```
+
+  (`.env.example` lists every supported variable with comments. If you installed
+  from PyPI/GitHub rather than a clone, you can also just create `.env` by hand.)
+- The repository ships a `.env.example` you can copy; the real `.env` you create
+  is yours alone.
+
+### Common Settings
 
 - `EPISCOPE_STRATEGY_NAME`
 - `MONGO_URI`
@@ -252,6 +286,7 @@ Common settings:
 - `EPISCOPE_LLM_PROVIDER`
 - `EPISCOPE_LLM_MODEL`
 - `EPISCOPE_EMBED_PROVIDER` (embedding provider: `auto` | `huggingface` | `openai` | `gemini` | `ollama`)
+- `EPISCOPE_DEVICE` (torch device: `auto` (default) | `cpu` | `cuda` | `mps`)
 - `CROSS_ENCODER_MODEL`
 - `OLLAMA_HOST`
 - `EPISCOPE_API_HOST`
@@ -259,13 +294,17 @@ Common settings:
 - `EPISCOPE_API_BASE_URL`
 - `EPISCOPE_LOG_LEVEL`
 - `EPISCOPE_OUTPUT_FORMAT` (CLI default output format: `human` or `json`)
+- `EPISCOPE_TASKS_DIR` (directory of JSON task specs loaded at startup)
 
-Provider-specific credentials:
+### Provider Credentials
 
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `OPENROUTER_API_KEY`
+
+`episcope doctor` reports which of these are set and which compute device will
+be used — run it first when something does not work.
 
 Current provider values supported by the API and UI:
 
@@ -276,11 +315,11 @@ Current provider values supported by the API and UI:
 
 The default runtime settings live in `src/episcope/settings.py`.
 
-## Start Here For Epidemiologists
+## Start Here If You Are New
 
 If you want to try EpiScope on a paper without setting up databases, use the CLI path first. It builds a temporary local index for the file or folder you provide, so you do not need MongoDB or Qdrant.
 
-First, check that your environment is ready (Python version, LLM key, and optional services):
+First, check that your environment is ready (Python version, compute device, LLM key, and optional services):
 
 ```bash
 episcope doctor
@@ -322,10 +361,40 @@ Extract likely data sources:
 episcope precision-miner --file /path/to/paper.pdf --miner-kind find_data_sources
 ```
 
+### Running Without An API Key (Ollama)
+
+`explore` and `index` need no API key. `ask`, `classify`, and `precision-miner`
+need a text-generation model. The easiest **keyless** option is
+[Ollama](https://ollama.com), a free local LLM runner:
+
+```bash
+# 1. Install Ollama
+#      macOS:  brew install ollama       (or download from https://ollama.com/download)
+#      Linux:  curl -fsSL https://ollama.com/install.sh | sh
+# 2. Start it and pull models:
+ollama serve &
+ollama pull llama3.2:1b      # small model — fine for `ask`
+ollama pull qwen2.5:7b       # larger model — for classify / precision-miner
+
+# 3. Use it:
+episcope ask "What data sources were used?" --path paper.pdf \
+  --llm-provider ollama --llm-model llama3.2:1b
+```
+
+If you run `ask` / `classify` / `precision-miner` with **no API key configured**,
+EpiScope automatically falls back to a local Ollama model (a small one for
+`ask`, and it tells you when the workflows need a larger model), and prints these
+exact instructions if Ollama is not installed yet.
+
+For better quality or speed, set a cloud key instead — `GEMINI_API_KEY`,
+`OPENAI_API_KEY`, or `OPENROUTER_API_KEY` (see [Configuration](#configuration)).
+
 Local notes:
 
-- local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which does not require a Gemini/OpenAI key
+- local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which runs locally and does not require a Gemini/OpenAI key
+- PDF parsing with the default `unstructured` loader may need system packages for some PDFs: `poppler` (generally) and `tesseract` (for scanned/image PDFs). On Debian/Ubuntu: `sudo apt-get install poppler-utils tesseract-ocr`; on macOS: `brew install poppler tesseract`. For cleaner section structure, point EpiScope at a running GROBID service with `--loader grobid`.
 - answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
+- on an older or unsupported GPU, the default device selection (`auto`) avoids the GPU and uses the CPU; you can force it with `EPISCOPE_DEVICE=cpu`. `episcope doctor` shows the resolved compute device.
 - classifier and miner kinds (including any user-defined ones) are listed by `episcope tasks`
 - use the API/UI/Docker path once you have a shared indexed corpus and want multiple users to work against the same backend
 
@@ -365,6 +434,17 @@ nearest `episcope.toml` automatically:
 cd my-review
 episcope papers
 episcope ask "Which studies use surveillance data?"
+```
+
+**Workspace visibility:** a workspace is only picked up when you run from inside
+it (or a subfolder), or when you pass `--workspace <path>` explicitly. From an
+unrelated directory with no `--workspace`, EpiScope falls back to global defaults
+and `episcope doctor` reports `Workspace: none discovered` — that is expected,
+not an error. To use a workspace from anywhere, pass its path:
+
+```bash
+episcope papers  --workspace /path/to/my-review
+episcope doctor  --workspace /path/to/my-review
 ```
 
 The workspace file stores local paths and defaults. Secrets such as
@@ -424,11 +504,22 @@ Practical runtime notes:
 
 ## Running The UI
 
-Start the Streamlit app from the repository root:
+The Streamlit UI is a **thin client over the FastAPI backend** — it does not run
+workflows itself, it calls the API over HTTP. So you need **both** the API and
+the UI. The `ui` extra installs only the frontend; install the `all` extra (or
+`server` + `ui`) to get both, and start the API first:
 
 ```bash
-episcope-ui
+python -m pip install "epi-scope[all]"   # API + UI (or: "epi-scope[server,ui]")
+
+episcope serve --port 8000               # terminal 1: the API backend
+episcope-ui                              # terminal 2: the Streamlit UI
 ```
+
+If the UI shows **"API not reachable"**, the backend is not running (or the
+"API Base URL" in the sidebar points elsewhere) — start `episcope serve` and set
+the URL. The simplest way to get everything at once is Docker Compose (below),
+which starts the API, UI, Qdrant, and GROBID together.
 
 The current UI includes three tabs:
 

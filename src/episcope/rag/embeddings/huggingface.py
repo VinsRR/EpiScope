@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoConfig, AutoModelForMaskedLM, AutoTokenizer, AutoModel
 
 from .base import Embedder, SparseEmbedder, LateEmbedder
+from episcope.rag.device import resolve_device
 
 
 # SUPPORTED_CROSS_ENCODER_MODELS = {
@@ -65,6 +66,10 @@ class HuggingFaceEmbedder(Embedder):
                 f"Model '{model}' is not in the list of supported dense embedding models: "
                 f"{sorted(SUPPORTED_DENSE_MODELS)}."
             )
+
+        # Default to a safe device: auto-selecting CUDA on an unsupported GPU
+        # crashes with cudaErrorNoKernelImageForDevice.
+        device = resolve_device(device)
 
         self._model = model
         self._batch_size = batch_size

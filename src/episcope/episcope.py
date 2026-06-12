@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
@@ -528,6 +529,92 @@ def _build_generator(provider: LLMProvider, model: Optional[str], temperature: f
     return LLMGenerator(client=client, model=resolved_model, temperature=temperature)
 
 
+# Small model for free-form Q&A; a larger instruct model for the structured
+# (JSON) classification/extraction workflows.
+_OLLAMA_SMALL_MODEL = "llama3.2:1b"
+_OLLAMA_STRONG_MODEL = "qwen2.5:7b"
+
+
+def _ollama_models() -> Optional[list[str]]:
+    """Locally-available Ollama model names, or None if the server is unreachable."""
+    try:
+        resp = requests.get(f"{_SETTINGS.ollama_host}/api/tags", timeout=3)
+        resp.raise_for_status()
+        return [model.get("name", "") for model in resp.json().get("models", [])]
+    except Exception:
+        return None
+
+
+def _ollama_setup_hint(model: str) -> str:
+    return (
+        "To run EpiScope without a cloud API key, use Ollama (free, local):\n"
+        "  1. Install — macOS: `brew install ollama` (or https://ollama.com/download)\n"
+        "              Linux: `curl -fsSL https://ollama.com/install.sh | sh`\n"
+        "  2. Start it: `ollama serve`\n"
+        f"  3. Pull a model: `ollama pull {model}`\n"
+        f"  4. Re-run with: `--llm-provider ollama --llm-model {model}`\n\n"
+        "Or set GEMINI_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY) in your .env."
+    )
+
+
+def _resolve_generator(
+    provider: LLMProvider,
+    model: Optional[str],
+    temperature: float,
+    *,
+    task: str,
+):
+    """Build a generator, falling back to a local Ollama model when no key is set.
+
+    Honors an explicit provider choice and the configured Gemini key. Only when
+    the default Gemini provider is used *and* no key is present does it route to
+    a local Ollama model — a small one for ``ask``, with a notice that the
+    classification/extraction workflows need a larger model.
+    """
+    needs_strong = task in {"classify", "precision-miner"}
+    default_model = _OLLAMA_STRONG_MODEL if needs_strong else _OLLAMA_SMALL_MODEL
+
+    if provider != LLMProvider.gemini or env("GEMINI_API_KEY"):
+        return _build_generator(provider, model, temperature)
+
+    available = _ollama_models()
+    if available is None:
+        raise ValueError(
+            "No GEMINI_API_KEY found and no local Ollama server is running.\n\n"
+            + _ollama_setup_hint(default_model)
+        )
+
+    chosen = model or default_model
+    if chosen not in available:
+        hint = (
+            f"Ollama is running, but the model '{chosen}' is not pulled.\n"
+            f"  Run: `ollama pull {chosen}`"
+        )
+        if available:
+            hint += f"\n  Models available now: {', '.join(available)}"
+        raise ValueError(hint)
+
+    typer.secho(
+        f"No API key found — using a local Ollama model ('{chosen}').",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    if needs_strong:
+        typer.secho(
+            "Note: classification and extraction need a capable instruct model; "
+            "a small model may return incomplete or invalid results "
+            f"(recommended: `ollama pull {_OLLAMA_STRONG_MODEL}`).",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+    if sys.stdin.isatty() and not typer.confirm(
+        "Continue with the local model?", default=True
+    ):
+        raise ValueError("Cancelled.")
+
+    return _build_generator(LLMProvider.ollama, chosen, temperature)
+
+
 def _build_retriever(
     vectordb: Any,
     *,
@@ -925,6 +1012,15 @@ def doctor(
         "" if py_ok else "EpiScope requires Python 3.10 or newer.",
         section="Environment",
     )
+    from episcope.rag.device import resolve_device
+
+    add(
+        "ok",
+        "Compute device",
+        resolve_device(),
+        "Override with EPISCOPE_DEVICE=cpu|cuda|mps.",
+        section="Environment",
+    )
 
     # LLM ------------------------------------------------------------------
     provider = settings.llm_provider
@@ -959,14 +1055,14 @@ def doctor(
     elif key_env is not None:
         has_key = bool(env(key_env))
         add(
-            "ok" if has_key else "fail",
+            "ok" if has_key else "warn",
             key_env,
             "set" if has_key else "not set",
             ""
             if has_key
             else (
-                f"Export {key_env} to use ask/classify/precision-miner "
-                f"with provider {provider!r}."
+                f"No {key_env} set. Set it for provider {provider!r}, or run "
+                "locally without a key via Ollama (see the README)."
             ),
             section="LLM",
         )
@@ -1691,7 +1787,9 @@ def explore(
             "provenance": None,
         }
         if generate_answer:
-            generator = _build_generator(llm_provider, llm_model, temperature)
+            generator = _resolve_generator(
+                llm_provider, llm_model, temperature, task="ask"
+            )
             provenance = generator.generate(results, question=query)
             payload["answer"] = provenance.answer
             payload["provenance"] = provenance
@@ -1828,7 +1926,9 @@ def ask(
             raise ValueError("Provide --path or run inside/pass --workspace.")
 
         results = list(retriever.retrieve(question, top_k=top_k))
-        generator = _build_generator(llm_provider, llm_model, temperature)
+        generator = _resolve_generator(
+            llm_provider, llm_model, temperature, task="ask"
+        )
         provenance = generator.generate(results, question=question)
 
         source_summaries = [
@@ -2068,7 +2168,9 @@ def classify(
             chunk_overlap=chunk_overlap,
         )
         tempdir = resolved["tempdir"]
-        generator = _build_generator(llm_provider, llm_model, temperature)
+        generator = _resolve_generator(
+            llm_provider, llm_model, temperature, task="classify"
+        )
         classifier_kind = _prepare_tasks(
             workspace_config, task_file, classifier_kind, expected="classifier"
         )
@@ -2300,7 +2402,9 @@ def precision_miner(
             chunk_overlap=chunk_overlap,
         )
         tempdir = resolved["tempdir"]
-        generator = _build_generator(llm_provider, llm_model, temperature)
+        generator = _resolve_generator(
+            llm_provider, llm_model, temperature, task="precision-miner"
+        )
         miner_kind = _prepare_tasks(
             workspace_config, task_file, miner_kind, expected="miner"
         )

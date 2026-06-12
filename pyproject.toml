@@ -38,6 +38,11 @@ server = [
     "qdrant-client",
     "pymongo",
 ]
+# Everything needed to run the API and the Streamlit UI together.
+all = [
+    "epi-scope[server]",
+    "epi-scope[ui]",
+]
 dev = [
     "pytest==9.0.3",
     "ruff==0.15.11",

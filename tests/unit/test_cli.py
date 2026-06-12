@@ -21,6 +21,15 @@ def _json_output_by_default(monkeypatch) -> None:
     monkeypatch.setenv("EPISCOPE_OUTPUT_FORMAT", "json")
 
 
+@pytest.fixture(autouse=True)
+def _default_gemini_key(monkeypatch) -> None:
+    """Provide a dummy key so generation commands resolve to (the monkeypatched)
+    ``_build_generator`` instead of the keyless Ollama fallback. Tests that
+    exercise the fallback delete it explicitly.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+
 class _FakeEmbedder:
     model_name = "fake-embedder/1"
     dim = 4
@@ -289,17 +298,19 @@ def test_doctor_reports_ok_when_provider_key_present(monkeypatch) -> None:
     assert {"Environment", "LLM"} <= sections
 
 
-def test_doctor_fails_when_provider_key_missing(monkeypatch) -> None:
+def test_doctor_warns_when_provider_key_missing(monkeypatch) -> None:
+    # A missing cloud key is a warning, not a failure: you can run keyless via
+    # Ollama. doctor still succeeds (exit 0).
     monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     result = runner.invoke(app, ["doctor", "--no-probe"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["ok"] is False
+    assert payload["ok"] is True
     assert any(
-        check["status"] == "fail" and check["label"] == "OPENAI_API_KEY"
+        check["status"] == "warn" and check["label"] == "OPENAI_API_KEY"
         for check in payload["checks"]
     )
 
@@ -475,3 +486,79 @@ def test_tasks_command_lists_builtin_and_declarative(tmp_path) -> None:
         entry for entry in payload["classifiers"] if entry["key"] == "study_design"
     )
     assert declared["source"] == "declarative"
+
+
+# ---------------------------------------------------------------------------
+# Keyless Ollama fallback for generation
+# ---------------------------------------------------------------------------
+def test_resolve_generator_passthrough_for_explicit_provider(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("built", p, m))
+    result = cli._resolve_generator(cli.LLMProvider.nollm, None, 0.0, task="ask")
+    assert result == ("built", cli.LLMProvider.nollm, None)
+
+
+def test_resolve_generator_uses_gemini_when_key_present(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("built", p, m))
+    result = cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="ask")
+    assert result[1] == cli.LLMProvider.gemini
+
+
+def test_resolve_generator_ask_falls_back_to_small_ollama_model(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_SMALL_MODEL])
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("ollama", p, m))
+    result = cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="ask")
+    assert result == ("ollama", cli.LLMProvider.ollama, cli._OLLAMA_SMALL_MODEL)
+
+
+def test_resolve_generator_workflow_uses_strong_default(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_STRONG_MODEL])
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("ollama", p, m))
+    result = cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="classify")
+    assert result[2] == cli._OLLAMA_STRONG_MODEL
+
+
+def test_resolve_generator_errors_without_key_or_ollama(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: None)
+    with pytest.raises(ValueError, match="ollama pull"):
+        cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="ask")
+
+
+def test_resolve_generator_errors_when_model_not_pulled(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: ["some-other-model"])
+    with pytest.raises(ValueError, match="not pulled"):
+        cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="ask")
+
+
+def test_ask_without_key_or_ollama_shows_install_hint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("episcope.episcope._ollama_models", lambda: None)
+
+    paper = tmp_path / "paper.txt"
+    paper.write_text("The dataset is on Zenodo.", encoding="utf-8")
+
+    result = runner.invoke(app, ["ask", "Where are the data?", "--path", str(paper)])
+
+    assert result.exit_code == 1
+    assert "Ollama" in result.output
+    assert "ollama pull" in result.output
