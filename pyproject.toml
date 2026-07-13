@@ -38,6 +38,15 @@ server = [
     "qdrant-client",
     "pymongo",
 ]
+# GROBID-backed PDF parsing (`--loader grobid`). Provides the `grobid_client`
+# module used by episcope.rag.ingestion.local_grobid_client.
+grobid = [
+    "grobid-client-python",
+]
+# Local FAISS vector backend (`--index-backend faiss`).
+faiss = [
+    "faiss-cpu",
+]
 # Everything needed to run the API and the Streamlit UI together.
 all = [
     "epi-scope[server]",

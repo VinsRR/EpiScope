@@ -1,5 +1,8 @@
-fastapi
-uvicorn
+# Runtime dependencies for the Docker image. Kept in sync with pyproject.toml:
+# each entry below maps to a section of [project.dependencies] or an extra.
+# The image installs these first (for layer caching) and then `pip install -e ".[server]"`.
+
+# Base — mirrors [project].dependencies
 pydantic
 typer
 requests
@@ -9,12 +12,21 @@ torch
 transformers
 sentence-transformers
 tqdm
-faiss-cpu
-qdrant-client
 unstructured[pdf]
 pypdf
 openai
 google-genai
 rapidfuzz
 lxml
+
+# [server] extra — FastAPI backend, Qdrant and MongoDB integrations
+fastapi
+uvicorn
+qdrant-client
 pymongo
+
+# [faiss] extra — local FAISS vector backend (--index-backend faiss)
+faiss-cpu
+
+# [grobid] extra — GROBID-backed PDF parsing (--loader grobid)
+grobid-client-python
