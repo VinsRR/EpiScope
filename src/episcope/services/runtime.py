@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from episcope.clients import (
@@ -11,6 +12,7 @@ from episcope.clients import (
     OpenAIClient,
     OpenRouterClient,
 )
+from episcope.db import AcademicDB, InMemoryAcademicDB
 from episcope.db.mongo_academic_db import MongoAcademicDB
 from episcope.rag.generation.llm_generator import LLMGenerator
 from episcope.rag.provenance import Provenance
@@ -22,6 +24,7 @@ from episcope.rag.retrieval.candidates import (
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import SearchResult
 from episcope.settings import AppSettings, env
+from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
 from episcope.workflows import PaperClassifier, PrecisionMiner
 from episcope.workflows.classification import (
@@ -41,6 +44,14 @@ EvidenceRerankerKind = Literal[
     "none", "global_cross_encoder", "within_label_cross_encoder"
 ]
 
+# Local-first fallback locations used when no Qdrant/Mongo is configured
+# (e.g. `episcope studio` with no external services). Intentionally mirrors
+# the CLI's own `.episcope/` convention (`episcope.py`'s `_DEFAULT_INDEX_DIR`
+# / `_DEFAULT_DB_BACKUP`) as a duplicated constant, since `services/` must
+# not import from the CLI module.
+_DEFAULT_LOCAL_INDEX_DIR = Path(".episcope") / "index"
+_DEFAULT_LOCAL_METADATA_BACKUP = Path(".episcope") / "academic_db.json"
+
 
 @dataclass(frozen=True)
 class RuntimeConfig:
@@ -49,7 +60,7 @@ class RuntimeConfig:
     strategy_name: str = "grobid"
     mongo_uri: Optional[str] = None
     mongo_db_name: str = "episcope_academic_db"
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: Optional[str] = None
     qdrant_collection: str = "episcope_academic"
     llm_provider: LlmProvider = "gemini"
     llm_model: str = "gemini-2.5-flash"
@@ -59,6 +70,9 @@ class RuntimeConfig:
     evidence_reranker_kind: EvidenceRerankerKind = "none"
     cross_encoder_model: Optional[str] = None
     cross_encoder_top_k: Optional[int] = 15
+    # Used only when qdrant_url / mongo_uri are None (local-first fallback).
+    index_dir: Optional[Path] = None
+    metadata_backup: Optional[Path] = None
 
     @classmethod
     def from_settings(cls, settings: Optional[AppSettings] = None) -> "RuntimeConfig":
@@ -67,11 +81,17 @@ class RuntimeConfig:
             strategy_name=settings.strategy_name,
             mongo_uri=settings.mongo_uri,
             mongo_db_name=settings.mongo_db_name,
-            qdrant_url=settings.qdrant_url,
+            qdrant_url=env("QDRANT_URL"),
             qdrant_collection=settings.qdrant_collection,
             llm_provider=_coerce_llm_provider(settings.llm_provider),
             llm_model=settings.llm_model,
             cross_encoder_model=settings.cross_encoder_model,
+            index_dir=Path(settings.local_index_dir)
+            if settings.local_index_dir
+            else None,
+            metadata_backup=Path(settings.local_metadata_backup)
+            if settings.local_metadata_backup
+            else None,
         )
 
 
@@ -203,18 +223,36 @@ class EpiScopeRuntime:
             temperature=self.config.llm_temperature,
         )
 
-    def build_db(self) -> MongoAcademicDB:
+    def build_db(self) -> AcademicDB:
         if not self.config.mongo_uri:
-            raise ValueError(
-                "No Mongo URI configured. Set config.mongo_uri or provide "
-                "the MONGO_URI environment variable."
-            )
+            # No Mongo configured at all: fall back to a local, file-backed
+            # store instead of requiring external services. This is
+            # deliberately not `db.get_academic_db()` - that factory
+            # silently falls back to in-memory even when a Mongo URI *is*
+            # configured but unreachable, which would look like missing
+            # papers instead of a clear connection error. Here, a
+            # configured-but-unreachable URI still raises below, unchanged.
+            backup_file = self.config.metadata_backup or _DEFAULT_LOCAL_METADATA_BACKUP
+            return InMemoryAcademicDB(backup_file=str(backup_file))
         return MongoAcademicDB(
             uri=self.config.mongo_uri,
             db_name=self.config.mongo_db_name,
         )
 
     def build_retriever(self) -> Retriever:
+        if not self.config.qdrant_url:
+            # No Qdrant configured: fall back to the same local file-backed
+            # index the CLI's own local-first commands already use. Always
+            # dense-only, regardless of `retrieval_mode` - a file index has
+            # no sparse capability, and a --quality-style preference for
+            # hybrid retrieval shouldn't turn into a hard error here.
+            index_dir = self.config.index_dir or _DEFAULT_LOCAL_INDEX_DIR
+            vdb = FileDB(str(index_dir))
+            return Retriever(
+                vectordb=vdb,
+                candidate_retrievers=[SemanticCandidateRetriever(vdb)],
+                use_rerank=False,
+            )
         try:
             vdb = QdrantDB(
                 collection=self.config.qdrant_collection,

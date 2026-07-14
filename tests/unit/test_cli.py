@@ -824,3 +824,109 @@ def test_ask_without_key_or_ollama_shows_install_hint(tmp_path, monkeypatch) -> 
     assert result.exit_code == 1
     assert "Ollama" in result.output
     assert "ollama pull" in result.output
+
+
+# ---------------------------------------------------------------------------
+# studio
+# ---------------------------------------------------------------------------
+class _FakeStudioProc:
+    def __init__(self, args, env=None):
+        self.args = args
+        self.env = env or {}
+        self.returncode = None
+        self.terminate_called = False
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.terminate_called = True
+
+    def wait(self, timeout=None):
+        self.returncode = 0
+        return self.returncode
+
+
+@pytest.fixture
+def _studio_popen(monkeypatch):
+    created: list[_FakeStudioProc] = []
+
+    def fake_popen(args, env=None):
+        proc = _FakeStudioProc(args, env=env)
+        created.append(proc)
+        return proc
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    # Simulate Ctrl-C on the first poll-loop tick so studio's cleanup path runs
+    # instead of looping forever waiting on the (fake) subprocesses.
+    monkeypatch.setattr(
+        "time.sleep", lambda *_: (_ for _ in ()).throw(KeyboardInterrupt())
+    )
+    return created
+
+
+def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
+    tmp_path, monkeypatch, _studio_popen
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.delenv("MONGO_URI", raising=False)
+
+    result = runner.invoke(
+        app, ["studio", "--api-port", "9199", "--ui-port", "9198"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(_studio_popen) == 2
+    api_proc, ui_proc = _studio_popen
+    assert "uvicorn" in api_proc.args
+    assert "episcope.api:app" in api_proc.args
+    assert "streamlit" in ui_proc.args
+    assert api_proc.terminate_called
+    assert ui_proc.terminate_called
+    # No papers indexed in this fresh tmp_path: the empty-index warning fires.
+    assert "No papers are indexed yet" in result.output
+
+
+def test_studio_points_at_workspace_index_when_qdrant_unset(
+    tmp_path, monkeypatch, _studio_popen
+) -> None:
+    from episcope.workspace import create_workspace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.delenv("MONGO_URI", raising=False)
+    ws = create_workspace(tmp_path / "my-review")
+
+    result = runner.invoke(
+        app,
+        ["studio", "--workspace", str(ws.root), "--api-port", "9197", "--ui-port", "9196"],
+    )
+
+    assert result.exit_code == 0, result.output
+    api_proc, _ = _studio_popen
+    assert api_proc.env.get("EPISCOPE_LOCAL_INDEX_DIR") == str(
+        ws.resolve_path(ws.index_dir)
+    )
+    assert api_proc.env.get("EPISCOPE_LOCAL_METADATA_BACKUP") == str(
+        ws.resolve_path(ws.metadata_path)
+    )
+
+
+def test_studio_does_not_override_explicit_qdrant_url(
+    tmp_path, monkeypatch, _studio_popen
+) -> None:
+    from episcope.workspace import create_workspace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("QDRANT_URL", "http://external-qdrant:6333")
+    ws = create_workspace(tmp_path / "my-review")
+
+    result = runner.invoke(
+        app,
+        ["studio", "--workspace", str(ws.root), "--api-port", "9195", "--ui-port", "9194"],
+    )
+
+    assert result.exit_code == 0, result.output
+    api_proc, _ = _studio_popen
+    assert "EPISCOPE_LOCAL_INDEX_DIR" not in api_proc.env

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from episcope import __version__
 from episcope.services import EpiScopeRuntime, RuntimeConfig
+from episcope.services.errors import humanize_error
 from episcope.workflows.registry import (
     TaskSpec,
     build_classifier_config_from_spec,
@@ -17,6 +19,10 @@ from episcope.workflows.registry import (
 )
 
 app = FastAPI(title="EpiScope API", version=__version__)
+
+
+def _path_str(value: Optional[Path]) -> Optional[str]:
+    return str(value) if value else None
 
 
 def _json_ready(value: Any) -> Any:
@@ -46,7 +52,7 @@ class BackendConfig(BaseModel):
     mongo_db_name: str = Field(
         default_factory=lambda: RuntimeConfig.from_settings().mongo_db_name
     )
-    qdrant_url: str = Field(
+    qdrant_url: Optional[str] = Field(
         default_factory=lambda: RuntimeConfig.from_settings().qdrant_url
     )
     qdrant_collection: str = Field(
@@ -70,9 +76,25 @@ class BackendConfig(BaseModel):
         default_factory=lambda: RuntimeConfig.from_settings().cross_encoder_model
     )
     cross_encoder_top_k: Optional[int] = 15
+    # Local-first fallback paths, used only when qdrant_url / mongo_uri are
+    # unset (see RuntimeConfig). Exposed as str over HTTP; converted back to
+    # Path in to_runtime_config().
+    index_dir: Optional[str] = Field(
+        default_factory=lambda: _path_str(RuntimeConfig.from_settings().index_dir)
+    )
+    metadata_backup: Optional[str] = Field(
+        default_factory=lambda: _path_str(
+            RuntimeConfig.from_settings().metadata_backup
+        )
+    )
 
     def to_runtime_config(self) -> RuntimeConfig:
-        return RuntimeConfig(**self.model_dump())
+        data = self.model_dump()
+        data["index_dir"] = Path(data["index_dir"]) if data["index_dir"] else None
+        data["metadata_backup"] = (
+            Path(data["metadata_backup"]) if data["metadata_backup"] else None
+        )
+        return RuntimeConfig(**data)
 
 
 class ClassificationRequest(BaseModel):
@@ -143,10 +165,10 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
         )
         return _json_ready(result)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=humanize_error(exc)) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Classification failed: {exc}"
+            status_code=500, detail=f"Classification failed: {humanize_error(exc)}"
         ) from exc
 
 
@@ -167,10 +189,10 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
         )
         return _json_ready(result)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=humanize_error(exc)) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Precision miner failed: {exc}"
+            status_code=500, detail=f"Precision miner failed: {humanize_error(exc)}"
         ) from exc
 
 
@@ -187,6 +209,6 @@ def explore(request: ExplorerRequest) -> Dict[str, Any]:
         )
         return _json_ready(result)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=humanize_error(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Explorer failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Explorer failed: {humanize_error(exc)}") from exc

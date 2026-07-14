@@ -40,6 +40,8 @@ class AppSettings:
     api_port: int = 8000
     api_base_url: str = "http://localhost:8000"
     log_level: str = "INFO"
+    local_index_dir: Optional[str] = None
+    local_metadata_backup: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -67,4 +69,6 @@ class AppSettings:
             api_base_url=env("EPISCOPE_API_BASE_URL", "http://localhost:8000")
             or "http://localhost:8000",
             log_level=(env("EPISCOPE_LOG_LEVEL", "INFO") or "INFO").upper(),
+            local_index_dir=env("EPISCOPE_LOCAL_INDEX_DIR"),
+            local_metadata_backup=env("EPISCOPE_LOCAL_METADATA_BACKUP"),
         )

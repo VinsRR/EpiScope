@@ -2953,5 +2953,136 @@ def serve(
     uvicorn.run("episcope.api:app", host=host, port=port, reload=reload)
 
 
+def _index_dir_is_empty(index_dir: Path) -> bool:
+    try:
+        return FileDB(str(index_dir)).get_embedding_model() is None
+    except Exception:
+        return True
+
+
+@app.command()
+def studio(
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace whose index/metadata to serve. Without one, uses the "
+        "current directory's local `.episcope/` store.",
+    ),
+    host: str = typer.Option(_SETTINGS.api_host, "--host"),
+    api_port: int = typer.Option(_SETTINGS.api_port, "--api-port"),
+    ui_port: int = typer.Option(8501, "--ui-port"),
+) -> None:
+    """Run the API and Streamlit UI together against a local, file-backed
+    index and in-memory metadata store - no Qdrant or MongoDB required.
+
+    Does not index anything itself; run `episcope index ... --workspace ...`
+    first. If QDRANT_URL or MONGO_URI are already set, those take precedence
+    over the local store, same as everywhere else in the CLI.
+    """
+    import os
+    import subprocess
+    import time
+    from importlib import resources
+
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError as exc:
+        _abort(f"uvicorn is required for `studio`: {exc}. Install epi-scope[server].")
+    try:
+        import streamlit  # noqa: F401
+    except ImportError as exc:
+        _abort(f"streamlit is required for `studio`: {exc}. Install epi-scope[ui].")
+
+    workspace_config = _optional_workspace(workspace)
+    child_env = dict(os.environ)
+
+    if workspace_config is not None:
+        index_dir = workspace_config.resolve_path(workspace_config.index_dir)
+        metadata_path = workspace_config.resolve_path(workspace_config.metadata_path)
+        if not env("QDRANT_URL"):
+            child_env["EPISCOPE_LOCAL_INDEX_DIR"] = str(index_dir)
+        if not env("MONGO_URI"):
+            child_env["EPISCOPE_LOCAL_METADATA_BACKUP"] = str(metadata_path)
+    else:
+        index_dir = _CLI_ROOT / "index"
+
+    if not env("QDRANT_URL") and _index_dir_is_empty(index_dir):
+        typer.secho(
+            "No papers are indexed yet at "
+            f"{index_dir} - the Explorer/Classification/Precision Miner tabs "
+            "will have nothing to retrieve. Run `episcope index ...` "
+            f"{'--workspace ' + str(workspace_config.root) if workspace_config else ''} "
+            "first.",
+            fg=typer.colors.YELLOW,
+        )
+
+    api_url = f"http://localhost:{api_port}"
+    ui_url = f"http://localhost:{ui_port}"
+    typer.secho("Starting EpiScope studio", bold=True)
+    typer.echo(f"  API: {api_url}")
+    typer.echo(f"  UI:  {ui_url}")
+    typer.echo("Press Ctrl-C to stop both.\n")
+
+    api_proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "episcope.api:app",
+            "--host",
+            host,
+            "--port",
+            str(api_port),
+        ],
+        env=child_env,
+    )
+    ui_app_path = resources.files("episcope.ui").joinpath("streamlit_app.py")
+    ui_env = {**child_env, "EPISCOPE_API_BASE_URL": api_url}
+    ui_proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(ui_app_path),
+            "--server.port",
+            str(ui_port),
+            "--server.headless",
+            "true",
+            "--browser.gatherUsageStats",
+            "false",
+        ],
+        env=ui_env,
+    )
+
+    try:
+        while True:
+            if api_proc.poll() is not None:
+                typer.secho(
+                    f"API process exited unexpectedly (code {api_proc.returncode}).",
+                    fg=typer.colors.RED,
+                )
+                break
+            if ui_proc.poll() is not None:
+                typer.secho(
+                    f"UI process exited unexpectedly (code {ui_proc.returncode}).",
+                    fg=typer.colors.RED,
+                )
+                break
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        typer.echo("\nStopping...")
+    finally:
+        for proc in (api_proc, ui_proc):
+            if proc.poll() is None:
+                proc.terminate()
+        for proc in (api_proc, ui_proc):
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
 if __name__ == "__main__":
     main()
