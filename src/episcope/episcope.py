@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 import requests
 import typer
@@ -145,6 +145,55 @@ class EvidenceRerankerKind(str, Enum):
 class OutputFormat(str, Enum):
     human = "human"
     json = "json"
+
+
+class QualityPreset(str, Enum):
+    fast = "fast"
+    balanced = "balanced"
+    accurate = "accurate"
+
+
+@dataclass(frozen=True)
+class _QualityValues:
+    """One row of the --quality preset table.
+
+    Deliberately excludes ``loader`` (accurate-but-slower parsing needs a
+    running GROBID service, which would make a "quality" knob silently start
+    depending on external infrastructure) and ``embed_model`` (changing the
+    embedding model changes vector dimensionality, which breaks retrieval
+    against an already-built index of a different quality level).
+    """
+
+    chunker: ChunkerKind
+    min_chunk_size: int
+    chunk_size: int
+    chunk_overlap: int
+    retrieval_mode: RetrievalMode
+
+
+_QUALITY_PRESETS: Dict[QualityPreset, _QualityValues] = {
+    QualityPreset.fast: _QualityValues(
+        chunker=ChunkerKind.paragraph,
+        min_chunk_size=_DEFAULT_MIN_CHUNK_SIZE,
+        chunk_size=800,
+        chunk_overlap=80,
+        retrieval_mode=RetrievalMode.dense_only,
+    ),
+    QualityPreset.balanced: _QualityValues(
+        chunker=ChunkerKind.paragraph,
+        min_chunk_size=_DEFAULT_MIN_CHUNK_SIZE,
+        chunk_size=600,
+        chunk_overlap=100,
+        retrieval_mode=RetrievalMode.hybrid,
+    ),
+    QualityPreset.accurate: _QualityValues(
+        chunker=ChunkerKind.paragraph,
+        min_chunk_size=_DEFAULT_MIN_CHUNK_SIZE,
+        chunk_size=500,
+        chunk_overlap=120,
+        retrieval_mode=RetrievalMode.hybrid,
+    ),
+}
 
 
 @dataclass
@@ -400,6 +449,49 @@ def _workspace_value(
 ):
     if workspace is not None and current == default:
         return workspace_value
+    return current
+
+
+def _resolve_value(
+    current,
+    default,
+    quality: Optional[QualityPreset],
+    quality_value,
+    workspace: Optional[WorkspaceConfig],
+    workspace_value,
+):
+    """Resolve one --quality-eligible field.
+
+    Precedence: an explicitly-typed CLI flag always wins; otherwise
+    ``--quality`` wins over ``episcope.toml``, which wins over the
+    hardcoded default. Mirrors :func:`_workspace_value`'s
+    default-detection, with the preset layer inserted above it.
+    """
+    if current != default:
+        return current
+    if quality is not None:
+        return quality_value
+    if workspace is not None:
+        return workspace_value
+    return current
+
+
+def _resolve_enum(
+    current,
+    default,
+    enum_cls,
+    quality: Optional[QualityPreset],
+    quality_value,
+    workspace: Optional[WorkspaceConfig],
+    workspace_value: str,
+):
+    """Enum-typed counterpart of :func:`_resolve_value` (see its docstring)."""
+    if current != default:
+        return current
+    if quality is not None:
+        return quality_value
+    if workspace is not None:
+        return enum_cls(workspace_value)
     return current
 
 
@@ -870,12 +962,20 @@ def _resolve_paper_from_store(
     min_chunk_size: int,
     chunk_size: int,
     chunk_overlap: int,
+    retrieval_mode_explicit: bool = False,
 ):
     if file_path is not None:
         if retrieval_mode != RetrievalMode.dense_only:
-            raise ValueError(
-                "Transient --file mode only supports --retrieval-mode dense-only."
-            )
+            if not retrieval_mode_explicit:
+                # A --quality preset (not the user) asked for hybrid/sparse
+                # retrieval; transient --file mode only ever builds a
+                # dense-only local index, so silently use it rather than
+                # erroring on a choice the user never made.
+                retrieval_mode = RetrievalMode.dense_only
+            else:
+                raise ValueError(
+                    "Transient --file mode only supports --retrieval-mode dense-only."
+                )
         tempdir, papers, retriever = _transient_retriever_for_path(
             file_path,
             loader_kind=loader_kind,
@@ -975,22 +1075,14 @@ def _print_doctor_check(status: str, label: str, detail: str, hint: str) -> None
         typer.secho(f"      {hint}", fg=typer.colors.BRIGHT_BLACK)
 
 
-@app.command()
-def doctor(
-    probe: bool = typer.Option(
-        True,
-        "--probe/--no-probe",
-        help="Probe optional services (Qdrant, GROBID, MongoDB, Ollama) over the network.",
-    ),
-    workspace: Optional[Path] = typer.Option(
-        None,
-        "--workspace",
-        "-w",
-        help="Workspace directory containing episcope.toml.",
-    ),
-    output_format: OutputFormat = _format_option(),
-) -> None:
-    """Check the local environment and report what is and is not ready to use."""
+def _collect_doctor_checks(
+    probe: bool, workspace: Optional[Path]
+) -> tuple[list[dict[str, Any]], bool]:
+    """Build the same environment/LLM/services/workspace checks `doctor`
+    reports, for reuse by other commands (e.g. `quickstart`).
+
+    Returns ``(checks, any_fail)``.
+    """
     import platform
     import sys
 
@@ -1177,13 +1269,11 @@ def doctor(
             section="Workspace",
         )
 
-    # Report ---------------------------------------------------------------
     any_fail = any(check["status"] == "fail" for check in checks)
+    return checks, any_fail
 
-    if output_format == OutputFormat.json:
-        _echo_json({"ok": not any_fail, "checks": checks})
-        raise typer.Exit(code=1 if any_fail else 0)
 
+def _print_doctor_report(checks: list[dict[str, Any]], any_fail: bool) -> None:
     current_section: Optional[str] = None
     for check in checks:
         if check["section"] != current_section:
@@ -1199,8 +1289,134 @@ def doctor(
         typer.secho(
             "Some required checks failed. See the hints above.", fg=typer.colors.RED
         )
+    else:
+        typer.secho("All required checks passed.", fg=typer.colors.GREEN)
+
+
+@app.command()
+def doctor(
+    probe: bool = typer.Option(
+        True,
+        "--probe/--no-probe",
+        help="Probe optional services (Qdrant, GROBID, MongoDB, Ollama) over the network.",
+    ),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory containing episcope.toml.",
+    ),
+    output_format: OutputFormat = _format_option(),
+) -> None:
+    """Check the local environment and report what is and is not ready to use."""
+    checks, any_fail = _collect_doctor_checks(probe, workspace)
+
+    if output_format == OutputFormat.json:
+        _echo_json({"ok": not any_fail, "checks": checks})
+        raise typer.Exit(code=1 if any_fail else 0)
+
+    _print_doctor_report(checks, any_fail)
+    if any_fail:
         raise typer.Exit(code=1)
-    typer.secho("All required checks passed.", fg=typer.colors.GREEN)
+
+
+_PROVIDER_KEY_ENV = {
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+@app.command()
+def quickstart(
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory to check at the end (see `episcope init`).",
+    ),
+) -> None:
+    """Interactively choose an LLM provider, write a .env file, and check the result.
+
+    Only touches your LLM provider configuration - it does not index anything
+    or make any model/API calls itself. Run `episcope doctor` any time
+    afterward to re-check your environment.
+    """
+    import dotenv
+
+    typer.secho("EpiScope quickstart", bold=True)
+    typer.echo("Let's configure an LLM provider and write a .env file.\n")
+
+    provider_choices = list(_PROVIDER_KEY_ENV) + ["ollama"]
+    typer.echo("Choose an LLM provider:")
+    for i, choice in enumerate(provider_choices, start=1):
+        note = "  (local, no API key needed)" if choice == "ollama" else ""
+        typer.echo(f"  {i}. {choice}{note}")
+    raw_choice = typer.prompt("Enter a number", default="1")
+    try:
+        provider = provider_choices[int(raw_choice) - 1]
+    except (ValueError, IndexError):
+        _abort(f"Invalid choice {raw_choice!r}. Run `episcope quickstart` again.")
+
+    env_path = Path(".env")
+    if not env_path.exists():
+        example_path = Path(".env.example")
+        env_path.write_text(
+            example_path.read_text(encoding="utf-8") if example_path.exists() else "",
+            encoding="utf-8",
+        )
+
+    dotenv.set_key(str(env_path), "EPISCOPE_LLM_PROVIDER", provider)
+    typer.echo(f"\nSet EPISCOPE_LLM_PROVIDER={provider} in {env_path}.")
+
+    if provider == "ollama":
+        ok, _code, _err = _probe_http(f"{_SETTINGS.ollama_host}/api/tags")
+        if ok:
+            typer.secho(
+                f"Ollama is reachable at {_SETTINGS.ollama_host}.",
+                fg=typer.colors.GREEN,
+            )
+        else:
+            typer.secho("Ollama is not reachable yet.", fg=typer.colors.YELLOW)
+            typer.echo(_ollama_setup_hint(_OLLAMA_SMALL_MODEL))
+    else:
+        key_env = _PROVIDER_KEY_ENV[provider]
+        has_key = bool(env(key_env))
+        prompt_label = f"Enter your {key_env}"
+        if has_key:
+            prompt_label += " (already set - leave blank to keep it)"
+        key_value = typer.prompt(
+            prompt_label, default="", hide_input=True, show_default=False
+        )
+        if key_value:
+            dotenv.set_key(str(env_path), key_env, key_value)
+            typer.echo(f"Set {key_env} in {env_path}.")
+        elif not has_key:
+            typer.secho(
+                f"No {key_env} provided. Add it to {env_path} before using "
+                f"provider {provider!r}.",
+                fg=typer.colors.YELLOW,
+            )
+
+    dotenv.load_dotenv(str(env_path), override=True)
+
+    typer.echo()
+    typer.secho("Checking your setup...", bold=True)
+    checks, any_fail = _collect_doctor_checks(probe=True, workspace=workspace)
+    _print_doctor_report(checks, any_fail)
+
+    typer.echo()
+    if any_fail:
+        typer.secho(
+            "Some checks still need attention - see the hints above.",
+            fg=typer.colors.YELLOW,
+        )
+    else:
+        typer.secho("You're ready. Try:", fg=typer.colors.GREEN)
+        typer.echo(
+            '  episcope ask "What data sources were used?" --path /path/to/paper.pdf'
+        )
 
 
 @app.command("init")
@@ -1613,43 +1829,72 @@ def explore(
         "--paper-id",
         help="Restrict retrieval to a single indexed paper id.",
     ),
+    quality: Optional[QualityPreset] = typer.Option(
+        None,
+        "--quality",
+        help=(
+            "Preset for chunking/retrieval: fast (fewer, larger chunks), "
+            "balanced, or accurate (smaller chunks, hybrid retrieval). "
+            "Any of the advanced flags below still overrides its part of "
+            "the preset when set explicitly."
+        ),
+    ),
     loader: LoaderKind = typer.Option(
         LoaderKind.unstructured,
         "--loader",
         help="Parsing backend used only with --path.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     embed_model: str = typer.Option(
         _DEFAULT_EMBED_MODEL,
         "--embed-model",
         help="Dense embedding model used only with --path.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     chunker: ChunkerKind = typer.Option(
         ChunkerKind.paragraph,
         "--chunker",
         help="Chunking strategy used only with --path.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
-    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
-    chunk_size: int = typer.Option(600, "--chunk-size"),
-    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    min_chunk_size: int = typer.Option(
+        _DEFAULT_MIN_CHUNK_SIZE,
+        "--min-chunk-size",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    chunk_size: int = typer.Option(
+        600, "--chunk-size", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    chunk_overlap: int = typer.Option(
+        100, "--chunk-overlap", rich_help_panel="Advanced (retrieval internals)"
+    ),
     index_backend: IndexBackend = typer.Option(
         IndexBackend.file,
         "--index-backend",
         help="Backend used for previously indexed corpora.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     index_dir: Path = typer.Option(
         _DEFAULT_INDEX_DIR,
         "--index-dir",
         help="Directory for previously built file/faiss indexes.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
-    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    qdrant_url: str = typer.Option(
+        _SETTINGS.qdrant_url,
+        "--qdrant-url",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
     qdrant_collection: str = typer.Option(
         _SETTINGS.qdrant_collection,
         "--qdrant-collection",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     retrieval_mode: RetrievalMode = typer.Option(
         RetrievalMode.dense_only,
         "--retrieval-mode",
         help="Dense-only is the most local-friendly mode.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     top_k: int = typer.Option(5, "--top-k", min=1),
     similarity_threshold: float = typer.Option(0.0, "--similarity-threshold"),
@@ -1675,6 +1920,8 @@ def explore(
     tempdir = None
     try:
         workspace_config = _optional_workspace(workspace)
+        preset = _QUALITY_PRESETS[quality] if quality is not None else None
+        retrieval_mode_explicit = retrieval_mode != RetrievalMode.dense_only
         loader = _workspace_enum(
             workspace_config,
             LoaderKind,
@@ -1688,29 +1935,37 @@ def explore(
             _DEFAULT_EMBED_MODEL,
             workspace_config.embed_model if workspace_config else None,
         )
-        chunker = _workspace_enum(
-            workspace_config,
-            ChunkerKind,
+        chunker = _resolve_enum(
             chunker,
             ChunkerKind.paragraph,
+            ChunkerKind,
+            quality,
+            preset.chunker if preset else None,
+            workspace_config,
             workspace_config.chunker if workspace_config else "",
         )
-        min_chunk_size = _workspace_value(
-            workspace_config,
+        min_chunk_size = _resolve_value(
             min_chunk_size,
             _DEFAULT_MIN_CHUNK_SIZE,
+            quality,
+            preset.min_chunk_size if preset else None,
+            workspace_config,
             workspace_config.min_chunk_size if workspace_config else None,
         )
-        chunk_size = _workspace_value(
-            workspace_config,
+        chunk_size = _resolve_value(
             chunk_size,
             600,
+            quality,
+            preset.chunk_size if preset else None,
+            workspace_config,
             workspace_config.chunk_size if workspace_config else None,
         )
-        chunk_overlap = _workspace_value(
-            workspace_config,
+        chunk_overlap = _resolve_value(
             chunk_overlap,
             100,
+            quality,
+            preset.chunk_overlap if preset else None,
+            workspace_config,
             workspace_config.chunk_overlap if workspace_config else None,
         )
         index_backend = _workspace_enum(
@@ -1738,11 +1993,13 @@ def explore(
             _SETTINGS.qdrant_collection,
             workspace_config.qdrant_collection if workspace_config else None,
         )
-        retrieval_mode = _workspace_enum(
-            workspace_config,
-            RetrievalMode,
+        retrieval_mode = _resolve_enum(
             retrieval_mode,
             RetrievalMode.dense_only,
+            RetrievalMode,
+            quality,
+            preset.retrieval_mode if preset else None,
+            workspace_config,
             workspace_config.retrieval_mode if workspace_config else "",
         )
         llm_provider = _workspace_enum(
@@ -1756,9 +2013,16 @@ def explore(
             llm_model = workspace_config.llm_model
         if path is not None:
             if retrieval_mode != RetrievalMode.dense_only:
-                raise ValueError(
-                    "--path mode only supports --retrieval-mode dense-only."
-                )
+                if not retrieval_mode_explicit:
+                    # A --quality preset (not the user) asked for
+                    # hybrid/sparse retrieval; --path mode only ever builds
+                    # a dense-only local index, so use it silently rather
+                    # than erroring on a choice the user never made.
+                    retrieval_mode = RetrievalMode.dense_only
+                else:
+                    raise ValueError(
+                        "--path mode only supports --retrieval-mode dense-only."
+                    )
             tempdir, papers, retriever = _transient_retriever_for_path(
                 path,
                 loader_kind=loader,
@@ -1835,20 +2099,44 @@ def ask(
         exists=True,
         help="File or directory to index temporarily for this question.",
     ),
+    quality: Optional[QualityPreset] = typer.Option(
+        None,
+        "--quality",
+        help=(
+            "Preset for chunking/retrieval: fast (fewer, larger chunks), "
+            "balanced, or accurate (smaller chunks, hybrid retrieval). "
+            "Any of the advanced flags below still overrides its part of "
+            "the preset when set explicitly."
+        ),
+    ),
     loader: LoaderKind = typer.Option(
         LoaderKind.unstructured,
         "--loader",
         help="Parsing backend. Use `grobid` when a running GROBID service is available.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     embed_model: str = typer.Option(
         _DEFAULT_EMBED_MODEL,
         "--embed-model",
         help="Dense embedding model used for the temporary local index.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
-    chunker: ChunkerKind = typer.Option(ChunkerKind.paragraph, "--chunker"),
-    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
-    chunk_size: int = typer.Option(600, "--chunk-size"),
-    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
+    chunker: ChunkerKind = typer.Option(
+        ChunkerKind.paragraph,
+        "--chunker",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    min_chunk_size: int = typer.Option(
+        _DEFAULT_MIN_CHUNK_SIZE,
+        "--min-chunk-size",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    chunk_size: int = typer.Option(
+        600, "--chunk-size", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    chunk_overlap: int = typer.Option(
+        100, "--chunk-overlap", rich_help_panel="Advanced (retrieval internals)"
+    ),
     top_k: int = typer.Option(5, "--top-k", min=1),
     llm_provider: LLMProvider = typer.Option(
         LLMProvider.gemini,
@@ -1868,6 +2156,7 @@ def ask(
     tempdir = None
     try:
         workspace_config = _optional_workspace(workspace)
+        preset = _QUALITY_PRESETS[quality] if quality is not None else None
         loader = _workspace_enum(
             workspace_config,
             LoaderKind,
@@ -1881,29 +2170,37 @@ def ask(
             _DEFAULT_EMBED_MODEL,
             workspace_config.embed_model if workspace_config else None,
         )
-        chunker = _workspace_enum(
-            workspace_config,
-            ChunkerKind,
+        chunker = _resolve_enum(
             chunker,
             ChunkerKind.paragraph,
+            ChunkerKind,
+            quality,
+            preset.chunker if preset else None,
+            workspace_config,
             workspace_config.chunker if workspace_config else "",
         )
-        min_chunk_size = _workspace_value(
-            workspace_config,
+        min_chunk_size = _resolve_value(
             min_chunk_size,
             _DEFAULT_MIN_CHUNK_SIZE,
+            quality,
+            preset.min_chunk_size if preset else None,
+            workspace_config,
             workspace_config.min_chunk_size if workspace_config else None,
         )
-        chunk_size = _workspace_value(
-            workspace_config,
+        chunk_size = _resolve_value(
             chunk_size,
             600,
+            quality,
+            preset.chunk_size if preset else None,
+            workspace_config,
             workspace_config.chunk_size if workspace_config else None,
         )
-        chunk_overlap = _workspace_value(
-            workspace_config,
+        chunk_overlap = _resolve_value(
             chunk_overlap,
             100,
+            quality,
+            preset.chunk_overlap if preset else None,
+            workspace_config,
             workspace_config.chunk_overlap if workspace_config else None,
         )
         llm_provider = _workspace_enum(
@@ -2001,26 +2298,64 @@ def classify(
         exists=True,
         help="JSON task spec to run for this call (overrides --classifier-kind).",
     ),
+    quality: Optional[QualityPreset] = typer.Option(
+        None,
+        "--quality",
+        help=(
+            "Preset for chunking/retrieval: fast (fewer, larger chunks), "
+            "balanced, or accurate (smaller chunks, hybrid retrieval). "
+            "Any of the advanced flags below still overrides its part of "
+            "the preset when set explicitly."
+        ),
+    ),
     strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
-    loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
     embed_model: str = typer.Option(
         _DEFAULT_EMBED_MODEL,
         "--embed-model",
         help="Used only with --file.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     chunker: ChunkerKind = typer.Option(
         ChunkerKind.paragraph,
         "--chunker",
         help="Used only with --file.",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
-    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
-    chunk_size: int = typer.Option(600, "--chunk-size"),
-    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
-    index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
-    index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
-    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    min_chunk_size: int = typer.Option(
+        _DEFAULT_MIN_CHUNK_SIZE,
+        "--min-chunk-size",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    chunk_size: int = typer.Option(
+        600, "--chunk-size", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    chunk_overlap: int = typer.Option(
+        100, "--chunk-overlap", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    index_backend: IndexBackend = typer.Option(
+        IndexBackend.file,
+        "--index-backend",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    index_dir: Path = typer.Option(
+        _DEFAULT_INDEX_DIR,
+        "--index-dir",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    qdrant_url: str = typer.Option(
+        _SETTINGS.qdrant_url,
+        "--qdrant-url",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
     qdrant_collection: str = typer.Option(
-        _SETTINGS.qdrant_collection, "--qdrant-collection"
+        _SETTINGS.qdrant_collection,
+        "--qdrant-collection",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     metadata_backend: MetadataBackend = typer.Option(
         MetadataBackend.memory,
@@ -2037,6 +2372,7 @@ def classify(
     retrieval_mode: RetrievalMode = typer.Option(
         RetrievalMode.dense_only,
         "--retrieval-mode",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     workflow_top_k: int = typer.Option(10, "--workflow-top-k", min=1),
     llm_provider: LLMProvider = typer.Option(LLMProvider.gemini, "--llm-provider"),
@@ -2059,6 +2395,8 @@ def classify(
     tempdir = None
     try:
         workspace_config = _optional_workspace(workspace)
+        preset = _QUALITY_PRESETS[quality] if quality is not None else None
+        retrieval_mode_explicit = retrieval_mode != RetrievalMode.dense_only
         strategy_name = _workspace_value(
             workspace_config,
             strategy_name,
@@ -2078,29 +2416,37 @@ def classify(
             _DEFAULT_EMBED_MODEL,
             workspace_config.embed_model if workspace_config else None,
         )
-        chunker = _workspace_enum(
-            workspace_config,
-            ChunkerKind,
+        chunker = _resolve_enum(
             chunker,
             ChunkerKind.paragraph,
+            ChunkerKind,
+            quality,
+            preset.chunker if preset else None,
+            workspace_config,
             workspace_config.chunker if workspace_config else "",
         )
-        min_chunk_size = _workspace_value(
-            workspace_config,
+        min_chunk_size = _resolve_value(
             min_chunk_size,
             _DEFAULT_MIN_CHUNK_SIZE,
+            quality,
+            preset.min_chunk_size if preset else None,
+            workspace_config,
             workspace_config.min_chunk_size if workspace_config else None,
         )
-        chunk_size = _workspace_value(
-            workspace_config,
+        chunk_size = _resolve_value(
             chunk_size,
             600,
+            quality,
+            preset.chunk_size if preset else None,
+            workspace_config,
             workspace_config.chunk_size if workspace_config else None,
         )
-        chunk_overlap = _workspace_value(
-            workspace_config,
+        chunk_overlap = _resolve_value(
             chunk_overlap,
             100,
+            quality,
+            preset.chunk_overlap if preset else None,
+            workspace_config,
             workspace_config.chunk_overlap if workspace_config else None,
         )
         index_backend = _workspace_enum(
@@ -2147,11 +2493,13 @@ def classify(
             _SETTINGS.qdrant_collection,
             workspace_config.qdrant_collection if workspace_config else None,
         )
-        retrieval_mode = _workspace_enum(
-            workspace_config,
-            RetrievalMode,
+        retrieval_mode = _resolve_enum(
             retrieval_mode,
             RetrievalMode.dense_only,
+            RetrievalMode,
+            quality,
+            preset.retrieval_mode if preset else None,
+            workspace_config,
             workspace_config.retrieval_mode if workspace_config else "",
         )
         llm_provider = _workspace_enum(
@@ -2177,6 +2525,7 @@ def classify(
             qdrant_collection=qdrant_collection,
             qdrant_url=qdrant_url,
             retrieval_mode=retrieval_mode,
+            retrieval_mode_explicit=retrieval_mode_explicit,
             embed_model=embed_model,
             chunker_kind=chunker,
             min_chunk_size=min_chunk_size,
@@ -2249,18 +2598,62 @@ def precision_miner(
         exists=True,
         help="JSON task spec to run for this call (overrides --miner-kind).",
     ),
+    quality: Optional[QualityPreset] = typer.Option(
+        None,
+        "--quality",
+        help=(
+            "Preset for chunking/retrieval: fast (fewer, larger chunks), "
+            "balanced, or accurate (smaller chunks, hybrid retrieval). "
+            "Any of the advanced flags below still overrides its part of "
+            "the preset when set explicitly."
+        ),
+    ),
     strategy_name: str = typer.Option(_DEFAULT_STRATEGY_NAME, "--strategy-name"),
-    loader: LoaderKind = typer.Option(LoaderKind.unstructured, "--loader"),
-    embed_model: str = typer.Option(_DEFAULT_EMBED_MODEL, "--embed-model"),
-    chunker: ChunkerKind = typer.Option(ChunkerKind.paragraph, "--chunker"),
-    min_chunk_size: int = typer.Option(_DEFAULT_MIN_CHUNK_SIZE, "--min-chunk-size"),
-    chunk_size: int = typer.Option(600, "--chunk-size"),
-    chunk_overlap: int = typer.Option(100, "--chunk-overlap"),
-    index_backend: IndexBackend = typer.Option(IndexBackend.file, "--index-backend"),
-    index_dir: Path = typer.Option(_DEFAULT_INDEX_DIR, "--index-dir"),
-    qdrant_url: str = typer.Option(_SETTINGS.qdrant_url, "--qdrant-url"),
+    loader: LoaderKind = typer.Option(
+        LoaderKind.unstructured,
+        "--loader",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    embed_model: str = typer.Option(
+        _DEFAULT_EMBED_MODEL,
+        "--embed-model",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    chunker: ChunkerKind = typer.Option(
+        ChunkerKind.paragraph,
+        "--chunker",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    min_chunk_size: int = typer.Option(
+        _DEFAULT_MIN_CHUNK_SIZE,
+        "--min-chunk-size",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    chunk_size: int = typer.Option(
+        600, "--chunk-size", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    chunk_overlap: int = typer.Option(
+        100, "--chunk-overlap", rich_help_panel="Advanced (retrieval internals)"
+    ),
+    index_backend: IndexBackend = typer.Option(
+        IndexBackend.file,
+        "--index-backend",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    index_dir: Path = typer.Option(
+        _DEFAULT_INDEX_DIR,
+        "--index-dir",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
+    qdrant_url: str = typer.Option(
+        _SETTINGS.qdrant_url,
+        "--qdrant-url",
+        rich_help_panel="Advanced (retrieval internals)",
+    ),
     qdrant_collection: str = typer.Option(
-        _SETTINGS.qdrant_collection, "--qdrant-collection"
+        _SETTINGS.qdrant_collection,
+        "--qdrant-collection",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     metadata_backend: MetadataBackend = typer.Option(
         MetadataBackend.memory,
@@ -2277,6 +2670,7 @@ def precision_miner(
     retrieval_mode: RetrievalMode = typer.Option(
         RetrievalMode.dense_only,
         "--retrieval-mode",
+        rich_help_panel="Advanced (retrieval internals)",
     ),
     workflow_top_k: int = typer.Option(10, "--workflow-top-k", min=1),
     llm_provider: LLMProvider = typer.Option(LLMProvider.gemini, "--llm-provider"),
@@ -2293,6 +2687,8 @@ def precision_miner(
     tempdir = None
     try:
         workspace_config = _optional_workspace(workspace)
+        preset = _QUALITY_PRESETS[quality] if quality is not None else None
+        retrieval_mode_explicit = retrieval_mode != RetrievalMode.dense_only
         strategy_name = _workspace_value(
             workspace_config,
             strategy_name,
@@ -2312,29 +2708,37 @@ def precision_miner(
             _DEFAULT_EMBED_MODEL,
             workspace_config.embed_model if workspace_config else None,
         )
-        chunker = _workspace_enum(
-            workspace_config,
-            ChunkerKind,
+        chunker = _resolve_enum(
             chunker,
             ChunkerKind.paragraph,
+            ChunkerKind,
+            quality,
+            preset.chunker if preset else None,
+            workspace_config,
             workspace_config.chunker if workspace_config else "",
         )
-        min_chunk_size = _workspace_value(
-            workspace_config,
+        min_chunk_size = _resolve_value(
             min_chunk_size,
             _DEFAULT_MIN_CHUNK_SIZE,
+            quality,
+            preset.min_chunk_size if preset else None,
+            workspace_config,
             workspace_config.min_chunk_size if workspace_config else None,
         )
-        chunk_size = _workspace_value(
-            workspace_config,
+        chunk_size = _resolve_value(
             chunk_size,
             600,
+            quality,
+            preset.chunk_size if preset else None,
+            workspace_config,
             workspace_config.chunk_size if workspace_config else None,
         )
-        chunk_overlap = _workspace_value(
-            workspace_config,
+        chunk_overlap = _resolve_value(
             chunk_overlap,
             100,
+            quality,
+            preset.chunk_overlap if preset else None,
+            workspace_config,
             workspace_config.chunk_overlap if workspace_config else None,
         )
         index_backend = _workspace_enum(
@@ -2381,11 +2785,13 @@ def precision_miner(
             _SETTINGS.qdrant_collection,
             workspace_config.qdrant_collection if workspace_config else None,
         )
-        retrieval_mode = _workspace_enum(
-            workspace_config,
-            RetrievalMode,
+        retrieval_mode = _resolve_enum(
             retrieval_mode,
             RetrievalMode.dense_only,
+            RetrievalMode,
+            quality,
+            preset.retrieval_mode if preset else None,
+            workspace_config,
             workspace_config.retrieval_mode if workspace_config else "",
         )
         llm_provider = _workspace_enum(
@@ -2411,6 +2817,7 @@ def precision_miner(
             qdrant_collection=qdrant_collection,
             qdrant_url=qdrant_url,
             retrieval_mode=retrieval_mode,
+            retrieval_mode_explicit=retrieval_mode_explicit,
             embed_model=embed_model,
             chunker_kind=chunker,
             min_chunk_size=min_chunk_size,

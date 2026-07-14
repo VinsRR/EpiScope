@@ -262,6 +262,112 @@ def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> Non
     assert payload["source_count"] >= 1
 
 
+# ---------------------------------------------------------------------------
+# --quality preset resolution
+# ---------------------------------------------------------------------------
+def test_resolve_value_precedence_explicit_beats_quality_beats_workspace() -> None:
+    from episcope import episcope as cli
+
+    # Explicit flag (current != default) always wins.
+    assert cli._resolve_value(300, 600, cli.QualityPreset.fast, 800, object(), 900) == 300
+    # No explicit flag: quality preset wins over workspace.
+    assert cli._resolve_value(600, 600, cli.QualityPreset.fast, 800, object(), 900) == 800
+    # No explicit flag, no quality: workspace wins over default.
+    assert cli._resolve_value(600, 600, None, None, object(), 900) == 900
+    # Nothing set: default.
+    assert cli._resolve_value(600, 600, None, None, None, None) == 600
+
+
+def test_ask_path_accepts_quality_preset(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeAnswerGenerator(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app, ["ask", "Where are the data?", "--path", str(paper), "--quality", "fast"]
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_explore_path_with_balanced_quality_does_not_raise(tmp_path, monkeypatch) -> None:
+    """Regression test: --quality balanced/accurate resolves retrieval_mode to
+    'hybrid', which --path's transient (dense-only-only) index can't serve.
+    This used to raise "--path mode only supports --retrieval-mode dense-only."
+    even though the user never asked for hybrid retrieval themselves - a
+    preset should never surface an error the user didn't ask for.
+    """
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    for quality in ("balanced", "accurate"):
+        result = runner.invoke(
+            app,
+            ["explore", "Zenodo", "--path", str(paper), "--quality", quality],
+        )
+        assert result.exit_code == 0, (quality, result.output)
+
+
+def test_explore_path_with_explicit_hybrid_still_errors(tmp_path, monkeypatch) -> None:
+    """An explicit --retrieval-mode conflicting with --path must still be a
+    clear, actionable error - only preset-driven mismatches are silenced.
+    """
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text("A short title\n\nSome content.", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["explore", "content", "--path", str(paper), "--retrieval-mode", "hybrid"],
+    )
+
+    assert result.exit_code == 1
+    assert "dense-only" in result.output
+
+
+def test_classify_file_with_quality_preset_does_not_raise(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakeClassifierGenerator(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["classify", "--file", str(paper), "--quality", "accurate"],
+    )
+
+    assert result.exit_code == 0, result.output
+
+
 def test_version_flag_prints_version() -> None:
     import episcope
 
@@ -327,6 +433,92 @@ def test_doctor_checks_anthropic_key(monkeypatch) -> None:
         check["status"] == "warn" and check["label"] == "ANTHROPIC_API_KEY"
         for check in payload["checks"]
     )
+
+
+# ---------------------------------------------------------------------------
+# quickstart
+# ---------------------------------------------------------------------------
+def _no_services_reachable(url: str, *, timeout: float = 3.0):
+    return False, None, "connection refused"
+
+
+@pytest.fixture
+def _isolate_quickstart_probes(monkeypatch):
+    """Keep quickstart tests fast/offline regardless of the real environment.
+
+    quickstart has no --no-probe escape hatch (checking connectivity is the
+    point), so without this a developer's real ambient MONGO_URI/mongo_uri
+    (dotenv legacy name, see settings.py) would make these tests attempt a
+    real, slow MongoDB connection.
+    """
+    monkeypatch.delenv("MONGO_URI", raising=False)
+    monkeypatch.delenv("mongo_uri", raising=False)
+    monkeypatch.setattr("episcope.episcope._probe_http", _no_services_reachable)
+    monkeypatch.setattr(
+        "episcope.episcope._check_mongo", lambda uri: ("skip", "not checked", "")
+    )
+    return monkeypatch
+
+
+def test_quickstart_ollama_writes_provider_and_reports_ready(
+    tmp_path, monkeypatch, _isolate_quickstart_probes
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "episcope.episcope._probe_http",
+        lambda url, **_: (True, 200, "") if "11434" in url else _no_services_reachable(url),
+    )
+
+    result = runner.invoke(app, ["quickstart"], input="5\n")
+
+    assert result.exit_code == 0, result.output
+    assert "You're ready" in result.output
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "ollama" in env_text
+
+
+def test_quickstart_gemini_writes_key_to_env(
+    tmp_path, monkeypatch, _isolate_quickstart_probes
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["quickstart"], input="1\nfake-key-123\n")
+
+    assert result.exit_code == 0, result.output
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "gemini" in env_text
+    assert "fake-key-123" in env_text
+    # LLM key presence is an "ok" check even though GROBID/Qdrant/Mongo are
+    # unreachable - those are warnings, not failures, for the local CLI path.
+    assert "All required checks passed" in result.output
+
+
+def test_quickstart_leaves_existing_key_untouched_when_blank(
+    tmp_path, monkeypatch, _isolate_quickstart_probes
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("GEMINI_API_KEY=already-set-key\n", encoding="utf-8")
+    monkeypatch.setenv("GEMINI_API_KEY", "already-set-key")
+
+    result = runner.invoke(app, ["quickstart"], input="1\n\n")
+
+    assert result.exit_code == 0, result.output
+    assert "leave blank to keep it" in result.output
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "already-set-key" in env_text
+
+
+def test_quickstart_invalid_choice_aborts(
+    tmp_path, monkeypatch, _isolate_quickstart_probes
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["quickstart"], input="99\n")
+
+    assert result.exit_code == 1
+    assert "Invalid choice" in result.output
 
 
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:

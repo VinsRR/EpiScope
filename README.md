@@ -20,20 +20,24 @@ git clone https://github.com/VinsRR/EpiScope.git
 cd EpiScope
 bash scripts/bootstrap.sh
 source .venv/bin/activate
-episcope doctor                                       # check your environment first
-episcope ask "What data sources were used?" --path paper.pdf
+episcope quickstart                                   # pick a provider, write .env, verify it
+episcope ask "What data sources were used?" --path paper.pdf --quality fast
 ```
 
 It also prints two things worth knowing up front: the installed distribution is named
 `epi-scope` but you `import`/run it as `episcope`, and the first command that needs
 local embeddings will download a small model (~90MB, one-time — not a hang).
 
+`--quality {fast,balanced,accurate}` (default `balanced`) is a single knob for
+chunking/retrieval instead of the several individual flags underneath it — see
+`episcope ask --help` for the advanced flags it stands in for.
+
 Prefer to do it by hand, or installing without cloning? The equivalent manual steps:
 
 ```bash
 python -m pip install "epi-scope @ git+https://github.com/VinsRR/EpiScope.git@main"
-episcope doctor                                       # check your environment first
-episcope ask "What data sources were used?" --path paper.pdf
+episcope quickstart                                   # pick a provider, write .env, verify it
+episcope ask "What data sources were used?" --path paper.pdf --quality fast
 ```
 
 See [Start Here If You Are New](#start-here-if-you-are-new) below for the full
@@ -354,6 +358,10 @@ human-readable summary by default; pass `--format json` (or set
 `EPISCOPE_OUTPUT_FORMAT=json`) for machine-readable output. Run
 `episcope --version` to print the installed version.
 
+Don't have a provider configured yet? `episcope quickstart` walks you through
+picking one (a cloud key, or local Ollama with no key), writes it to `.env`,
+and then runs the same checks as `doctor` to confirm it worked.
+
 Inspect a document:
 
 ```bash
@@ -365,6 +373,12 @@ Ask a question over one paper or a folder of papers:
 ```bash
 episcope ask "What data sources were used in this study?" --path /path/to/paper.pdf
 ```
+
+`ask`, `explore`, `classify`, and `precision-miner` all accept
+`--quality {fast,balanced,accurate}` (default `balanced`) as a single knob over
+chunking/retrieval, instead of tuning the individual `--chunker`/`--chunk-size`/
+`--retrieval-mode`/etc. flags directly — those are still there under "Advanced" in
+`--help` if you want to override just one of them.
 
 Run retrieval without generating an answer:
 
