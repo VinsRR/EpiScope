@@ -18,7 +18,6 @@ from episcope.workflows.registry import humanize_task_spec_error
 # the actionable detail (a URL, an env var name) is never lost.
 _HINTS: list[tuple[str, str]] = [
     ("MONGO_URI", "No paper-metadata database is configured."),
-    ("No Mongo URI configured", "No paper-metadata database is configured."),
     (
         "Could not infer an embedding provider",
         "EpiScope doesn't recognize this embedding model name.",
@@ -34,6 +33,10 @@ _HINTS: list[tuple[str, str]] = [
     (
         "was not found at",
         "This corpus hasn't been indexed yet, or the collection name doesn't match.",
+    ),
+    (
+        "does not have a dense embedding model configured",
+        "This corpus hasn't been indexed yet. Run `episcope index ...` first.",
     ),
 ]
 

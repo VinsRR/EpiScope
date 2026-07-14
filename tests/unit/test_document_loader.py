@@ -83,3 +83,38 @@ def test_unstructured_pdf_loader_falls_back_to_pypdf(monkeypatch, tmp_path: Path
     assert sections
     combined_text = "\n".join(section.content for section in sections)
     assert "Main finding one." in combined_text
+
+
+def test_unstructured_pdf_loader_redirects_library_stdout_to_stderr(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    # `unstructured` prints diagnostics (e.g. "No languages specified...")
+    # directly to stdout rather than logging, which corrupts `--format
+    # json` CLI output. The loader must redirect that to stderr.
+    class FakeElement:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    def fake_partition_pdf(**_kwargs):
+        print("Warning: No languages specified, defaulting to English.")
+        return [FakeElement("Title"), FakeElement("Body text.")]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "unstructured.partition.pdf",
+        types.SimpleNamespace(partition_pdf=fake_partition_pdf),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "unstructured.documents.elements",
+        types.SimpleNamespace(Title=FakeElement, Header=FakeElement, Text=FakeElement),
+    )
+
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    UnstructuredDocumentLoader().load(pdf_path)
+
+    captured = capsys.readouterr()
+    assert "No languages specified" not in captured.out
+    assert "No languages specified" in captured.err

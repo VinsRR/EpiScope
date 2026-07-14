@@ -969,10 +969,19 @@ def _resolve_paper_from_store(
     if file_path is not None:
         if retrieval_mode != RetrievalMode.dense_only:
             if not retrieval_mode_explicit:
-                # A --quality preset (not the user) asked for hybrid/sparse
-                # retrieval; transient --file mode only ever builds a
-                # dense-only local index, so silently use it rather than
-                # erroring on a choice the user never made.
+                # A --quality preset or workspace config (not the user
+                # directly) asked for hybrid/sparse retrieval; transient
+                # --file mode only ever builds a dense-only local index, so
+                # use it rather than erroring on a choice the user never
+                # made explicitly - but say so, since --quality accurate
+                # otherwise silently drops one of its two effects here.
+                typer.secho(
+                    "Note: --file mode only supports dense-only retrieval; "
+                    "ignoring the hybrid retrieval mode from --quality/workspace "
+                    "config (chunking/embedding settings still apply).",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
                 retrieval_mode = RetrievalMode.dense_only
             else:
                 raise ValueError(
@@ -1347,78 +1356,89 @@ def quickstart(
     """
     import dotenv
 
-    typer.secho("EpiScope quickstart", bold=True)
-    typer.echo("Let's configure an LLM provider and write a .env file.\n")
-
-    provider_choices = list(_PROVIDER_KEY_ENV) + ["ollama"]
-    typer.echo("Choose an LLM provider:")
-    for i, choice in enumerate(provider_choices, start=1):
-        note = "  (local, no API key needed)" if choice == "ollama" else ""
-        typer.echo(f"  {i}. {choice}{note}")
-    raw_choice = typer.prompt("Enter a number", default="1")
     try:
-        provider = provider_choices[int(raw_choice) - 1]
-    except (ValueError, IndexError):
-        _abort(f"Invalid choice {raw_choice!r}. Run `episcope quickstart` again.")
+        typer.secho("EpiScope quickstart", bold=True)
+        typer.echo("Let's configure an LLM provider and write a .env file.\n")
 
-    env_path = Path(".env")
-    if not env_path.exists():
-        example_path = Path(".env.example")
-        env_path.write_text(
-            example_path.read_text(encoding="utf-8") if example_path.exists() else "",
-            encoding="utf-8",
-        )
+        provider_choices = list(_PROVIDER_KEY_ENV) + ["ollama"]
+        typer.echo("Choose an LLM provider:")
+        for i, choice in enumerate(provider_choices, start=1):
+            note = "  (local, no API key needed)" if choice == "ollama" else ""
+            typer.echo(f"  {i}. {choice}{note}")
+        raw_choice = typer.prompt("Enter a number", default="1")
+        try:
+            provider = provider_choices[int(raw_choice) - 1]
+        except (ValueError, IndexError):
+            _abort(f"Invalid choice {raw_choice!r}. Run `episcope quickstart` again.")
 
-    dotenv.set_key(str(env_path), "EPISCOPE_LLM_PROVIDER", provider)
-    typer.echo(f"\nSet EPISCOPE_LLM_PROVIDER={provider} in {env_path}.")
-
-    if provider == "ollama":
-        ok, _code, _err = _probe_http(f"{_SETTINGS.ollama_host}/api/tags")
-        if ok:
-            typer.secho(
-                f"Ollama is reachable at {_SETTINGS.ollama_host}.",
-                fg=typer.colors.GREEN,
+        env_path = Path(".env")
+        if not env_path.exists():
+            example_path = Path(".env.example")
+            env_path.write_text(
+                example_path.read_text(encoding="utf-8")
+                if example_path.exists()
+                else "",
+                encoding="utf-8",
             )
+
+        dotenv.set_key(str(env_path), "EPISCOPE_LLM_PROVIDER", provider)
+        typer.echo(f"\nSet EPISCOPE_LLM_PROVIDER={provider} in {env_path}.")
+
+        if provider == "ollama":
+            ok, _code, _err = _probe_http(f"{_SETTINGS.ollama_host}/api/tags")
+            if ok:
+                typer.secho(
+                    f"Ollama is reachable at {_SETTINGS.ollama_host}.",
+                    fg=typer.colors.GREEN,
+                )
+            else:
+                typer.secho("Ollama is not reachable yet.", fg=typer.colors.YELLOW)
+                typer.echo(_ollama_setup_hint(_OLLAMA_SMALL_MODEL))
+            # Leaving the gemini default model name in place would make
+            # `doctor` show a confusing Provider: ollama / Model:
+            # gemini-2.5-flash pair right after setup - align it, even
+            # though command execution itself already ignores this value
+            # in the keyless Ollama-fallback path.
+            dotenv.set_key(str(env_path), "EPISCOPE_LLM_MODEL", _OLLAMA_SMALL_MODEL)
         else:
-            typer.secho("Ollama is not reachable yet.", fg=typer.colors.YELLOW)
-            typer.echo(_ollama_setup_hint(_OLLAMA_SMALL_MODEL))
-    else:
-        key_env = _PROVIDER_KEY_ENV[provider]
-        has_key = bool(env(key_env))
-        prompt_label = f"Enter your {key_env}"
-        if has_key:
-            prompt_label += " (already set - leave blank to keep it)"
-        key_value = typer.prompt(
-            prompt_label, default="", hide_input=True, show_default=False
-        )
-        if key_value:
-            dotenv.set_key(str(env_path), key_env, key_value)
-            typer.echo(f"Set {key_env} in {env_path}.")
-        elif not has_key:
+            key_env = _PROVIDER_KEY_ENV[provider]
+            has_key = bool(env(key_env))
+            prompt_label = f"Enter your {key_env}"
+            if has_key:
+                prompt_label += " (already set - leave blank to keep it)"
+            key_value = typer.prompt(
+                prompt_label, default="", hide_input=True, show_default=False
+            )
+            if key_value:
+                dotenv.set_key(str(env_path), key_env, key_value)
+                typer.echo(f"Set {key_env} in {env_path}.")
+            elif not has_key:
+                typer.secho(
+                    f"No {key_env} provided. Add it to {env_path} before using "
+                    f"provider {provider!r}.",
+                    fg=typer.colors.YELLOW,
+                )
+
+        dotenv.load_dotenv(str(env_path), override=True)
+
+        typer.echo()
+        typer.secho("Checking your setup...", bold=True)
+        checks, any_fail = _collect_doctor_checks(probe=True, workspace=workspace)
+        _print_doctor_report(checks, any_fail)
+
+        typer.echo()
+        if any_fail:
             typer.secho(
-                f"No {key_env} provided. Add it to {env_path} before using "
-                f"provider {provider!r}.",
+                "Some checks still need attention - see the hints above.",
                 fg=typer.colors.YELLOW,
             )
-
-    dotenv.load_dotenv(str(env_path), override=True)
-
-    typer.echo()
-    typer.secho("Checking your setup...", bold=True)
-    checks, any_fail = _collect_doctor_checks(probe=True, workspace=workspace)
-    _print_doctor_report(checks, any_fail)
-
-    typer.echo()
-    if any_fail:
-        typer.secho(
-            "Some checks still need attention - see the hints above.",
-            fg=typer.colors.YELLOW,
-        )
-    else:
-        typer.secho("You're ready. Try:", fg=typer.colors.GREEN)
-        typer.echo(
-            '  episcope ask "What data sources were used?" --path /path/to/paper.pdf'
-        )
+        else:
+            typer.secho("You're ready. Try:", fg=typer.colors.GREEN)
+            typer.echo(
+                '  episcope ask "What data sources were used?" --path /path/to/paper.pdf'
+            )
+    except Exception as exc:
+        _abort_exc(exc)
 
 
 @app.command("init")
@@ -2016,10 +2036,19 @@ def explore(
         if path is not None:
             if retrieval_mode != RetrievalMode.dense_only:
                 if not retrieval_mode_explicit:
-                    # A --quality preset (not the user) asked for
-                    # hybrid/sparse retrieval; --path mode only ever builds
-                    # a dense-only local index, so use it silently rather
-                    # than erroring on a choice the user never made.
+                    # A --quality preset or workspace config (not the user
+                    # directly) asked for hybrid/sparse retrieval; --path
+                    # mode only ever builds a dense-only local index, so use
+                    # it rather than erroring on a choice the user never
+                    # made explicitly - but say so, since --quality accurate
+                    # otherwise silently drops one of its two effects here.
+                    typer.secho(
+                        "Note: --path mode only supports dense-only retrieval; "
+                        "ignoring the hybrid retrieval mode from --quality/workspace "
+                        "config (chunking/embedding settings still apply).",
+                        fg=typer.colors.YELLOW,
+                        err=True,
+                    )
                     retrieval_mode = RetrievalMode.dense_only
                 else:
                     raise ValueError(
@@ -2513,6 +2542,14 @@ def classify(
         )
         if workspace_config is not None and llm_model is None:
             llm_model = workspace_config.llm_model
+        # Resolve and validate the task/classifier-kind before the
+        # potentially slow PDF-parse + embedding step below, so a typo'd
+        # --classifier-kind or a broken --task-file fails immediately
+        # instead of after a minutes-long wait.
+        classifier_kind = _prepare_tasks(
+            workspace_config, task_file, classifier_kind, expected="classifier"
+        )
+        classifier_config = build_classifier_config(classifier_kind, workflow_top_k)
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -2538,15 +2575,12 @@ def classify(
         generator = _resolve_generator(
             llm_provider, llm_model, temperature, task="classify"
         )
-        classifier_kind = _prepare_tasks(
-            workspace_config, task_file, classifier_kind, expected="classifier"
-        )
         classifier = PaperClassifier(
             retriever=resolved["retriever"],
             generator=generator,
             strategy_name=strategy_name,
             academic_db=resolved["academic_db"],
-            config=build_classifier_config(classifier_kind, workflow_top_k),
+            config=classifier_config,
             evidence_reranker=_build_evidence_reranker(
                 evidence_reranker,
                 cross_encoder_model=cross_encoder_model,
@@ -2805,6 +2839,14 @@ def precision_miner(
         )
         if workspace_config is not None and llm_model is None:
             llm_model = workspace_config.llm_model
+        # Resolve and validate the task/miner-kind before the potentially
+        # slow PDF-parse + embedding step below, so a typo'd --miner-kind
+        # or a broken --task-file fails immediately instead of after a
+        # minutes-long wait.
+        miner_kind = _prepare_tasks(
+            workspace_config, task_file, miner_kind, expected="miner"
+        )
+        miner_config = build_precision_miner_config(miner_kind, workflow_top_k)
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -2830,15 +2872,12 @@ def precision_miner(
         generator = _resolve_generator(
             llm_provider, llm_model, temperature, task="precision-miner"
         )
-        miner_kind = _prepare_tasks(
-            workspace_config, task_file, miner_kind, expected="miner"
-        )
         miner = PrecisionMiner(
             retriever=resolved["retriever"],
             generator=generator,
             strategy_name=strategy_name,
             academic_db=resolved["academic_db"],
-            config=build_precision_miner_config(miner_kind, workflow_top_k),
+            config=miner_config,
         )
         if detailed:
             result = miner.run_detailed(
@@ -2990,7 +3029,15 @@ def _run_task_wizard(kind: str, workspace_config: Optional[WorkspaceConfig]) -> 
     else:
         default_dir = Path(".")
     default_path = default_dir / f"{spec.key}.json"
-    output_path = Path(typer.prompt("\nSave to", default=str(default_path)))
+    while True:
+        output_path = Path(typer.prompt("\nSave to", default=str(default_path)))
+        if output_path.suffix != ".json":
+            output_path = output_path.with_suffix(".json")
+        if output_path.exists() and not typer.confirm(
+            f"{output_path} already exists. Overwrite?", default=False
+        ):
+            continue
+        break
     _ensure_parent_dir(output_path)
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -3141,9 +3188,20 @@ def studio(
     over the local store, same as everywhere else in the CLI.
     """
     import os
+    import signal
     import subprocess
     import time
     from importlib import resources
+
+    # Python's default SIGTERM handling terminates the process immediately,
+    # without running the except/finally cleanup below - only SIGINT
+    # (Ctrl-C) does that by default. A plain `kill`/process-manager stop
+    # would otherwise orphan the API/UI subprocesses. Route SIGTERM through
+    # the same KeyboardInterrupt-based cleanup path.
+    def _handle_sigterm(signum, frame):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     try:
         import uvicorn  # noqa: F401
@@ -3154,94 +3212,99 @@ def studio(
     except ImportError as exc:
         _abort(f"streamlit is required for `studio`: {exc}. Install epi-scope[ui].")
 
-    workspace_config = _optional_workspace(workspace)
-    child_env = dict(os.environ)
+    try:
+        workspace_config = _optional_workspace(workspace)
+        child_env = dict(os.environ)
 
-    if workspace_config is not None:
-        index_dir = workspace_config.resolve_path(workspace_config.index_dir)
-        metadata_path = workspace_config.resolve_path(workspace_config.metadata_path)
-        if not env("QDRANT_URL"):
-            child_env["EPISCOPE_LOCAL_INDEX_DIR"] = str(index_dir)
-        if not env("MONGO_URI"):
-            child_env["EPISCOPE_LOCAL_METADATA_BACKUP"] = str(metadata_path)
-    else:
-        index_dir = _CLI_ROOT / "index"
+        if workspace_config is not None:
+            index_dir = workspace_config.resolve_path(workspace_config.index_dir)
+            metadata_path = workspace_config.resolve_path(
+                workspace_config.metadata_path
+            )
+            if not env("QDRANT_URL"):
+                child_env["EPISCOPE_LOCAL_INDEX_DIR"] = str(index_dir)
+            if not env("MONGO_URI"):
+                child_env["EPISCOPE_LOCAL_METADATA_BACKUP"] = str(metadata_path)
+        else:
+            index_dir = _CLI_ROOT / "index"
 
-    if not env("QDRANT_URL") and _index_dir_is_empty(index_dir):
-        typer.secho(
-            "No papers are indexed yet at "
-            f"{index_dir} - the Explorer/Classification/Precision Miner tabs "
-            "will have nothing to retrieve. Run `episcope index ...` "
-            f"{'--workspace ' + str(workspace_config.root) if workspace_config else ''} "
-            "first.",
-            fg=typer.colors.YELLOW,
+        if not env("QDRANT_URL") and _index_dir_is_empty(index_dir):
+            typer.secho(
+                "No papers are indexed yet at "
+                f"{index_dir} - the Explorer/Classification/Precision Miner tabs "
+                "will have nothing to retrieve. Run `episcope index ...` "
+                f"{'--workspace ' + str(workspace_config.root) if workspace_config else ''} "
+                "first.",
+                fg=typer.colors.YELLOW,
+            )
+
+        api_url = f"http://localhost:{api_port}"
+        ui_url = f"http://localhost:{ui_port}"
+        typer.secho("Starting EpiScope studio", bold=True)
+        typer.echo(f"  API: {api_url}")
+        typer.echo(f"  UI:  {ui_url}")
+        typer.echo("Press Ctrl-C to stop both.\n")
+
+        api_proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "episcope.api:app",
+                "--host",
+                host,
+                "--port",
+                str(api_port),
+            ],
+            env=child_env,
+        )
+        ui_app_path = resources.files("episcope.ui").joinpath("streamlit_app.py")
+        ui_env = {**child_env, "EPISCOPE_API_BASE_URL": api_url}
+        ui_proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(ui_app_path),
+                "--server.port",
+                str(ui_port),
+                "--server.headless",
+                "true",
+                "--browser.gatherUsageStats",
+                "false",
+            ],
+            env=ui_env,
         )
 
-    api_url = f"http://localhost:{api_port}"
-    ui_url = f"http://localhost:{ui_port}"
-    typer.secho("Starting EpiScope studio", bold=True)
-    typer.echo(f"  API: {api_url}")
-    typer.echo(f"  UI:  {ui_url}")
-    typer.echo("Press Ctrl-C to stop both.\n")
-
-    api_proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "episcope.api:app",
-            "--host",
-            host,
-            "--port",
-            str(api_port),
-        ],
-        env=child_env,
-    )
-    ui_app_path = resources.files("episcope.ui").joinpath("streamlit_app.py")
-    ui_env = {**child_env, "EPISCOPE_API_BASE_URL": api_url}
-    ui_proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(ui_app_path),
-            "--server.port",
-            str(ui_port),
-            "--server.headless",
-            "true",
-            "--browser.gatherUsageStats",
-            "false",
-        ],
-        env=ui_env,
-    )
-
-    try:
-        while True:
-            if api_proc.poll() is not None:
-                typer.secho(
-                    f"API process exited unexpectedly (code {api_proc.returncode}).",
-                    fg=typer.colors.RED,
-                )
-                break
-            if ui_proc.poll() is not None:
-                typer.secho(
-                    f"UI process exited unexpectedly (code {ui_proc.returncode}).",
-                    fg=typer.colors.RED,
-                )
-                break
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        typer.echo("\nStopping...")
-    finally:
-        for proc in (api_proc, ui_proc):
-            if proc.poll() is None:
-                proc.terminate()
-        for proc in (api_proc, ui_proc):
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        try:
+            while True:
+                if api_proc.poll() is not None:
+                    typer.secho(
+                        f"API process exited unexpectedly (code {api_proc.returncode}).",
+                        fg=typer.colors.RED,
+                    )
+                    break
+                if ui_proc.poll() is not None:
+                    typer.secho(
+                        f"UI process exited unexpectedly (code {ui_proc.returncode}).",
+                        fg=typer.colors.RED,
+                    )
+                    break
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            typer.echo("\nStopping...")
+        finally:
+            for proc in (api_proc, ui_proc):
+                if proc.poll() is None:
+                    proc.terminate()
+            for proc in (api_proc, ui_proc):
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+    except Exception as exc:
+        _abort_exc(exc)
 
 
 if __name__ == "__main__":

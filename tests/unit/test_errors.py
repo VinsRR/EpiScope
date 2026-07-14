@@ -84,11 +84,6 @@ def test_humanize_error_delegates_to_task_spec_for_validation_errors() -> None:
             "No paper-metadata database is configured.",
         ),
         (
-            "No Mongo URI configured. Set config.mongo_uri or provide the "
-            "MONGO_URI environment variable.",
-            "No paper-metadata database is configured.",
-        ),
-        (
             "Could not infer an embedding provider from model name 'weird'. "
             "Pass provider=... or set EPISCOPE_EMBED_PROVIDER.",
             "EpiScope doesn't recognize this embedding model name.",
@@ -106,6 +101,10 @@ def test_humanize_error_delegates_to_task_spec_for_validation_errors() -> None:
             "Qdrant collection 'x' was not found at http://localhost:6333, "
             "and dense_dim was not provided to create it.",
             "This corpus hasn't been indexed yet, or the collection name doesn't match.",
+        ),
+        (
+            "VectorDB does not have a dense embedding model configured.",
+            "This corpus hasn't been indexed yet. Run `episcope index ...` first.",
         ),
     ],
 )

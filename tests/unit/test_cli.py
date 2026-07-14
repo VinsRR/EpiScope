@@ -70,6 +70,23 @@ class _FakeAnswerGenerator:
         return Provenance(answer="The paper says the data are on Zenodo.", evidences=[])
 
 
+class _FakePrecisionMinerGenerator:
+    model_id = "fake-generator"
+
+    def generate(self, contexts, **kwargs):
+        return Provenance(
+            answer="""
+            {
+              "description": "Data sources mentioned in the paper.",
+              "items": [
+                {"name": "Zenodo", "url": null, "explanation": "Dataset is hosted here."}
+              ]
+            }
+            """,
+            evidences=[],
+        )
+
+
 def test_inspect_command_reads_text_file(tmp_path) -> None:
     paper = tmp_path / "paper.txt"
     paper.write_text(
@@ -323,6 +340,24 @@ def test_explore_path_with_balanced_quality_does_not_raise(tmp_path, monkeypatch
             ["explore", "Zenodo", "--path", str(paper), "--quality", quality],
         )
         assert result.exit_code == 0, (quality, result.output)
+        # The dropped retrieval-mode effect must be surfaced, not silent.
+        assert "only supports dense-only retrieval" in result.output
+
+
+def test_explore_path_without_quality_prints_no_retrieval_mode_note(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text("A short title\n\nSome content.", encoding="utf-8")
+
+    result = runner.invoke(app, ["explore", "content", "--path", str(paper)])
+
+    assert result.exit_code == 0, result.output
+    assert "only supports dense-only retrieval" not in result.output
 
 
 def test_explore_path_with_explicit_hybrid_still_errors(tmp_path, monkeypatch) -> None:
@@ -366,6 +401,37 @@ def test_classify_file_with_quality_preset_does_not_raise(tmp_path, monkeypatch)
     )
 
     assert result.exit_code == 0, result.output
+    assert "only supports dense-only retrieval" in result.output
+
+
+def test_precision_miner_file_with_quality_preset_does_not_raise(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    monkeypatch.setattr(
+        "episcope.episcope._build_generator",
+        lambda provider, model, temperature: _FakePrecisionMinerGenerator(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    for quality in ("fast", "balanced", "accurate"):
+        result = runner.invoke(
+            app,
+            ["precision-miner", "--file", str(paper), "--quality", quality],
+        )
+        assert result.exit_code == 0, (quality, result.output)
+        # "fast" resolves to dense_only already, so no retrieval-mode
+        # mismatch note; "balanced"/"accurate" resolve to hybrid, which
+        # --file mode can't serve, so the drop must be surfaced.
+        has_note = "only supports dense-only retrieval" in result.output
+        assert has_note == (quality != "fast"), (quality, result.output)
 
 
 def test_version_flag_prints_version() -> None:
@@ -552,6 +618,47 @@ def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> N
     payload = json.loads(result.stdout)
     assert payload["paper_id"] == "paper"
     assert payload["result"]["classification"] == ["open"]
+
+
+def test_classify_unknown_kind_fails_before_parsing_file(tmp_path, monkeypatch) -> None:
+    embedder_calls: list[str] = []
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: embedder_calls.append(model_name) or _FakeEmbedder(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text("A short title\n\nSome content.", encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["classify", "--file", str(paper), "--classifier-kind", "not_a_real_kind"]
+    )
+
+    assert result.exit_code == 1
+    assert "Unknown classifier kind" in result.output
+    # The (potentially slow) PDF-parse + embedding step must not run for a
+    # request that was always going to fail on an unknown kind.
+    assert embedder_calls == []
+
+
+def test_precision_miner_unknown_kind_fails_before_parsing_file(
+    tmp_path, monkeypatch
+) -> None:
+    embedder_calls: list[str] = []
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: embedder_calls.append(model_name) or _FakeEmbedder(),
+    )
+    paper = tmp_path / "paper.txt"
+    paper.write_text("A short title\n\nSome content.", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["precision-miner", "--file", str(paper), "--miner-kind", "not_a_real_kind"],
+    )
+
+    assert result.exit_code == 1
+    assert "Unknown precision-miner kind" in result.output
+    assert embedder_calls == []
 
 
 def _study_design_spec() -> dict:
@@ -886,6 +993,36 @@ def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
     assert ui_proc.terminate_called
     # No papers indexed in this fresh tmp_path: the empty-index warning fires.
     assert "No papers are indexed yet" in result.output
+
+
+def test_studio_sigterm_is_routed_through_the_same_cleanup_as_ctrl_c(
+    tmp_path, monkeypatch, _studio_popen
+) -> None:
+    # Python's default SIGTERM handling bypasses except/finally entirely, so
+    # a plain `kill`/process-manager stop would otherwise orphan the API/UI
+    # subprocesses - studio must install a handler that converts SIGTERM
+    # into the same KeyboardInterrupt-based cleanup path Ctrl-C already uses.
+    import signal
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.delenv("MONGO_URI", raising=False)
+
+    registered_handlers: dict[int, object] = {}
+    real_signal = signal.signal
+
+    def capturing_signal(sig, handler):
+        registered_handlers[sig] = handler
+        return real_signal(sig, handler) if sig != signal.SIGTERM else None
+
+    monkeypatch.setattr(signal, "signal", capturing_signal)
+
+    result = runner.invoke(app, ["studio", "--api-port", "9193", "--ui-port", "9192"])
+
+    assert result.exit_code == 0, result.output
+    assert signal.SIGTERM in registered_handlers
+    with pytest.raises(KeyboardInterrupt):
+        registered_handlers[signal.SIGTERM](signal.SIGTERM, None)
 
 
 def test_studio_points_at_workspace_index_when_qdrant_unset(

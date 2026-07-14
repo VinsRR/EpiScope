@@ -28,9 +28,12 @@ It also prints two things worth knowing up front: the installed distribution is 
 `epi-scope` but you `import`/run it as `episcope`, and the first command that needs
 local embeddings will download a small model (~90MB, one-time — not a hang).
 
-`--quality {fast,balanced,accurate}` (default `balanced`) is a single knob for
-chunking/retrieval instead of the several individual flags underneath it — see
-`episcope ask --help` for the advanced flags it stands in for.
+`--quality {fast,balanced,accurate}` is a single knob for chunking/retrieval
+instead of the several individual flags underneath it — see `episcope ask
+--help` for the advanced flags it stands in for. Omitting it keeps today's
+per-command defaults (equivalent to `balanced` on most flags, but dense-only
+rather than hybrid retrieval on `explore`/`classify`/`precision-miner`); pass
+`--quality balanced` explicitly if you want hybrid retrieval too.
 
 Prefer to do it by hand, or installing without cloning? The equivalent manual steps:
 
@@ -389,10 +392,12 @@ episcope ask "What data sources were used in this study?" --path /path/to/paper.
 ```
 
 `ask`, `explore`, `classify`, and `precision-miner` all accept
-`--quality {fast,balanced,accurate}` (default `balanced`) as a single knob over
-chunking/retrieval, instead of tuning the individual `--chunker`/`--chunk-size`/
-`--retrieval-mode`/etc. flags directly — those are still there under "Advanced" in
-`--help` if you want to override just one of them.
+`--quality {fast,balanced,accurate}` as a single knob over chunking/retrieval,
+instead of tuning the individual `--chunker`/`--chunk-size`/`--retrieval-mode`/etc.
+flags directly — those are still there under "Advanced" in `--help` if you want
+to override just one of them. It has no default (omitting it keeps today's
+per-command flag defaults); pass `--quality balanced` explicitly for its hybrid
+retrieval mode on `explore`/`classify`/`precision-miner`.
 
 Run retrieval without generating an answer:
 
@@ -411,6 +416,11 @@ Extract likely data sources:
 ```bash
 episcope precision-miner --file /path/to/paper.pdf --miner-kind find_data_sources
 ```
+
+Prefer a browser over the command line? `episcope init`/`episcope index` into a
+workspace, then `episcope studio --workspace <name>` gives you the same
+Explorer/Classification/Precision Miner tabs with no Qdrant or MongoDB to set
+up — see [Running The UI](#running-the-ui).
 
 ### Running Without An API Key (Ollama)
 
@@ -556,10 +566,26 @@ Practical runtime notes:
 
 ## Running The UI
 
+**Fastest path — no Qdrant or MongoDB needed:** `episcope studio` starts the
+API and the Streamlit UI together against a local, file-backed index (the same
+kind the CLI's `--path` commands already use), pointed at a workspace you've
+indexed:
+
+```bash
+python -m pip install "epi-scope[all]"     # API + UI (or: "epi-scope[server,ui]")
+episcope init my-review && episcope index ./papers --workspace my-review
+episcope studio --workspace my-review      # one terminal, prints both URLs
+```
+
+It warns if the workspace hasn't been indexed yet, and stops both processes
+together on Ctrl-C. This is the recommended way to try the UI locally; the rest
+of this section covers running the API and UI as separate, longer-lived
+processes (e.g. for a shared/server deployment).
+
 The Streamlit UI is a **thin client over the FastAPI backend** — it does not run
-workflows itself, it calls the API over HTTP. So you need **both** the API and
-the UI. The `ui` extra installs only the frontend; install the `all` extra (or
-`server` + `ui`) to get both, and start the API first:
+workflows itself, it calls the API over HTTP. Run them as two separate
+processes when you want that (e.g. to keep the API running while restarting the
+UI, or for a shared deployment against real Qdrant/MongoDB):
 
 ```bash
 python -m pip install "epi-scope[all]"   # API + UI (or: "epi-scope[server,ui]")
@@ -570,8 +596,8 @@ episcope-ui                              # terminal 2: the Streamlit UI
 
 If the UI shows **"API not reachable"**, the backend is not running (or the
 "API Base URL" in the sidebar points elsewhere) — start `episcope serve` and set
-the URL. The simplest way to get everything at once is Docker Compose (below),
-which starts the API, UI, Qdrant, and GROBID together.
+the URL. Docker Compose (below) starts the API, UI, Qdrant, and GROBID together
+for a shared/server setup.
 
 The current UI includes three tabs:
 

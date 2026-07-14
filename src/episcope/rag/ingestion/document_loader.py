@@ -29,7 +29,9 @@ factory.
 from __future__ import annotations
 
 import abc
+import contextlib
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
 
@@ -388,12 +390,17 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             return self._load_pdf_with_pypdf(path)
 
         try:
-            elements = partition_pdf(
-                filename=str(path),
-                infer_table_structure=False,
-                strategy="hi_res",
-                extract_image_block_types=[],
-            )
+            # unstructured prints some diagnostics (e.g. "No languages
+            # specified, defaulting to English.") directly to stdout rather
+            # than logging - left alone, that corrupts `--format json`
+            # output. Redirect to stderr for the duration of this call only.
+            with contextlib.redirect_stdout(sys.stderr):
+                elements = partition_pdf(
+                    filename=str(path),
+                    infer_table_structure=False,
+                    strategy="hi_res",
+                    extract_image_block_types=[],
+                )
         except Exception as exc:
             logger.warning(f"Failed to parse {path} with unstructured: {exc}")
             return self._load_pdf_with_pypdf(path)

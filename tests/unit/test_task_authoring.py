@@ -284,6 +284,76 @@ def test_tasks_new_interactive_classifier_writes_valid_file(tmp_path, monkeypatc
     assert data["multi_label"] is True
 
 
+def _minimal_classifier_inputs(save_to: str) -> str:
+    return (
+        "\n".join(
+            [
+                "study_design",
+                "",
+                "",
+                "",
+                "cohort",
+                "",
+                "",
+                "",
+                "",  # finish labels
+                "y",
+                "0",
+                save_to,
+            ]
+        )
+        + "\n"
+    )
+
+
+def test_tasks_new_interactive_appends_json_extension(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["tasks", "new", "--kind", "classifier", "--interactive"],
+        input=_minimal_classifier_inputs("my_output_file"),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "my_output_file.json").exists()
+
+
+def test_tasks_new_interactive_confirms_before_overwriting(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "study_design.json"
+    existing.write_text('{"marker": "original"}', encoding="utf-8")
+    inputs = _minimal_classifier_inputs("") + "y\n"  # default path exists; confirm overwrite
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "classifier", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "already exists" in result.output
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert data["key"] == "study_design"
+
+
+def test_tasks_new_interactive_declining_overwrite_reprompts_for_a_path(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "study_design.json"
+    existing.write_text('{"marker": "original"}', encoding="utf-8")
+    inputs = (
+        _minimal_classifier_inputs("") + "n\nstudy_design_v2\n"
+    )  # decline overwrite, then pick a new path
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "classifier", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "study_design_v2.json").exists()
+    assert json.loads(existing.read_text(encoding="utf-8")) == {"marker": "original"}
+
+
 def test_tasks_new_interactive_miner_writes_valid_file(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     inputs = (
