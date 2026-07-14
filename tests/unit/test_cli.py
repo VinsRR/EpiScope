@@ -956,6 +956,11 @@ class _FakeStudioProc:
 
 @pytest.fixture
 def _studio_popen(monkeypatch):
+    # `studio` requires the `server`/`ui` extras (uvicorn, streamlit), which
+    # aren't part of the base package dependencies - skip rather than fail
+    # in environments (e.g. the base tox testenv) that only install those.
+    pytest.importorskip("uvicorn")
+    pytest.importorskip("streamlit")
     created: list[_FakeStudioProc] = []
 
     def fake_popen(args, env=None):
