@@ -31,7 +31,9 @@ from episcope.rag.retrieval.candidates import (
 )
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import PaperMetadata, Reference, StructuredSection
+from episcope.services.errors import humanize_error
 from episcope.settings import AppSettings, env
+from episcope.utils.logger import setup_logging
 from episcope.vectordb.file import FileDB
 from episcope.vectordb.qdrant import QdrantDB
 from episcope.workspace import (
@@ -155,6 +157,7 @@ class LoadedPaper:
 
 
 def main() -> None:
+    setup_logging()
     app()
 
 
@@ -361,6 +364,10 @@ def _human_tasks(payload: Any) -> list[str]:
 def _abort(message: str) -> None:
     typer.secho(message, fg=typer.colors.RED, err=True)
     raise typer.Exit(code=1)
+
+
+def _abort_exc(exc: Exception) -> None:
+    _abort(humanize_error(exc))
 
 
 def _ensure_parent_dir(path: Path) -> None:
@@ -1218,7 +1225,7 @@ def init_workspace(
     try:
         workspace = create_workspace(path, name=name, force=force)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
 
     _emit(
         {
@@ -1250,7 +1257,7 @@ def inspect_document(
     try:
         paper = _load_paper(file_path, loader_kind=loader)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
 
     _emit(
         {
@@ -1482,7 +1489,7 @@ def index(
             vectordb.save()
         _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
 
     _emit(
         {
@@ -1571,7 +1578,7 @@ def papers(
         )
         doc_ids = academic_db.list_docs(strategy_name)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
 
     _emit(
         {
@@ -1804,7 +1811,7 @@ def explore(
             payload["provenance"] = provenance
         _emit(payload, output_format, _human_explore)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
     finally:
         if tempdir is not None:
             tempdir.cleanup()
@@ -1959,7 +1966,7 @@ def ask(
         }
         _emit(payload, output_format, _human_ask)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
     finally:
         if tempdir is not None:
             tempdir.cleanup()
@@ -2207,7 +2214,7 @@ def classify(
             )
         _emit(result, output_format, _human_classify)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
     finally:
         if tempdir is not None:
             tempdir.cleanup()
@@ -2439,7 +2446,7 @@ def precision_miner(
             }
         _emit(result, output_format, _human_precision_miner)
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
     finally:
         if tempdir is not None:
             tempdir.cleanup()
@@ -2522,7 +2529,7 @@ def tasks(
                 f"Unknown action {action!r}. Choose 'list', 'new', or 'validate'."
             )
     except Exception as exc:
-        _abort(str(exc))
+        _abort_exc(exc)
 
 
 @app.command()

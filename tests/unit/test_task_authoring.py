@@ -203,6 +203,29 @@ def test_tasks_validate_schema_error(tmp_path) -> None:
     )
     result = runner.invoke(app, ["tasks", "validate", "--task-file", str(bad_spec)])
     assert result.exit_code == 1
+    # The error is plain language, not a raw pydantic ValidationError dump.
+    assert "must define at least one label" in result.output
+    assert "type=value_error" not in result.output
+    assert "errors.pydantic.dev" not in result.output
+
+
+def test_tasks_validate_bad_key_format_is_humanized(tmp_path) -> None:
+    bad_spec = tmp_path / "bad_key.json"
+    bad_spec.write_text(
+        json.dumps(
+            {
+                "key": "Bad Key",
+                "kind": "classifier",
+                "labels": [{"code": "a"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["tasks", "validate", "--task-file", str(bad_spec)])
+    assert result.exit_code == 1
+    assert "key must contain only lowercase letters" in result.output
+    assert "type=value_error" not in result.output
+    assert "errors.pydantic.dev" not in result.output
 
 
 def test_tasks_validate_requires_task_file() -> None:

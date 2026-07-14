@@ -36,7 +36,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from episcope.workflows.classification.config import (
     BaseClassifierConfig,
@@ -406,6 +406,51 @@ def validate_task_file(path: str | Path) -> TaskSpec:
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
     return TaskSpec.model_validate(data)
+
+
+def _field_path(loc: tuple) -> str:
+    parts: List[str] = []
+    for part in loc:
+        if isinstance(part, int) and parts:
+            parts[-1] = f"{parts[-1]}[{part}]"
+        else:
+            parts.append(str(part))
+    return ".".join(parts)
+
+
+def _humanize_single_error(err: Dict[str, Any]) -> str:
+    loc = err.get("loc", ())
+    field = _field_path(loc)
+    msg = err.get("msg", "")
+    err_type = err.get("type", "")
+    if err_type == "value_error" and msg.startswith("Value error, "):
+        # Raised by our own field_validator/model_validator as a plain
+        # ValueError; pydantic only adds the "Value error, " prefix, so the
+        # original human-written message is already the right thing to show.
+        return msg[len("Value error, ") :]
+    if err_type == "missing":
+        return f"{field or 'a required field'} is missing."
+    if field:
+        return f"{field}: {msg}"
+    return msg
+
+
+def humanize_task_spec_error(exc: Exception) -> str:
+    """Translate a :class:`TaskSpec` validation failure into plain language.
+
+    Pydantic's default rendering wraps each error in internal framing
+    (``[type=value_error, input_value=...]``) plus a link to pydantic's own
+    error docs, which reads as an unrelated crash to someone hand-editing a
+    JSON task file. This strips that framing and surfaces the validators'
+    own (already human-written) messages instead.
+    """
+    if isinstance(exc, ValidationError):
+        lines = [_humanize_single_error(err) for err in exc.errors()]
+        if len(lines) == 1:
+            return f"Task definition is invalid: {lines[0]}"
+        bullets = "\n".join(f"  - {line}" for line in lines)
+        return f"Task definition has {len(lines)} errors:\n{bullets}"
+    return str(exc)
 
 
 def scaffold_task_spec(kind: str) -> str:

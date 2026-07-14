@@ -13,6 +13,23 @@ EpiScope is a Python package for retrieval-backed analysis of scientific papers,
 
 ## Fastest Way To Try It
 
+From a clone of this repository, one script does the venv/install/`.env` setup for you:
+
+```bash
+git clone https://github.com/VinsRR/EpiScope.git
+cd EpiScope
+bash scripts/bootstrap.sh
+source .venv/bin/activate
+episcope doctor                                       # check your environment first
+episcope ask "What data sources were used?" --path paper.pdf
+```
+
+It also prints two things worth knowing up front: the installed distribution is named
+`epi-scope` but you `import`/run it as `episcope`, and the first command that needs
+local embeddings will download a small model (~90MB, one-time — not a hang).
+
+Prefer to do it by hand, or installing without cloning? The equivalent manual steps:
+
 ```bash
 python -m pip install "epi-scope @ git+https://github.com/VinsRR/EpiScope.git@main"
 episcope doctor                                       # check your environment first
@@ -185,6 +202,10 @@ Notes:
 ## Installation
 
 EpiScope requires Python 3.10+.
+
+For the one-command version of everything below, see
+[Fastest Way To Try It](#fastest-way-to-try-it) (`scripts/bootstrap.sh`). The manual
+steps:
 
 EpiScope is not published on PyPI yet. Install it directly from GitHub:
 
