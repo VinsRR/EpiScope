@@ -236,3 +236,196 @@ def test_tasks_validate_requires_task_file() -> None:
 def test_tasks_unknown_action_exits_nonzero() -> None:
     result = runner.invoke(app, ["tasks", "oops"])
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# tasks new --interactive (wizard)
+# ---------------------------------------------------------------------------
+def test_tasks_new_interactive_classifier_writes_valid_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    inputs = (
+        "\n".join(
+            [
+                "study_design",  # key
+                "Study design",  # label
+                "Primary design",  # description
+                "10",  # top_k
+                "cohort",  # label 1 code
+                "",  # name (default to code)
+                "Follows groups over time",  # definition
+                "We followed a cohort",  # examples
+                "unclear",  # label 2 code
+                "",  # name
+                "Not enough info",  # definition
+                "",  # examples
+                "",  # blank -> finish labels
+                "y",  # multi_label
+                "2",  # default_label choice (unclear)
+                "",  # save to (accept default)
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "classifier", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    saved = tmp_path / "study_design.json"
+    assert saved.exists()
+    data = json.loads(saved.read_text(encoding="utf-8"))
+    assert data["key"] == "study_design"
+    assert data["kind"] == "classifier"
+    assert [lbl["code"] for lbl in data["labels"]] == ["cohort", "unclear"]
+    assert data["labels"][0]["definition"] == "Follows groups over time"
+    assert data["labels"][0]["examples"] == ["We followed a cohort"]
+    assert data["default_label"] == "unclear"
+    assert data["multi_label"] is True
+
+
+def test_tasks_new_interactive_miner_writes_valid_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    inputs = (
+        "\n".join(
+            [
+                "find_funders",  # key
+                "",  # label
+                "",  # description
+                "",  # top_k
+                "Who funded this study?",  # template 1
+                "What grant supported this work?",  # template 2
+                "",  # blank -> finish templates
+                "",  # section filters
+                "",  # save to (accept default)
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "miner", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    saved = tmp_path / "find_funders.json"
+    data = json.loads(saved.read_text(encoding="utf-8"))
+    assert data["retrieval_templates"] == [
+        "Who funded this study?",
+        "What grant supported this work?",
+    ]
+    assert data["section_filters"] is None
+
+
+def test_tasks_new_interactive_retries_invalid_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    inputs = (
+        "\n".join(
+            [
+                "Bad Key",  # rejected: uppercase/space
+                "good_key",  # accepted retry
+                "",
+                "",
+                "",  # label/description/top_k
+                "a",
+                "",
+                "",
+                "",  # label 1
+                "",  # finish labels
+                "y",
+                "0",
+                "",
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "classifier", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "must contain only lowercase" in result.output
+    assert (tmp_path / "good_key.json").exists()
+
+
+def test_tasks_new_interactive_retries_duplicate_label_code(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    inputs = (
+        "\n".join(
+            [
+                "dup_test",
+                "",
+                "",
+                "",
+                "a",
+                "",
+                "",
+                "",  # label 1: a
+                "a",  # duplicate, rejected
+                "b",
+                "",
+                "",
+                "",  # label 2: b
+                "",  # finish labels
+                "y",
+                "0",
+                "",
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(
+        app, ["tasks", "new", "--kind", "classifier", "--interactive"], input=inputs
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "already used" in result.output
+    data = json.loads((tmp_path / "dup_test.json").read_text(encoding="utf-8"))
+    assert [lbl["code"] for lbl in data["labels"]] == ["a", "b"]
+
+
+def test_tasks_new_interactive_defaults_to_workspace_tasks_dir(tmp_path, monkeypatch) -> None:
+    from episcope.workspace import create_workspace
+
+    monkeypatch.chdir(tmp_path)
+    ws = create_workspace(tmp_path / "my-ws")
+    inputs = (
+        "\n".join(
+            [
+                "ws_task",
+                "",
+                "",
+                "",
+                "a",
+                "",
+                "",
+                "",
+                "",  # finish labels
+                "y",
+                "0",
+                "",  # accept default save path
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "tasks",
+            "new",
+            "--kind",
+            "classifier",
+            "--interactive",
+            "--workspace",
+            str(ws.root),
+        ],
+        input=inputs,
+    )
+
+    assert result.exit_code == 0, result.output
+    expected = ws.resolve_path("tasks") / "ws_task.json"
+    assert expected.exists()
+    assert "auto-loaded" in result.output

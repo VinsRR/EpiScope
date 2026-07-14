@@ -103,6 +103,20 @@ retrieval); the model is told the valid codes (unknown codes are ignored when
 parsing). A miner task lists retrieval prompts; its extraction schema is fixed. Prompts default to sensible
 templates and can be overridden with `system_prompt` / `user_prompt_template`.
 
+The easiest way to build one is to answer prompts instead of hand-editing JSON:
+
+```bash
+episcope tasks new --kind classifier --interactive
+episcope tasks new --kind miner --interactive
+```
+
+This walks through the label/retrieval-template fields one at a time, catches
+mistakes (like a duplicate label code) as you go, and saves the finished file
+to your workspace's `tasks/` directory if you're in one (auto-loaded from
+then on) or the current directory otherwise. `episcope tasks new --kind
+classifier` (without `--interactive`) still prints a raw JSON scaffold if you
+prefer to write the file by hand.
+
 Example classifier task (`study_design.json`):
 
 ```json

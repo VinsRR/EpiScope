@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, is_dataclass
@@ -48,6 +49,7 @@ from episcope.workflows.classification import (
     WithinLabelCrossEncoderReranker,
 )
 from episcope.workflows.registry import (
+    TaskSpec,
     build_classifier_config,
     build_precision_miner_config,
     classifier_catalog,
@@ -2859,6 +2861,152 @@ def precision_miner(
             tempdir.cleanup()
 
 
+def _prompt_task_key() -> str:
+    while True:
+        key = typer.prompt("Task key (lowercase letters, digits, underscores)")
+        if re.fullmatch(r"[a-z0-9_]+", key):
+            return key
+        typer.secho(
+            "Key must contain only lowercase letters, digits, and underscores.",
+            fg=typer.colors.RED,
+        )
+
+
+def _prompt_optional_int(message: str) -> Optional[int]:
+    while True:
+        raw = typer.prompt(message, default="", show_default=False).strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            typer.secho(f"{raw!r} is not a whole number.", fg=typer.colors.RED)
+
+
+def _prompt_classifier_labels() -> list[Dict[str, Any]]:
+    labels: list[Dict[str, Any]] = []
+    typer.echo("\nNow define at least one label. Leave the code blank when done.")
+    while True:
+        prompt = f"  Label {len(labels) + 1} code" + ("" if not labels else " (blank to finish)")
+        code = typer.prompt(prompt, default="", show_default=False).strip()
+        if not code:
+            if labels:
+                return labels
+            typer.secho("At least one label is required.", fg=typer.colors.RED)
+            continue
+        if any(existing["code"] == code for existing in labels):
+            typer.secho(f"Code {code!r} is already used.", fg=typer.colors.RED)
+            continue
+        name = typer.prompt("    Name", default=code)
+        definition = typer.prompt(
+            "    Definition (injected into the prompt)", default="", show_default=False
+        )
+        examples_raw = typer.prompt(
+            "    Example sentences (comma-separated, optional)",
+            default="",
+            show_default=False,
+        )
+        examples = [item.strip() for item in examples_raw.split(",") if item.strip()]
+        labels.append(
+            {"code": code, "name": name, "definition": definition, "examples": examples}
+        )
+
+
+def _prompt_default_label(codes: list[str]) -> Optional[str]:
+    typer.echo("\nChoose a default label for when classification is unclear:")
+    typer.echo("  0. (none)")
+    for index, code in enumerate(codes, start=1):
+        typer.echo(f"  {index}. {code}")
+    while True:
+        raw = typer.prompt("Enter a number", default="0")
+        try:
+            choice = int(raw)
+        except ValueError:
+            typer.secho("Enter a number from the list.", fg=typer.colors.RED)
+            continue
+        if choice == 0:
+            return None
+        if 1 <= choice <= len(codes):
+            return codes[choice - 1]
+        typer.secho("Out of range.", fg=typer.colors.RED)
+
+
+def _prompt_miner_templates() -> list[str]:
+    templates: list[str] = []
+    typer.echo(
+        "\nNow enter retrieval query templates (one per line). Leave blank to finish."
+    )
+    while True:
+        prompt = f"  Template {len(templates) + 1}" + ("" if not templates else " (blank to finish)")
+        raw = typer.prompt(prompt, default="", show_default=False).strip()
+        if not raw:
+            if templates:
+                return templates
+            typer.secho("At least one retrieval template is required.", fg=typer.colors.RED)
+            continue
+        templates.append(raw)
+
+
+def _run_task_wizard(kind: str, workspace_config: Optional[WorkspaceConfig]) -> None:
+    if kind not in ("classifier", "miner"):
+        _abort(f"--kind must be 'classifier' or 'miner', got {kind!r}.")
+        return  # unreachable; satisfies the type checker
+
+    typer.secho(f"Creating a new {kind} task", bold=True)
+    key = _prompt_task_key()
+    label = typer.prompt("Human-readable name (optional)", default="", show_default=False)
+    description = typer.prompt("Description (optional)", default="", show_default=False)
+    top_k = _prompt_optional_int("Default retrieval depth (top_k, optional)")
+
+    data: Dict[str, Any] = {
+        "key": key,
+        "kind": kind,
+        "label": label,
+        "description": description,
+        "top_k": top_k,
+    }
+
+    if kind == "classifier":
+        labels = _prompt_classifier_labels()
+        multi_label = typer.confirm("\nAllow multiple labels per paper?", default=True)
+        default_label = _prompt_default_label([lbl["code"] for lbl in labels])
+        data.update(
+            {"labels": labels, "multi_label": multi_label, "default_label": default_label}
+        )
+    else:
+        templates = _prompt_miner_templates()
+        section_filters_raw = typer.prompt(
+            "\nSection filters (comma-separated, optional)", default="", show_default=False
+        )
+        section_filters = [
+            item.strip() for item in section_filters_raw.split(",") if item.strip()
+        ] or None
+        data.update({"retrieval_templates": templates, "section_filters": section_filters})
+
+    spec = TaskSpec.model_validate(data)
+
+    if workspace_config is not None:
+        default_dir = workspace_config.resolve_path("tasks")
+    else:
+        default_dir = Path(".")
+    default_path = default_dir / f"{spec.key}.json"
+    output_path = Path(typer.prompt("\nSave to", default=str(default_path)))
+    _ensure_parent_dir(output_path)
+    output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    typer.secho(
+        f"\nSaved {spec.kind} task {spec.key!r} to {output_path}", fg=typer.colors.GREEN
+    )
+    if workspace_config is not None and output_path.is_relative_to(default_dir):
+        typer.echo(
+            "This is a workspace task - it will be auto-loaded next time you run "
+            "a command in this workspace."
+        )
+    else:
+        example_cmd = "classify" if kind == "classifier" else "precision-miner"
+        typer.echo(f"Run it with: episcope {example_cmd} --task-file {output_path}")
+
+
 @app.command("tasks")
 def tasks(
     action: str = typer.Argument(
@@ -2875,6 +3023,12 @@ def tasks(
         "--kind",
         help="Task kind for 'new': 'classifier' or 'miner'.",
     ),
+    interactive: bool = typer.Option(
+        False,
+        "--interactive",
+        help="For 'new': build the task by answering prompts instead of "
+        "printing a scaffold to edit by hand.",
+    ),
     task_file: Optional[Path] = typer.Option(
         None,
         "--task-file",
@@ -2885,7 +3039,8 @@ def tasks(
         None,
         "--workspace",
         "-w",
-        help="Workspace directory containing episcope.toml (used by 'list').",
+        help="Workspace directory containing episcope.toml (used by 'list' and "
+        "'new --interactive').",
     ),
     output_format: OutputFormat = _format_option(),
 ) -> None:
@@ -2896,6 +3051,7 @@ def tasks(
       episcope tasks                                  # list all kinds
       episcope tasks new --kind classifier            # print a scaffold
       episcope tasks new --kind miner > my.json       # save it
+      episcope tasks new --kind classifier --interactive  # answer prompts instead
       episcope tasks validate --task-file my.json     # lint without running
     """
     try:
@@ -2913,7 +3069,11 @@ def tasks(
             if kind is None:
                 _abort("--kind is required for 'tasks new'. Choose 'classifier' or 'miner'.")
                 return  # unreachable; satisfies the type checker
-            typer.echo(scaffold_task_spec(kind))
+            if interactive:
+                workspace_config = _optional_workspace(workspace)
+                _run_task_wizard(kind, workspace_config)
+            else:
+                typer.echo(scaffold_task_spec(kind))
 
         elif action == "validate":
             if task_file is None:
