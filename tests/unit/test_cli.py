@@ -546,6 +546,41 @@ def test_resolve_generator_errors_when_model_not_pulled(monkeypatch) -> None:
         cli._resolve_generator(cli.LLMProvider.gemini, None, 0.0, task="ask")
 
 
+def test_resolve_generator_ignores_gemini_model_name_on_ollama_fallback(
+    monkeypatch,
+) -> None:
+    """A workspace's configured Gemini model must not leak into the Ollama
+    fallback lookup (regression: previously caused a spurious 'model not
+    pulled' error even though the Ollama default was available)."""
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_SMALL_MODEL])
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("ollama", p, m))
+
+    result = cli._resolve_generator(
+        cli.LLMProvider.gemini, "gemini-2.5-flash", 0.0, task="ask"
+    )
+
+    assert result == ("ollama", cli.LLMProvider.ollama, cli._OLLAMA_SMALL_MODEL)
+
+
+def test_resolve_generator_ignores_gemini_model_name_for_workflow_task(
+    monkeypatch,
+) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_STRONG_MODEL])
+    monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("ollama", p, m))
+
+    result = cli._resolve_generator(
+        cli.LLMProvider.gemini, "gemini-2.5-flash", 0.0, task="classify"
+    )
+
+    assert result[2] == cli._OLLAMA_STRONG_MODEL
+
+
 def test_ask_without_key_or_ollama_shows_install_hint(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",

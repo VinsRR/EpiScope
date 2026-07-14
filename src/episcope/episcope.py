@@ -584,7 +584,10 @@ def _resolve_generator(
             + _ollama_setup_hint(default_model)
         )
 
-    chosen = model or default_model
+    # `model`, if set, was chosen in the Gemini provider's context (either an
+    # explicit --llm-model flag or the workspace config's gemini model), so it
+    # is never a valid Ollama model name here — always use the Ollama default.
+    chosen = default_model
     if chosen not in available:
         hint = (
             f"Ollama is running, but the model '{chosen}' is not pulled.\n"
