@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional
 
 from episcope.clients import (
+    AnthropicClient,
     GeminiClient,
     LLMClient,
     OllamaClient,
@@ -32,7 +33,7 @@ from episcope.workflows.registry import (
     build_precision_miner_config as _build_precision_miner_config,
 )
 
-LlmProvider = Literal["gemini", "openai", "openrouter", "ollama"]
+LlmProvider = Literal["gemini", "openai", "openrouter", "anthropic", "ollama"]
 RetrievalMode = Literal[
     "dense_only", "hybrid", "sparse_only", "hybrid_candidates_only"
 ]
@@ -189,6 +190,8 @@ class EpiScopeRuntime:
             return OpenAIClient()
         if provider == "openrouter":
             return OpenRouterClient()
+        if provider == "anthropic":
+            return AnthropicClient()
         if provider == "ollama":
             return OllamaClient()
         raise ValueError(f"Unsupported llm_provider={provider!r}")
@@ -289,6 +292,7 @@ def _health_checks(config: RuntimeConfig) -> Dict[str, Any]:
                 "gemini": env("GEMINI_API_KEY"),
                 "openai": env("OPENAI_API_KEY"),
                 "openrouter": env("OPENROUTER_API_KEY"),
+                "anthropic": env("ANTHROPIC_API_KEY"),
                 "ollama": env("OLLAMA_HOST", "http://localhost:11434"),
             }.get(config.llm_provider)
         ),
@@ -297,6 +301,6 @@ def _health_checks(config: RuntimeConfig) -> Dict[str, Any]:
 
 def _coerce_llm_provider(provider: str) -> LlmProvider:
     normalized = provider.lower()
-    if normalized in {"gemini", "openai", "openrouter", "ollama"}:
+    if normalized in {"gemini", "openai", "openrouter", "anthropic", "ollama"}:
         return normalized  # type: ignore[return-value]
     raise ValueError(f"Unsupported llm_provider={provider!r}")

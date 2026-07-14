@@ -21,6 +21,7 @@ dependencies = [
     "pypdf",
     "openai",
     "google-genai",
+    "anthropic",
     "rapidfuzz",
     "lxml",
 ]

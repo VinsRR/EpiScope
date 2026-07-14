@@ -218,7 +218,7 @@ with st.sidebar:
     st.header("Model")
     defaults = (health or {}).get("defaults", {})
     default_mongo_uri = defaults.get("mongo_uri")
-    provider_options = ["gemini", "openai", "openrouter", "ollama"]
+    provider_options = ["gemini", "openai", "openrouter", "anthropic", "ollama"]
     default_provider = defaults.get("llm_provider", "gemini")
     llm_provider = st.selectbox(
         "LLM Provider",

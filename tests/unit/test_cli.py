@@ -315,6 +315,20 @@ def test_doctor_warns_when_provider_key_missing(monkeypatch) -> None:
     )
 
 
+def test_doctor_checks_anthropic_key(monkeypatch) -> None:
+    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "anthropic")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["doctor", "--no-probe"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert any(
+        check["status"] == "warn" and check["label"] == "ANTHROPIC_API_KEY"
+        for check in payload["checks"]
+    )
+
+
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
@@ -486,6 +500,27 @@ def test_tasks_command_lists_builtin_and_declarative(tmp_path) -> None:
         entry for entry in payload["classifiers"] if entry["key"] == "study_design"
     )
     assert declared["source"] == "declarative"
+
+
+# ---------------------------------------------------------------------------
+# Provider dispatch
+# ---------------------------------------------------------------------------
+def test_build_generator_dispatches_anthropic_provider(monkeypatch) -> None:
+    from episcope import episcope as cli
+    from episcope.clients import AnthropicClient
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    generator = cli._build_generator(cli.LLMProvider.anthropic, "claude-sonnet-5", 0.0)
+    assert isinstance(generator.client, AnthropicClient)
+    assert generator.model == "claude-sonnet-5"
+
+
+def test_build_generator_anthropic_requires_explicit_model(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="--llm-model is required"):
+        cli._build_generator(cli.LLMProvider.anthropic, None, 0.0)
 
 
 # ---------------------------------------------------------------------------

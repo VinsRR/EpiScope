@@ -130,6 +130,7 @@ class LLMProvider(str, Enum):
     gemini = "gemini"
     openai = "openai"
     openrouter = "openrouter"
+    anthropic = "anthropic"
     ollama = "ollama"
 
 
@@ -492,6 +493,7 @@ def _build_metadata_db(
 def _build_generator(provider: LLMProvider, model: Optional[str], temperature: float):
     from episcope.rag.generation.llm_generator import LLMGenerator
     from episcope.clients import (
+        AnthropicClient,
         GeminiClient,
         OllamaClient,
         OpenAIClient,
@@ -521,6 +523,8 @@ def _build_generator(provider: LLMProvider, model: Optional[str], temperature: f
         client = OpenAIClient()
     elif provider == LLMProvider.openrouter:
         client = OpenRouterClient()
+    elif provider == LLMProvider.anthropic:
+        client = AnthropicClient()
     elif provider == LLMProvider.ollama:
         client = OllamaClient()
     else:
@@ -553,7 +557,8 @@ def _ollama_setup_hint(model: str) -> str:
         "  2. Start it: `ollama serve`\n"
         f"  3. Pull a model: `ollama pull {model}`\n"
         f"  4. Re-run with: `--llm-provider ollama --llm-model {model}`\n\n"
-        "Or set GEMINI_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY) in your .env."
+        "Or set GEMINI_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY / "
+        "ANTHROPIC_API_KEY) in your .env."
     )
 
 
@@ -1034,6 +1039,7 @@ def doctor(
         "gemini": "GEMINI_API_KEY",
         "openai": "OPENAI_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
     }.get(provider)
     if provider == "ollama":
         if probe:
@@ -1074,7 +1080,7 @@ def doctor(
             "warn",
             "Credentials",
             f"unknown provider {provider!r}",
-            "Set EPISCOPE_LLM_PROVIDER to one of: gemini, openai, openrouter, ollama.",
+            "Set EPISCOPE_LLM_PROVIDER to one of: gemini, openai, openrouter, anthropic, ollama.",
             section="LLM",
         )
 

@@ -52,8 +52,8 @@ class BackendConfig(BaseModel):
     qdrant_collection: str = Field(
         default_factory=lambda: RuntimeConfig.from_settings().qdrant_collection
     )
-    llm_provider: Literal["gemini", "openai", "openrouter", "ollama"] = Field(
-        default_factory=lambda: RuntimeConfig.from_settings().llm_provider
+    llm_provider: Literal["gemini", "openai", "openrouter", "anthropic", "ollama"] = (
+        Field(default_factory=lambda: RuntimeConfig.from_settings().llm_provider)
     )
     llm_model: str = Field(
         default_factory=lambda: RuntimeConfig.from_settings().llm_model

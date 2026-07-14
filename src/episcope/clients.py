@@ -32,6 +32,12 @@ except ImportError:  # pragma: no cover - exercised in environments without the 
     genai = None
     genai_types = None
 
+anthropic: Any
+try:
+    import anthropic
+except ImportError:  # pragma: no cover - exercised in environments without the SDK
+    anthropic = None
+
 
 # Provider-agnostic interface
 
@@ -589,3 +595,118 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
             **kwargs,
         )
         return [embedding.values or [] for embedding in result.embeddings]
+
+
+@dataclass
+class AnthropicClient(UsageTrackingMixin, LLMClient):
+    """
+    Client for Anthropic's Claude models via the anthropic SDK.
+
+    - Reads `ANTHROPIC_API_KEY` from the environment.
+    - `api_key` can be passed explicitly to override env var.
+    - `prompt_cache`: when True, marks the system prompt with an ephemeral
+      cache_control block so repeated calls sharing the same system prompt
+      and model reuse Anthropic's server-side prompt cache.
+    - `default_max_tokens`: Anthropic's Messages API requires `max_tokens`;
+      this is used whenever the caller does not supply one.
+
+    Example models: 'claude-opus-4-8', 'claude-sonnet-5'
+    """
+
+    api_key: Optional[str] = field(default=None, repr=False)
+    prompt_cache: bool = True
+    default_max_tokens: int = 4096
+    _client: Any = field(init=False, repr=False)
+
+    def __post_init__(self):
+        self._init_usage_tracking()
+        if anthropic is None:
+            raise ImportError(
+                "The anthropic package is not installed. Install it to use AnthropicClient."
+            )
+        key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise ValueError(
+                "`api_key` not provided and `ANTHROPIC_API_KEY` env var not set."
+            )
+        self._client = anthropic.Anthropic(api_key=key)
+
+    def chat(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        model: str,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Call the Anthropic Messages API.
+
+        System messages are pulled out of `messages` into the top-level
+        `system` parameter, as required by the Messages API.
+        """
+        system_text: Optional[str] = None
+        converted: List[Dict[str, Any]] = []
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            text = (
+                content
+                if isinstance(content, str)
+                else "".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            )
+            if role == "system":
+                system_text = f"{system_text}\n\n{text}" if system_text else text
+            else:
+                converted.append({"role": role, "content": text})
+
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": converted,
+            "temperature": temperature,
+            "max_tokens": max_tokens or self.default_max_tokens,
+        }
+        if system_text:
+            create_kwargs["system"] = (
+                [
+                    {
+                        "type": "text",
+                        "text": system_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+                if self.prompt_cache
+                else system_text
+            )
+
+        sig = inspect.signature(self._client.messages.create)
+        create_kwargs.update(
+            {k: v for k, v in kwargs.items() if k in sig.parameters}
+        )
+        response = self._client.messages.create(**create_kwargs)
+
+        usage = getattr(response, "usage", None)
+        self._record_usage(
+            prompt_tokens=getattr(usage, "input_tokens", None),
+            completion_tokens=getattr(usage, "output_tokens", None),
+            cached_tokens=getattr(usage, "cache_read_input_tokens", None),
+        )
+        return "".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        )
+
+    def embed(
+        self,
+        texts: List[str],
+        *,
+        model: str,
+        **kwargs: Any,
+    ) -> List[List[float]]:
+        raise NotImplementedError(
+            "Anthropic does not provide an embeddings API. Use a different "
+            "embedding provider (huggingface, openai, gemini, or ollama)."
+        )

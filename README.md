@@ -302,6 +302,7 @@ Notes:
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `OPENROUTER_API_KEY`
+- `ANTHROPIC_API_KEY`
 
 `episcope doctor` reports which of these are set and which compute device will
 be used — run it first when something does not work.
@@ -311,6 +312,7 @@ Current provider values supported by the API and UI:
 - `gemini`
 - `openai`
 - `openrouter`
+- `anthropic`
 - `ollama`
 
 The default runtime settings live in `src/episcope/settings.py`.
@@ -387,13 +389,14 @@ EpiScope automatically falls back to a local Ollama model (a small one for
 exact instructions if Ollama is not installed yet.
 
 For better quality or speed, set a cloud key instead — `GEMINI_API_KEY`,
-`OPENAI_API_KEY`, or `OPENROUTER_API_KEY` (see [Configuration](#configuration)).
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY` (see
+[Configuration](#configuration)).
 
 Local notes:
 
 - local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which runs locally and does not require a Gemini/OpenAI key
 - PDF parsing with the default `unstructured` loader may need system packages for some PDFs: `poppler` (generally) and `tesseract` (for scanned/image PDFs). On Debian/Ubuntu: `sudo apt-get install poppler-utils tesseract-ocr`; on macOS: `brew install poppler tesseract`. For cleaner section structure, point EpiScope at a running GROBID service with `--loader grobid`.
-- answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
+- answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
 - on an older or unsupported GPU, the default device selection (`auto`) avoids the GPU and uses the CPU; you can force it with `EPISCOPE_DEVICE=cpu`. `episcope doctor` shows the resolved compute device.
 - classifier and miner kinds (including any user-defined ones) are listed by `episcope tasks`
 - use the API/UI/Docker path once you have a shared indexed corpus and want multiple users to work against the same backend
