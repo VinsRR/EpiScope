@@ -376,9 +376,12 @@ def test_resolve_retrieval_mode_errors_when_explicit_and_local_ml_missing(monkey
         )
 
 
-def test_resolve_retrieval_mode_passes_through_when_fully_satisfied() -> None:
+def test_resolve_retrieval_mode_passes_through_when_fully_satisfied(monkeypatch) -> None:
     from episcope import episcope as cli
 
+    # Explicitly mock local ML availability rather than relying on whether
+    # torch happens to be installed in whatever environment runs this test.
+    monkeypatch.setattr(cli, "_local_ml_available", lambda: True)
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
     result = cli._resolve_retrieval_mode_for_vectordb(
         fake_vectordb, cli.RetrievalMode.hybrid, True
