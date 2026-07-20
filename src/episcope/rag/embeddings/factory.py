@@ -2,15 +2,11 @@ import logging
 import os
 from typing import Optional
 
-from .base import Embedder
-from .huggingface import (
-    HuggingFaceEmbedder,
-    HuggingFaceSparseEmbedder,
-    HuggingFaceLateEmbedder,
-)
+from .base import Embedder, SparseEmbedder, LateEmbedder
 from .ollama import OllamaEmbedder
 from .openai import OpenAIEmbedder
 from .gemini import GeminiEmbedder
+from .fastembed_embedder import FastEmbedEmbedder, FASTEMBED_SUPPORTED_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +17,29 @@ OPENAI_EMBEDDING_MODELS = {
     "text-embedding-ada-002",
 }
 
+_LOCAL_ML_HINT = (
+    "This requires the heavier local ML stack (torch/transformers/"
+    "sentence-transformers), which isn't installed. Install it with "
+    "`pip install epi-scope[local-ml]`, or use a model covered by the "
+    "lightweight default: {supported}."
+)
+
+
+def _import_huggingface():
+    try:
+        from . import huggingface
+    except ImportError as exc:
+        raise ImportError(
+            _LOCAL_ML_HINT.format(supported=", ".join(sorted(FASTEMBED_SUPPORTED_MODELS)))
+        ) from exc
+    return huggingface
+
+
 # Provider name -> dense embedder class. Adding a provider is one entry here.
+# "huggingface" is intentionally absent: it's dispatched lazily in
+# get_embedder() below so importing this module never requires torch.
 EMBEDDER_PROVIDERS = {
-    "huggingface": HuggingFaceEmbedder,
+    "fastembed": FastEmbedEmbedder,
     "openai": OpenAIEmbedder,
     "gemini": GeminiEmbedder,
     "ollama": OllamaEmbedder,
@@ -59,11 +75,14 @@ class EmbedderFactory:
         if resolved == "auto":
             resolved = EmbedderFactory._detect_provider(model_name)
 
-        embedder_cls = EMBEDDER_PROVIDERS.get(resolved)
+        if resolved == "huggingface":
+            embedder_cls = _import_huggingface().HuggingFaceEmbedder
+        else:
+            embedder_cls = EMBEDDER_PROVIDERS.get(resolved)
         if embedder_cls is None:
             raise ValueError(
                 f"Unknown embedding provider {resolved!r}. Choose one of: "
-                f"{', '.join(sorted(EMBEDDER_PROVIDERS))} (or 'auto')."
+                f"{', '.join(sorted({*EMBEDDER_PROVIDERS, 'huggingface'}))} (or 'auto')."
             )
         logger.info(
             "Creating %s for model '%s' (provider=%s).",
@@ -79,7 +98,10 @@ class EmbedderFactory:
         name = model_name.strip()
         lowered = name.lower()
         if "/" in name and not name.startswith("models/"):
-            return "huggingface"
+            # Prefer the torch-free backend when it covers this model; the
+            # heavier huggingface backend remains reachable via an explicit
+            # provider="huggingface" (needs epi-scope[local-ml]).
+            return "fastembed" if name in FASTEMBED_SUPPORTED_MODELS else "huggingface"
         if name.startswith("models/") or "gemini" in lowered:
             return "gemini"
         if (
@@ -91,17 +113,17 @@ class EmbedderFactory:
         raise ValueError(
             f"Could not infer an embedding provider from model name {model_name!r}. "
             f"Pass provider=... or set EPISCOPE_EMBED_PROVIDER to one of: "
-            f"{', '.join(sorted(EMBEDDER_PROVIDERS))}."
+            f"{', '.join(sorted({*EMBEDDER_PROVIDERS, 'huggingface'}))}."
         )
 
     @staticmethod
-    def get_sparse_embedder(model_name: str, **kwargs) -> HuggingFaceSparseEmbedder:
-        """Factory method to get a sparse embedder instance."""
+    def get_sparse_embedder(model_name: str, **kwargs) -> SparseEmbedder:
+        """Factory method to get a sparse embedder instance (needs epi-scope[local-ml])."""
         logger.info(f"Creating HuggingFaceSparseEmbedder for model '{model_name}'.")
-        return HuggingFaceSparseEmbedder(model=model_name, **kwargs)
+        return _import_huggingface().HuggingFaceSparseEmbedder(model=model_name, **kwargs)
 
     @staticmethod
-    def get_late_embedder(model_name: str, **kwargs) -> HuggingFaceLateEmbedder:
-        """Factory method to get a late-interaction embedder instance."""
+    def get_late_embedder(model_name: str, **kwargs) -> LateEmbedder:
+        """Factory method to get a late-interaction embedder instance (needs epi-scope[local-ml])."""
         logger.info(f"Creating HuggingFaceLateEmbedder for model '{model_name}'.")
-        return HuggingFaceLateEmbedder(model=model_name, **kwargs)
+        return _import_huggingface().HuggingFaceLateEmbedder(model=model_name, **kwargs)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from episcope.rag.embeddings import factory
@@ -22,7 +25,10 @@ def _patch_providers(monkeypatch):
 
 def test_detect_provider_common_cases() -> None:
     detect = EmbedderFactory._detect_provider
-    assert detect("sentence-transformers/all-MiniLM-L6-v2") == "huggingface"
+    # Covered by the lightweight fastembed backend: no torch required.
+    assert detect("sentence-transformers/all-MiniLM-L6-v2") == "fastembed"
+    # Not in fastembed's curated list: falls back to the huggingface backend.
+    assert detect("intfloat/e5-small-v2") == "huggingface"
     assert detect("gemini-embedding-001") == "gemini"
     assert detect("models/embedding-001") == "gemini"
     assert detect("text-embedding-3-small") == "openai"
@@ -63,3 +69,36 @@ def test_auto_without_match_raises(monkeypatch) -> None:
     monkeypatch.delenv("EPISCOPE_EMBED_PROVIDER", raising=False)
     with pytest.raises(ValueError, match="Could not infer"):
         EmbedderFactory.get_embedder("nomic-embed-text")
+
+
+def test_huggingface_dispatch_is_lazy_and_works_when_available(monkeypatch) -> None:
+    fake_module = types.SimpleNamespace(
+        HuggingFaceEmbedder=_FakeEmbedder,
+        HuggingFaceSparseEmbedder=_FakeEmbedder,
+        HuggingFaceLateEmbedder=_FakeEmbedder,
+    )
+    monkeypatch.setitem(
+        sys.modules, "episcope.rag.embeddings.huggingface", fake_module
+    )
+    embedder = EmbedderFactory.get_embedder(
+        "intfloat/e5-small-v2", provider="huggingface"
+    )
+    assert isinstance(embedder, _FakeEmbedder)
+    assert embedder.model == "intfloat/e5-small-v2"
+
+
+def test_huggingface_dispatch_missing_torch_raises_local_ml_hint(monkeypatch) -> None:
+    monkeypatch.delitem(
+        sys.modules, "episcope.rag.embeddings.huggingface", raising=False
+    )
+    original_import = __import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "" and fromlist and "huggingface" in fromlist and level == 1:
+            raise ImportError("simulated missing torch")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(ImportError, match="epi-scope\\[local-ml\\]"):
+        EmbedderFactory.get_embedder("intfloat/e5-small-v2", provider="huggingface")

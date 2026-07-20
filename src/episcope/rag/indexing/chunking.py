@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 
 from episcope.rag.embeddings.base import Embedder
-from episcope.rag.embeddings.huggingface import HuggingFaceEmbedder
 from episcope.schemas import PaperMetadata, StructuredSection
 
 
@@ -224,7 +223,11 @@ class SemanticChunker(Chunker):
                 - "chunk": (Strategy 1, default) compare to the whole chunk embedding.
                 - "last":  (Strategy 2) compare only to the last sentence embedding.
         """
-        self.embedder = embedder or HuggingFaceEmbedder()
+        if embedder is None:
+            from episcope.rag.embeddings.huggingface import HuggingFaceEmbedder
+
+            embedder = HuggingFaceEmbedder()
+        self.embedder = embedder
         self.similarity_threshold = float(similarity_threshold)
         self.compare_mode = compare_mode
 

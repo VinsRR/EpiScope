@@ -13,8 +13,9 @@ Two concrete extractors are supplied:
 
 * :class:`UnstructuredDocumentLoader` parses PDF and other files using
   the optional Unstructured library.  It groups titles and
-  paragraphs into sections.  If Unstructured is not installed, it
-  falls back to reading plain text files.
+  paragraphs into sections.  If Unstructured's hi_res (ML layout) PDF
+  parsing is unavailable, it falls back to a torch-free pdfminer.six
+  heuristic (font size / bold weight) for heading detection.
 * :class:`GrobidDocumentLoader` leverages the grobid_client library to
   produce TEI XML and then extracts sections.  If the grobid
   dependency is missing or parsing fails, it falls back to the
@@ -32,6 +33,7 @@ import abc
 import contextlib
 import logging
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
 
@@ -385,9 +387,11 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
             )
         except ImportError:
             logger.warning(
-                "Unstructured PDF parsing is unavailable. Falling back to basic PDF text extraction."
+                "Unstructured's hi_res PDF parsing is unavailable (needs "
+                "`pip install epi-scope[local-ml]`). Falling back to a "
+                "torch-free heuristic PDF extraction."
             )
-            return self._load_pdf_with_pypdf(path)
+            return self._load_pdf_with_pdfminer(path)
 
         try:
             # unstructured prints some diagnostics (e.g. "No languages
@@ -403,7 +407,7 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
                 )
         except Exception as exc:
             logger.warning(f"Failed to parse {path} with unstructured: {exc}")
-            return self._load_pdf_with_pypdf(path)
+            return self._load_pdf_with_pdfminer(path)
 
         sections: List[StructuredSection] = []
         current_title: str = ""
@@ -433,33 +437,103 @@ class UnstructuredDocumentLoader(AbstractDocumentLoader):
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
 
-    def _load_pdf_with_pypdf(
+    def _load_pdf_with_pdfminer(
         self, path: Path
     ) -> Tuple[List[StructuredSection], PaperMetadata]:
-        """Extract text from a PDF without OCR-heavy dependencies."""
+        """Extract text and heading structure from a PDF using pdfminer.six.
+
+        This is the torch-free fallback used when unstructured's hi_res
+        (ML layout/table detection) path isn't installed or fails. It
+        detects headings heuristically from font size and bold weight
+        rather than a trained layout model, so section boundaries are
+        coarser than the hi_res path (bold table cells can be picked up as
+        spurious short "headings"), but the full document text is kept
+        either way.
+        """
         try:
-            from pypdf import PdfReader
+            from pdfminer.high_level import extract_pages
+            from pdfminer.layout import LTChar, LTTextContainer, LTTextLine
         except ImportError as exc:
             raise RuntimeError(
-                "PDF parsing is unavailable. Install unstructured PDF extras, run GROBID, or install pypdf."
+                "PDF parsing is unavailable: pdfminer.six is not installed."
             ) from exc
 
         try:
-            reader = PdfReader(str(path))
-            page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
+            pages_lines: List[List[Tuple[float, str, bool]]] = []
+            for page_layout in extract_pages(str(path)):
+                lines: List[Tuple[float, str, bool]] = []
+                for element in page_layout:
+                    if not isinstance(element, LTTextContainer):
+                        continue
+                    for text_line in element:
+                        if not isinstance(text_line, LTTextLine):
+                            continue
+                        chars = [c for c in text_line if isinstance(c, LTChar)]
+                        if not chars:
+                            continue
+                        text = text_line.get_text().strip()
+                        if not text:
+                            continue
+                        size = sum(c.size for c in chars) / len(chars)
+                        bold = any("bold" in c.fontname.lower() for c in chars)
+                        lines.append((size, text, bold))
+                pages_lines.append(lines)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to extract text from PDF {path}: {exc}"
             ) from exc
 
-        content = "\n\n".join(text for text in page_texts if text)
-        if not content:
+        all_lines = [line for page in pages_lines for line in page]
+        if not all_lines:
             raise RuntimeError(
-                f"PDF {path} did not yield extractable text. Try --loader grobid for OCR/structured parsing."
+                f"PDF {path} did not yield extractable text. Try --loader grobid, "
+                f"or install epi-scope[local-ml] for `--loader unstructured` hi_res parsing."
             )
 
-        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
-        sections = [StructuredSection(title="", content=p) for p in paragraphs]
+        body_size = Counter(round(size, 1) for size, _, _ in all_lines).most_common(1)[0][0]
+
+        # Drop running headers/footers: short lines repeated across most pages.
+        page_counts: Counter = Counter()
+        for page in pages_lines:
+            for text in {text for _, text, _ in page}:
+                page_counts[text] += 1
+        num_pages = len(pages_lines) or 1
+        repeated_noise = {
+            text
+            for text, count in page_counts.items()
+            if count >= 3 and count >= 0.5 * num_pages and len(text) < 100
+        }
+
+        def _is_heading(size: float, text: str, bold: bool) -> bool:
+            if len(text) < 3 or len(text) > 90 or len(text.split()) > 14:
+                return False
+            if not any(ch.isalpha() for ch in text):
+                return False
+            return bold or size > body_size * 1.05
+
+        sections: List[StructuredSection] = []
+        current_title = ""
+        current_content: List[str] = []
+        for size, text, bold in all_lines:
+            if text in repeated_noise:
+                continue
+            if _is_heading(size, text, bold):
+                if current_content:
+                    sections.append(
+                        StructuredSection(
+                            title=current_title, content="\n".join(current_content)
+                        )
+                    )
+                    current_content = []
+                current_title = text
+            else:
+                current_content.append(text)
+
+        if current_content:
+            sections.append(
+                StructuredSection(title=current_title, content="\n".join(current_content))
+            )
+
         metadata = PaperMetadata(title=path.stem)
         return sections, metadata
 

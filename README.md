@@ -268,15 +268,28 @@ python -m pip install -e ".[dev]"
 Optional extras can be installed from either GitHub or a local checkout:
 
 ```bash
-python -m pip install "epi-scope[server] @ git+https://github.com/VinsRR/EpiScope.git@main"   # FastAPI backend
-python -m pip install "epi-scope[ui] @ git+https://github.com/VinsRR/EpiScope.git@main"       # Streamlit frontend
-python -m pip install "epi-scope[all] @ git+https://github.com/VinsRR/EpiScope.git@main"      # both (API + UI)
-python -m pip install "epi-scope[dev] @ git+https://github.com/VinsRR/EpiScope.git@main"      # tests, lint, type-check
+python -m pip install "epi-scope[server] @ git+https://github.com/VinsRR/EpiScope.git@main"    # FastAPI backend
+python -m pip install "epi-scope[ui] @ git+https://github.com/VinsRR/EpiScope.git@main"        # Streamlit frontend
+python -m pip install "epi-scope[all] @ git+https://github.com/VinsRR/EpiScope.git@main"       # both (API + UI)
+python -m pip install "epi-scope[local-ml] @ git+https://github.com/VinsRR/EpiScope.git@main"  # torch-based embeddings + hi_res PDF parsing
+python -m pip install "epi-scope[dev] @ git+https://github.com/VinsRR/EpiScope.git@main"       # tests, lint, type-check
 ```
 
 The `ui` extra installs only the Streamlit frontend, which needs a running API;
 use `all` (or `server,ui`) if you want the full UI experience. See
 [Running The UI](#running-the-ui).
+
+The base install has no torch dependency: local embedding uses
+[fastembed](https://github.com/qdrant/fastembed) (ONNX runtime) and PDF
+parsing uses a `pdfminer.six` heuristic loader, both usable with zero
+external services or API keys. Install `local-ml` for the heavier
+`sentence-transformers`/`transformers`/`torch` backend — needed for
+embedding models outside fastembed's curated list, or for `unstructured`'s
+ML-based `hi_res` PDF layout/table parsing. `episcope doctor` reports which
+tier is active for both. Generating answers or classifications (`ask`,
+`classify`, `precision-miner`) still needs an LLM: a cloud API key or a
+local Ollama model — see `episcope quickstart`. Without either, `ask`
+degrades to showing the top retrieved passages instead of erroring.
 
 If you only want to build the package from the repository root:
 
@@ -453,8 +466,8 @@ For better quality or speed, set a cloud key instead — `GEMINI_API_KEY`,
 
 Local notes:
 
-- local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2`, which runs locally and does not require a Gemini/OpenAI key
-- PDF parsing with the default `unstructured` loader may need system packages for some PDFs: `poppler` (generally) and `tesseract` (for scanned/image PDFs). On Debian/Ubuntu: `sudo apt-get install poppler-utils tesseract-ocr`; on macOS: `brew install poppler tesseract`. For cleaner section structure, point EpiScope at a running GROBID service with `--loader grobid`.
+- local indexing and retrieval default to `sentence-transformers/all-MiniLM-L6-v2` served by the torch-free `fastembed` backend, which runs locally and does not require a Gemini/OpenAI key
+- PDF parsing defaults to a torch-free `pdfminer.six` heuristic loader (coarser section detection, no extra system packages needed). Installing `epi-scope[local-ml]` enables `unstructured`'s ML-based `hi_res` layout parsing instead, which may need system packages for some PDFs: `poppler` (generally) and `tesseract` (for scanned/image PDFs) — on Debian/Ubuntu: `sudo apt-get install poppler-utils tesseract-ocr`; on macOS: `brew install poppler tesseract`. For cleaner section structure either way, point EpiScope at a running GROBID service with `--loader grobid`.
 - answer generation and classification still require an LLM provider; use `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `--llm-provider ollama --llm-model <local-model>`
 - on an older or unsupported GPU, the default device selection (`auto`) avoids the GPU and uses the CPU; you can force it with `EPISCOPE_DEVICE=cpu`. `episcope doctor` shows the resolved compute device.
 - classifier and miner kinds (including any user-defined ones) are listed by `episcope tasks`

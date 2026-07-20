@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 from typer.testing import CliRunner
@@ -315,6 +316,117 @@ def test_ask_path_accepts_quality_preset(tmp_path, monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# _resolve_retrieval_mode_for_vectordb (hybrid/sparse without sparse-capable
+# storage, or without the local ML stack for the sparse embedder)
+# ---------------------------------------------------------------------------
+def test_resolve_retrieval_mode_dense_only_passthrough() -> None:
+    from episcope import episcope as cli
+
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
+    result = cli._resolve_retrieval_mode_for_vectordb(
+        fake_vectordb, cli.RetrievalMode.dense_only, False
+    )
+    assert result == cli.RetrievalMode.dense_only
+
+
+def test_resolve_retrieval_mode_clamps_when_storage_lacks_sparse(capsys) -> None:
+    from episcope import episcope as cli
+
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
+    result = cli._resolve_retrieval_mode_for_vectordb(
+        fake_vectordb, cli.RetrievalMode.hybrid, False
+    )
+    assert result == cli.RetrievalMode.dense_only
+    assert "sparse-capable storage" in capsys.readouterr().err
+
+
+def test_resolve_retrieval_mode_errors_when_explicit_and_storage_lacks_sparse() -> None:
+    from episcope import episcope as cli
+
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
+    with pytest.raises(ValueError, match="sparse-capable storage"):
+        cli._resolve_retrieval_mode_for_vectordb(
+            fake_vectordb, cli.RetrievalMode.hybrid, True
+        )
+
+
+def test_resolve_retrieval_mode_clamps_when_local_ml_missing(monkeypatch, capsys) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.setattr(cli, "_local_ml_available", lambda: False)
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
+    result = cli._resolve_retrieval_mode_for_vectordb(
+        fake_vectordb, cli.RetrievalMode.hybrid, False
+    )
+    assert result == cli.RetrievalMode.dense_only
+    assert "local ML stack" in capsys.readouterr().err
+
+
+def test_resolve_retrieval_mode_errors_when_explicit_and_local_ml_missing(monkeypatch) -> None:
+    from episcope import episcope as cli
+
+    monkeypatch.setattr(cli, "_local_ml_available", lambda: False)
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
+    with pytest.raises(ValueError, match="local ML stack"):
+        cli._resolve_retrieval_mode_for_vectordb(
+            fake_vectordb, cli.RetrievalMode.hybrid, True
+        )
+
+
+def test_resolve_retrieval_mode_passes_through_when_fully_satisfied() -> None:
+    from episcope import episcope as cli
+
+    fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
+    result = cli._resolve_retrieval_mode_for_vectordb(
+        fake_vectordb, cli.RetrievalMode.hybrid, True
+    )
+    assert result == cli.RetrievalMode.hybrid
+
+
+def test_explore_workspace_with_balanced_quality_clamps_on_file_backend(
+    tmp_path, monkeypatch
+) -> None:
+    """Regression test: the default (file-backed) workspace can't serve hybrid
+    retrieval; a --quality preset asking for it should degrade gracefully
+    instead of raising, matching the --path/--file clamp behavior.
+    """
+    monkeypatch.setattr(
+        "episcope.episcope.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+    workspace = tmp_path / "ws"
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["init", str(workspace)]).exit_code == 0
+    index_result = runner.invoke(
+        app,
+        [
+            "index",
+            str(paper),
+            "--workspace",
+            str(workspace),
+            "--embed-model",
+            "fake-embedder/1",
+        ],
+    )
+    assert index_result.exit_code == 0, index_result.output
+
+    result = runner.invoke(
+        app,
+        ["explore", "Zenodo", "--workspace", str(workspace), "--quality", "balanced"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "sparse-capable storage" in result.output
+    payload = json.loads(result.stdout)
+    assert payload["retrieval_count"] >= 1
 
 
 def test_explore_path_with_balanced_quality_does_not_raise(tmp_path, monkeypatch) -> None:
@@ -915,7 +1027,7 @@ def test_resolve_generator_ignores_gemini_model_name_for_workflow_task(
     assert result[2] == cli._OLLAMA_STRONG_MODEL
 
 
-def test_ask_without_key_or_ollama_shows_install_hint(tmp_path, monkeypatch) -> None:
+def test_ask_without_key_or_ollama_shows_extractive_fallback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "episcope.episcope.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
@@ -924,13 +1036,19 @@ def test_ask_without_key_or_ollama_shows_install_hint(tmp_path, monkeypatch) -> 
     monkeypatch.setattr("episcope.episcope._ollama_models", lambda: None)
 
     paper = tmp_path / "paper.txt"
-    paper.write_text("The dataset is on Zenodo.", encoding="utf-8")
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
 
     result = runner.invoke(app, ["ask", "Where are the data?", "--path", str(paper)])
 
-    assert result.exit_code == 1
-    assert "Ollama" in result.output
-    assert "ollama pull" in result.output
+    assert result.exit_code == 0
+    assert "quickstart" in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["answer"] is None
+    assert payload["sources"]
+    assert "Zenodo" in payload["sources"][0]["text"]
 
 
 # ---------------------------------------------------------------------------

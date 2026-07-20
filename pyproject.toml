@@ -13,12 +13,10 @@ dependencies = [
     "requests",
     "numpy",
     "python-dotenv",
-    "torch",
-    "transformers",
-    "sentence-transformers",
+    "fastembed",
     "tqdm",
-    "unstructured[pdf]",
-    "pypdf",
+    "unstructured",
+    "pdfminer.six",
     "openai",
     "google-genai",
     "anthropic",
@@ -47,6 +45,18 @@ grobid = [
 # Local FAISS vector backend (`--index-backend faiss`).
 faiss = [
     "faiss-cpu",
+]
+# The heavier local ML stack: torch-based embedding models beyond the
+# lightweight fastembed default (provider="huggingface"), and unstructured's
+# hi_res PDF parsing (layout/table models via unstructured-inference). Only
+# needed for custom embedding models or best-effort PDF structure extraction;
+# the lightweight defaults (fastembed + the pdfminer heuristic loader) work
+# without it.
+local-ml = [
+    "torch",
+    "transformers",
+    "sentence-transformers",
+    "unstructured[pdf]",
 ]
 # Everything needed to run the API and the Streamlit UI together.
 all = [

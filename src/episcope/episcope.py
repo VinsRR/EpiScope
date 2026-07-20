@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import sys
@@ -346,8 +347,12 @@ def _human_explore(payload: Any) -> list[str]:
 
 def _human_ask(payload: Any) -> list[str]:
     data = _json_ready(payload)
-    lines = [f"Q: {data['question']}", "", f"A: {data['answer']}"]
     sources = data.get("sources", [])
+    no_answer = data.get("answer") is None
+    if no_answer:
+        lines = [f"Q: {data['question']}", "", "No generated answer — top passages:"]
+    else:
+        lines = [f"Q: {data['question']}", "", f"A: {data['answer']}"]
     if sources:
         lines.extend(["", f"Sources ({data.get('source_count', len(sources))}):"])
         for source in sources:
@@ -357,6 +362,8 @@ def _human_ask(payload: Any) -> list[str]:
                 f"  - {source.get('paper_id', '?')}{separator} "
                 f"(score {_format_score(source.get('rank_score'))})"
             )
+            if no_answer and source.get("text"):
+                lines.append(f"    {_truncate(source['text'], 300)}")
     return lines
 
 
@@ -663,6 +670,16 @@ def _ollama_setup_hint(model: str) -> str:
     )
 
 
+class NoGeneratorAvailable(ValueError):
+    """Raised when no LLM key and no local Ollama server are available at all.
+
+    Distinct from other `_resolve_generator` failures (Ollama running but
+    missing the model, user declining the confirm prompt) so callers can
+    choose to degrade gracefully specifically for this "nothing is
+    configured yet" case rather than every generator failure.
+    """
+
+
 def _resolve_generator(
     provider: LLMProvider,
     model: Optional[str],
@@ -685,7 +702,7 @@ def _resolve_generator(
 
     available = _ollama_models()
     if available is None:
-        raise ValueError(
+        raise NoGeneratorAvailable(
             "No GEMINI_API_KEY found and no local Ollama server is running.\n\n"
             + _ollama_setup_hint(default_model)
         )
@@ -762,6 +779,58 @@ def _build_retriever(
         return Retriever(vectordb=vectordb, use_rerank=False)
 
     raise ValueError(f"Unsupported retrieval mode: {retrieval_mode.value}")
+
+
+def _local_ml_available() -> bool:
+    """Whether the heavier torch-based local ML stack is installed.
+
+    Sparse/late-interaction embedding (needed for hybrid/sparse retrieval)
+    only has a huggingface/torch implementation today - unlike dense
+    embedding, which the lightweight fastembed backend already covers.
+    """
+    return importlib.util.find_spec("torch") is not None
+
+
+def _resolve_retrieval_mode_for_vectordb(
+    vectordb: Any,
+    retrieval_mode: RetrievalMode,
+    retrieval_mode_explicit: bool,
+) -> RetrievalMode:
+    """Clamp/validate hybrid or sparse-only mode against what's actually usable.
+
+    Hybrid/sparse retrieval needs both sparse-capable storage (Qdrant, not
+    the default local file index) and the local ML stack (for the sparse
+    embedder). When a --quality preset or workspace config - not the user
+    directly - asked for it and it isn't usable, fall back to dense-only
+    with a warning rather than erroring on a choice the user never made
+    explicitly, mirroring the existing --path/--file clamp behavior.
+    """
+    if retrieval_mode == RetrievalMode.dense_only:
+        return retrieval_mode
+
+    if not vectordb.capabilities().get("sparse"):
+        reason = (
+            f"retrieval mode {retrieval_mode.value!r} requires sparse-capable "
+            "storage (Qdrant), not the default local file index"
+        )
+    elif not _local_ml_available():
+        reason = (
+            f"retrieval mode {retrieval_mode.value!r} needs the local ML stack "
+            "for sparse embeddings (`pip install epi-scope[local-ml]`)"
+        )
+    else:
+        return retrieval_mode
+
+    if retrieval_mode_explicit:
+        raise ValueError(reason[0].upper() + reason[1:] + ".")
+
+    typer.secho(
+        f"Note: {reason}; falling back to dense-only retrieval from "
+        "--quality/workspace config (chunking/embedding settings still apply).",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    return RetrievalMode.dense_only
 
 
 def _build_evidence_reranker(
@@ -1028,6 +1097,9 @@ def _resolve_paper_from_store(
         qdrant_collection=qdrant_collection,
         qdrant_url=qdrant_url,
     )
+    retrieval_mode = _resolve_retrieval_mode_for_vectordb(
+        vectordb, retrieval_mode, retrieval_mode_explicit
+    )
     retriever = _build_retriever(vectordb, retrieval_mode=retrieval_mode)
     return {
         "paper_id": paper_id,
@@ -1139,12 +1211,46 @@ def _collect_doctor_checks(
         "Override with EPISCOPE_DEVICE=cpu|cuda|mps.",
         section="Environment",
     )
+    if _local_ml_available():
+        add(
+            "ok",
+            "PDF parsing",
+            "unstructured hi_res (ML layout detection)",
+            section="Environment",
+        )
+    else:
+        add(
+            "warn",
+            "PDF parsing",
+            "pdfminer heuristic (torch-free fallback)",
+            "Coarser section/heading detection than hi_res (tables aren't "
+            "specially handled). Install `epi-scope[local-ml]` for ML-based "
+            "layout parsing.",
+            section="Environment",
+        )
 
     # LLM ------------------------------------------------------------------
     provider = settings.llm_provider
     add("ok", "Provider", provider, section="LLM")
     add("ok", "Model", settings.llm_model, section="LLM")
     add("ok", "Embedding provider", settings.embed_provider, section="LLM")
+    resolved_embed_provider = settings.embed_provider
+    if resolved_embed_provider == "auto":
+        try:
+            resolved_embed_provider = EmbedderFactory._detect_provider(_DEFAULT_EMBED_MODEL)
+        except ValueError:
+            resolved_embed_provider = "auto"
+    if resolved_embed_provider == "huggingface" and not _local_ml_available():
+        add(
+            "warn",
+            "Embedding backend",
+            f"{resolved_embed_provider} (needs epi-scope[local-ml])",
+            "Install `epi-scope[local-ml]`, or use a model covered by the "
+            "lightweight default (fastembed).",
+            section="LLM",
+        )
+    else:
+        add("ok", "Embedding backend", resolved_embed_provider, section="LLM")
     key_env = {
         "gemini": "GEMINI_API_KEY",
         "openai": "OPENAI_API_KEY",
@@ -2076,6 +2182,9 @@ def explore(
                 qdrant_collection=qdrant_collection,
                 qdrant_url=qdrant_url,
             )
+            retrieval_mode = _resolve_retrieval_mode_for_vectordb(
+                vectordb, retrieval_mode, retrieval_mode_explicit
+            )
             retriever = _build_retriever(vectordb, retrieval_mode=retrieval_mode)
 
         filter_payload = {"paper_id": paper_id} if paper_id else None
@@ -2262,18 +2371,31 @@ def ask(
                 qdrant_collection=workspace_config.qdrant_collection,
                 qdrant_url=workspace_config.qdrant_url,
             )
+            resolved_retrieval_mode = _resolve_retrieval_mode_for_vectordb(
+                vectordb, RetrievalMode(workspace_config.retrieval_mode), False
+            )
             retriever = _build_retriever(
                 vectordb,
-                retrieval_mode=RetrievalMode(workspace_config.retrieval_mode),
+                retrieval_mode=resolved_retrieval_mode,
             )
         else:
             raise ValueError("Provide --path or run inside/pass --workspace.")
 
         results = list(retriever.retrieve(question, top_k=top_k))
-        generator = _resolve_generator(
-            llm_provider, llm_model, temperature, task="ask"
-        )
-        provenance = generator.generate(results, question=question)
+        try:
+            generator = _resolve_generator(
+                llm_provider, llm_model, temperature, task="ask"
+            )
+            answer = generator.generate(results, question=question).answer
+        except NoGeneratorAvailable:
+            typer.secho(
+                "No LLM configured — showing the most relevant passages instead "
+                "of a generated answer. Run `episcope quickstart` to enable "
+                "generated answers.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            answer = None
 
         source_summaries = [
             {
@@ -2287,10 +2409,12 @@ def ask(
         payload: dict[str, Any] = {
             "question": question,
             "workspace": str(workspace_config.root) if workspace_config else None,
-            "answer": provenance.answer,
+            "answer": answer,
             "papers": _paper_summaries(papers),
             "source_count": len(results),
-            "sources": results if show_context else source_summaries,
+            # Without a generated answer, the passages themselves are the
+            # result, so always include their text regardless of --show-context.
+            "sources": results if (show_context or answer is None) else source_summaries,
         }
         _emit(payload, output_format, _human_ask)
     except Exception as exc:
@@ -3206,11 +3330,17 @@ def studio(
     try:
         import uvicorn  # noqa: F401
     except ImportError as exc:
-        _abort(f"uvicorn is required for `studio`: {exc}. Install epi-scope[server].")
+        _abort(
+            f"uvicorn is required for `studio`: {exc}. "
+            "`studio` needs both the API and UI extras: install epi-scope[all]."
+        )
     try:
         import streamlit  # noqa: F401
     except ImportError as exc:
-        _abort(f"streamlit is required for `studio`: {exc}. Install epi-scope[ui].")
+        _abort(
+            f"streamlit is required for `studio`: {exc}. "
+            "`studio` needs both the API and UI extras: install epi-scope[all]."
+        )
 
     try:
         workspace_config = _optional_workspace(workspace)

@@ -48,22 +48,55 @@ def test_grobid_loader_explicit_url_overrides_env(monkeypatch) -> None:
     assert captured["grobid_server"] == "http://custom-grobid:8070"
 
 
-def test_unstructured_pdf_loader_falls_back_to_pypdf(monkeypatch, tmp_path: Path) -> None:
-    class FakePage:
-        def __init__(self, text: str) -> None:
+def test_unstructured_pdf_loader_falls_back_to_pdfminer(monkeypatch, tmp_path: Path) -> None:
+    class FakeChar:
+        def __init__(self, size: float, fontname: str) -> None:
+            self.size = size
+            self.fontname = fontname
+
+    class FakeTextLine:
+        def __init__(self, text: str, size: float = 10.0, bold: bool = False) -> None:
             self._text = text
+            fontname = "Helvetica-Bold" if bold else "Helvetica"
+            self._chars = [FakeChar(size, fontname) for _ in (text or " ")]
 
-        def extract_text(self) -> str:
-            return self._text
+        def get_text(self) -> str:
+            return self._text + "\n"
 
-    class FakeReader:
-        def __init__(self, _path: str) -> None:
-            self.pages = [
-                FakePage("Title page\n\nMain finding one."),
-                FakePage("Main finding two."),
-            ]
+        def __iter__(self):
+            return iter(self._chars)
 
-    monkeypatch.setitem(sys.modules, "pypdf", types.SimpleNamespace(PdfReader=FakeReader))
+    class FakeTextContainer:
+        def __init__(self, lines) -> None:
+            self._lines = lines
+
+        def __iter__(self):
+            return iter(self._lines)
+
+    def fake_extract_pages(_path: str):
+        yield [
+            FakeTextContainer(
+                [
+                    FakeTextLine("Title page", size=14.0, bold=True),
+                    FakeTextLine("Main finding one.", size=10.0),
+                ]
+            )
+        ]
+        yield [FakeTextContainer([FakeTextLine("Main finding two.", size=10.0)])]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pdfminer.high_level",
+        types.SimpleNamespace(extract_pages=fake_extract_pages),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pdfminer.layout",
+        types.SimpleNamespace(
+            LTChar=FakeChar, LTTextContainer=FakeTextContainer, LTTextLine=FakeTextLine
+        ),
+    )
+
     original_import = __import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -83,6 +116,8 @@ def test_unstructured_pdf_loader_falls_back_to_pypdf(monkeypatch, tmp_path: Path
     assert sections
     combined_text = "\n".join(section.content for section in sections)
     assert "Main finding one." in combined_text
+    assert "Main finding two." in combined_text
+    assert any(section.title == "Title page" for section in sections)
 
 
 def test_unstructured_pdf_loader_redirects_library_stdout_to_stderr(
