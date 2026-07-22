@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, AsyncIterator, Dict, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
 from episcope import __version__
-from episcope.services import EpiScopeRuntime, RuntimeConfig
+from episcope.services import (
+    CorpusService,
+    EpiScopeRuntime,
+    JobManager,
+    RuntimeConfig,
+    StudioRepository,
+    TaskService,
+    WorkspaceService,
+    run_export,
+    runtime_config_for_workspace,
+)
 from episcope.services.errors import humanize_error
 from episcope.workflows.registry import (
     TaskSpec,
@@ -18,7 +29,19 @@ from episcope.workflows.registry import (
     miner_catalog,
 )
 
-app = FastAPI(title="EpiScope API", version=__version__)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    global _studio_jobs
+    _jobs()
+    try:
+        yield
+    finally:
+        if _studio_jobs is not None:
+            _studio_jobs.shutdown()
+            _studio_jobs = None
+
+
+app = FastAPI(title="EpiScope API", version=__version__, lifespan=_lifespan)
 
 
 def _path_str(value: Optional[Path]) -> Optional[str]:
@@ -103,6 +126,7 @@ class ClassificationRequest(BaseModel):
     task: Optional[TaskSpec] = None
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
+    workspace_id: Optional[str] = None
 
 
 class PrecisionMinerRequest(BaseModel):
@@ -111,6 +135,7 @@ class PrecisionMinerRequest(BaseModel):
     task: Optional[TaskSpec] = None
     detailed: bool = True
     config: BackendConfig = Field(default_factory=BackendConfig)
+    workspace_id: Optional[str] = None
 
 
 class ExplorerRequest(BaseModel):
@@ -120,6 +145,66 @@ class ExplorerRequest(BaseModel):
     generate_answer: bool = False
     filters: Dict[str, Any] = Field(default_factory=dict)
     config: BackendConfig = Field(default_factory=BackendConfig)
+    workspace_id: Optional[str] = None
+
+
+class WorkspaceCreateRequest(BaseModel):
+    id: str
+    name: Optional[str] = None
+
+
+class WorkspaceSettingsRequest(BaseModel):
+    changes: Dict[str, Any]
+
+
+class IndexJobRequest(BaseModel):
+    document_ids: list[str]
+    replace_existing: bool = False
+
+
+class WorkflowRunRequest(BaseModel):
+    paper_ids: list[str]
+    task_key: str
+    detailed: bool = True
+
+
+class StudioExploreRequest(BaseModel):
+    query: str
+    top_k: int = Field(5, ge=1, le=100)
+    similarity_threshold: float = Field(0.0, ge=0.0, le=1.0)
+    generate_answer: bool = False
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+
+_studio_workspaces: Optional[WorkspaceService] = None
+_studio_jobs: Optional[JobManager] = None
+
+
+def _workspaces() -> WorkspaceService:
+    global _studio_workspaces
+    if _studio_workspaces is None:
+        _studio_workspaces = WorkspaceService()
+    return _studio_workspaces
+
+
+def _jobs() -> JobManager:
+    global _studio_jobs
+    if _studio_jobs is None:
+        _studio_jobs = JobManager(_workspaces())
+    return _studio_jobs
+
+
+def _studio_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail=str(exc).strip("'"))
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=humanize_error(exc))
+    return HTTPException(status_code=500, detail=humanize_error(exc))
+
+
+def _workspace_runtime(workspace_id: str) -> tuple[Any, EpiScopeRuntime]:
+    workspace = _workspaces().get(workspace_id)
+    return workspace, EpiScopeRuntime(runtime_config_for_workspace(workspace))
 
 
 def _redact_secrets(defaults: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,12 +236,20 @@ def health() -> Dict[str, Any]:
 @app.post("/classify")
 def classify(request: ClassificationRequest) -> Dict[str, Any]:
     try:
-        runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        workspace = None
+        if request.workspace_id:
+            workspace, runtime = _workspace_runtime(request.workspace_id)
+        else:
+            runtime = EpiScopeRuntime(request.config.to_runtime_config())
         inline_config = None
         if request.task is not None:
             if request.task.kind != "classifier":
                 raise ValueError("task.kind must be 'classifier' for /classify.")
             inline_config = build_classifier_config_from_spec(request.task)
+        elif workspace is not None:
+            spec = TaskService(workspace).get(request.classifier_kind)
+            if spec is not None:
+                inline_config = build_classifier_config_from_spec(spec)
         result = runtime.classify(
             request.paper_id,
             classifier_kind=request.classifier_kind,
@@ -175,12 +268,20 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
 @app.post("/precision-miner")
 def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
     try:
-        runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        workspace = None
+        if request.workspace_id:
+            workspace, runtime = _workspace_runtime(request.workspace_id)
+        else:
+            runtime = EpiScopeRuntime(request.config.to_runtime_config())
         inline_config = None
         if request.task is not None:
             if request.task.kind != "miner":
                 raise ValueError("task.kind must be 'miner' for /precision-miner.")
             inline_config = build_miner_config_from_spec(request.task)
+        elif workspace is not None:
+            spec = TaskService(workspace).get(request.miner_kind)
+            if spec is not None:
+                inline_config = build_miner_config_from_spec(spec)
         result = runtime.precision_mine(
             request.paper_id,
             miner_kind=request.miner_kind,
@@ -199,7 +300,10 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
 @app.post("/explore")
 def explore(request: ExplorerRequest) -> Dict[str, Any]:
     try:
-        runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        if request.workspace_id:
+            _, runtime = _workspace_runtime(request.workspace_id)
+        else:
+            runtime = EpiScopeRuntime(request.config.to_runtime_config())
         result = runtime.explore(
             request.query,
             top_k=request.top_k,
@@ -212,3 +316,263 @@ def explore(request: ExplorerRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=humanize_error(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Explorer failed: {humanize_error(exc)}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped Studio API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/workspaces")
+def list_workspaces() -> Dict[str, Any]:
+    return {
+        "root": str(_workspaces().root),
+        "active_workspace_id": _workspaces().settings.active_workspace_id,
+        "items": _workspaces().list(),
+    }
+
+
+@app.post("/workspaces", status_code=status.HTTP_201_CREATED)
+def create_studio_workspace(request: WorkspaceCreateRequest) -> Dict[str, Any]:
+    try:
+        return _workspaces().create(request.id, name=request.name)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}")
+def get_studio_workspace(workspace_id: str) -> Dict[str, Any]:
+    try:
+        return _workspaces().summary(_workspaces().get(workspace_id))
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.patch("/workspaces/{workspace_id}/settings")
+def update_studio_workspace(
+    workspace_id: str, request: WorkspaceSettingsRequest
+) -> Dict[str, Any]:
+    try:
+        return _workspaces().update_settings(workspace_id, request.changes)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/documents")
+def list_documents(workspace_id: str) -> Dict[str, Any]:
+    try:
+        workspace = _workspaces().get(workspace_id)
+        return {"items": CorpusService(workspace).list_documents()}
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/documents", status_code=status.HTTP_201_CREATED
+)
+async def upload_document(
+    workspace_id: str,
+    file: UploadFile = File(...),
+    paper_id: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    try:
+        workspace = _workspaces().get(workspace_id)
+        content = await file.read()
+        return CorpusService(
+            workspace, upload_limit_mb=_workspaces().settings.upload_limit_mb
+        ).upload(file.filename or "", content, paper_id=paper_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/papers")
+def list_papers(workspace_id: str) -> Dict[str, Any]:
+    try:
+        return {"items": CorpusService(_workspaces().get(workspace_id)).list_papers()}
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/papers/{paper_id}")
+def get_paper(workspace_id: str, paper_id: str) -> Dict[str, Any]:
+    try:
+        return CorpusService(_workspaces().get(workspace_id)).get_paper(paper_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/index-jobs", status_code=status.HTTP_202_ACCEPTED
+)
+def create_index_job(workspace_id: str, request: IndexJobRequest) -> Dict[str, Any]:
+    try:
+        return _jobs().submit_index(
+            workspace_id,
+            request.document_ids,
+            replace_existing=request.replace_existing,
+        )
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/tasks")
+def list_tasks(workspace_id: str) -> Dict[str, Any]:
+    try:
+        return TaskService(_workspaces().get(workspace_id)).list()
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post("/workspaces/{workspace_id}/tasks/validate")
+def validate_task(workspace_id: str, task: TaskSpec) -> Dict[str, Any]:
+    try:
+        spec = TaskService(_workspaces().get(workspace_id)).validate(task.model_dump())
+        return {"valid": True, "task": spec.model_dump()}
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/tasks", status_code=status.HTTP_201_CREATED
+)
+def create_task(workspace_id: str, task: TaskSpec) -> Dict[str, Any]:
+    try:
+        service = TaskService(_workspaces().get(workspace_id))
+        if (service.directory / f"{task.key}.json").exists():
+            raise ValueError(f"Task {task.key!r} already exists; use PUT to edit it.")
+        return service.save(task.model_dump()).model_dump()
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.put("/workspaces/{workspace_id}/tasks/{task_key}")
+def update_task(workspace_id: str, task_key: str, task: TaskSpec) -> Dict[str, Any]:
+    try:
+        return TaskService(_workspaces().get(workspace_id)).save(
+            task.model_dump(), expected_key=task_key
+        ).model_dump()
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/tasks/{task_key}")
+def get_workspace_task(workspace_id: str, task_key: str) -> Dict[str, Any]:
+    try:
+        spec = TaskService(_workspaces().get(workspace_id)).get(task_key)
+        if spec is None:
+            raise ValueError("Built-in tasks are read-only and do not have an editable spec.")
+        return spec.model_dump()
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post("/workspaces/{workspace_id}/runs/explore")
+def studio_explore(workspace_id: str, request: StudioExploreRequest) -> Dict[str, Any]:
+    try:
+        return _jobs().explore(workspace_id, request.model_dump())
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/runs/classification",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def studio_classification(
+    workspace_id: str, request: WorkflowRunRequest
+) -> Dict[str, Any]:
+    try:
+        return _jobs().submit_workflow(
+            workspace_id,
+            kind="classification",
+            paper_ids=request.paper_ids,
+            task_key=request.task_key,
+            detailed=request.detailed,
+        )
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/runs/precision-miner",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def studio_precision_miner(
+    workspace_id: str, request: WorkflowRunRequest
+) -> Dict[str, Any]:
+    try:
+        return _jobs().submit_workflow(
+            workspace_id,
+            kind="precision_miner",
+            paper_ids=request.paper_ids,
+            task_key=request.task_key,
+            detailed=request.detailed,
+        )
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/jobs")
+def list_jobs(workspace_id: str) -> Dict[str, Any]:
+    try:
+        repository = StudioRepository(_workspaces().get(workspace_id))
+        return {"items": repository.list_jobs()}
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/jobs/{job_id}")
+def get_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
+    try:
+        return StudioRepository(_workspaces().get(workspace_id)).get_job(job_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post("/workspaces/{workspace_id}/jobs/{job_id}/cancel")
+def cancel_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
+    try:
+        return _jobs().cancel(workspace_id, job_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.post(
+    "/workspaces/{workspace_id}/jobs/{job_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
+    try:
+        return _jobs().retry(workspace_id, job_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/runs")
+def list_runs(workspace_id: str) -> Dict[str, Any]:
+    try:
+        return {"items": StudioRepository(_workspaces().get(workspace_id)).list_runs()}
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/runs/{run_id}")
+def get_run(workspace_id: str, run_id: str) -> Dict[str, Any]:
+    try:
+        return StudioRepository(_workspaces().get(workspace_id)).get_run(run_id)
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc
+
+
+@app.get("/workspaces/{workspace_id}/runs/{run_id}/download")
+def download_run(workspace_id: str, run_id: str, format: str = "json") -> Response:
+    try:
+        run = StudioRepository(_workspaces().get(workspace_id)).get_run(run_id)
+        content, media_type, filename = run_export(run, format)
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        raise _studio_http_error(exc) from exc

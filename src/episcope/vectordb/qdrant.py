@@ -502,6 +502,26 @@ class QdrantDB(AbstractVectorDB):
         )
         return [p.payload for p in points if p.payload is not None]
 
+    def delete(self, namespace: str) -> int:
+        query_filter = self._build_filter(namespace=namespace)
+        if query_filter is None:
+            return 0
+        points, _ = self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=query_filter,
+            limit=10000,
+            with_payload=False,
+            with_vectors=False,
+        )
+        if not points:
+            return 0
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=models.FilterSelector(filter=query_filter),
+            wait=True,
+        )
+        return len(points)
+
     # def get_embedding_model(self) -> Optional[str]:
     #     """Get the name of the embedding model used for the database."""
     #     points, _ = self.client.scroll(

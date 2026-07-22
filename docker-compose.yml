@@ -34,8 +34,11 @@ services:
       GROBID_URL: http://grobid:8070
       EPISCOPE_API_HOST: 0.0.0.0
       EPISCOPE_API_PORT: 8000
+      EPISCOPE_WORKSPACES_ROOT: /data/workspaces
     ports:
       - "${EPISCOPE_API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    volumes:
+      - workspace_data:/data/workspaces
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -90,3 +93,4 @@ volumes:
   qdrant_data:
   caddy_data:
   caddy_config:
+  workspace_data:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -25,12 +27,18 @@ class WorkspaceConfig:
     chunk_size: int = 600
     chunk_overlap: int = 100
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embed_provider: str = "auto"
     retrieval_mode: str = "dense_only"
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "episcope_academic"
     mongo_db_name: str = "episcope_academic_db"
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.5-flash"
+    llm_temperature: float = 0.0
+    workflow_top_k: int = 10
+    evidence_reranker_kind: str = "none"
+    cross_encoder_model: Optional[str] = None
+    cross_encoder_top_k: int = 15
 
     @property
     def config_path(self) -> Path:
@@ -105,6 +113,7 @@ def load_workspace(path: str | Path) -> WorkspaceConfig:
             indexing.get("embed_model")
             or "sentence-transformers/all-MiniLM-L6-v2"
         ),
+        embed_provider=str(indexing.get("embed_provider") or "auto"),
         retrieval_mode=str(retrieval.get("mode") or "dense_only"),
         qdrant_url=str(server.get("qdrant_url") or "http://localhost:6333"),
         qdrant_collection=str(
@@ -113,6 +122,17 @@ def load_workspace(path: str | Path) -> WorkspaceConfig:
         mongo_db_name=str(server.get("mongo_db_name") or "episcope_academic_db"),
         llm_provider=str(llm.get("provider") or "gemini"),
         llm_model=str(llm.get("model") or "gemini-2.5-flash"),
+        llm_temperature=float(llm.get("temperature") or 0.0),
+        workflow_top_k=int(llm.get("workflow_top_k") or 10),
+        evidence_reranker_kind=str(
+            retrieval.get("evidence_reranker_kind") or "none"
+        ),
+        cross_encoder_model=(
+            str(retrieval["cross_encoder_model"])
+            if retrieval.get("cross_encoder_model")
+            else None
+        ),
+        cross_encoder_top_k=int(retrieval.get("cross_encoder_top_k") or 15),
     )
 
 
@@ -129,7 +149,21 @@ def find_workspace(start: str | Path | None = None) -> Optional[WorkspaceConfig]
 
 
 def write_workspace_config(config: WorkspaceConfig) -> None:
-    config.config_path.write_text(_render_workspace_toml(config), encoding="utf-8")
+    config.root.mkdir(parents=True, exist_ok=True)
+    rendered = _render_workspace_toml(config)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=config.root,
+        prefix=f".{WORKSPACE_FILE}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        handle.write(rendered)
+        handle.flush()
+        os.fsync(handle.fileno())
+        temporary_path = Path(handle.name)
+    os.replace(temporary_path, config.config_path)
 
 
 def _render_workspace_toml(config: WorkspaceConfig) -> str:
@@ -137,36 +171,42 @@ def _render_workspace_toml(config: WorkspaceConfig) -> str:
         [
             "[workspace]",
             f'name = "{_escape(config.name)}"',
-            'strategy_name = "local"',
-            'papers_dir = "papers"',
-            'outputs_dir = "outputs"',
-            'logs_dir = "logs"',
+            f'strategy_name = "{_escape(config.strategy_name)}"',
+            f'papers_dir = "{_escape(config.papers_dir)}"',
+            f'outputs_dir = "{_escape(config.outputs_dir)}"',
+            f'logs_dir = "{_escape(config.logs_dir)}"',
             "",
             "[storage]",
-            'metadata_backend = "memory"',
-            'metadata_path = "metadata.json"',
-            'index_backend = "file"',
-            'index_dir = "index"',
+            f'metadata_backend = "{_escape(config.metadata_backend)}"',
+            f'metadata_path = "{_escape(config.metadata_path)}"',
+            f'index_backend = "{_escape(config.index_backend)}"',
+            f'index_dir = "{_escape(config.index_dir)}"',
             "",
             "[indexing]",
-            'loader = "unstructured"',
-            'chunker = "paragraph"',
-            "min_chunk_size = 20",
-            "chunk_size = 600",
-            "chunk_overlap = 100",
-            'embed_model = "sentence-transformers/all-MiniLM-L6-v2"',
+            f'loader = "{_escape(config.loader)}"',
+            f'chunker = "{_escape(config.chunker)}"',
+            f"min_chunk_size = {config.min_chunk_size}",
+            f"chunk_size = {config.chunk_size}",
+            f"chunk_overlap = {config.chunk_overlap}",
+            f'embed_model = "{_escape(config.embed_model)}"',
+            f'embed_provider = "{_escape(config.embed_provider)}"',
             "",
             "[retrieval]",
-            'mode = "dense_only"',
+            f'mode = "{_escape(config.retrieval_mode)}"',
+            f'evidence_reranker_kind = "{_escape(config.evidence_reranker_kind)}"',
+            f'cross_encoder_model = "{_escape(config.cross_encoder_model or "")}"',
+            f"cross_encoder_top_k = {config.cross_encoder_top_k}",
             "",
             "[server]",
-            'qdrant_url = "http://localhost:6333"',
-            'qdrant_collection = "episcope_academic"',
-            'mongo_db_name = "episcope_academic_db"',
+            f'qdrant_url = "{_escape(config.qdrant_url)}"',
+            f'qdrant_collection = "{_escape(config.qdrant_collection)}"',
+            f'mongo_db_name = "{_escape(config.mongo_db_name)}"',
             "",
             "[llm]",
-            'provider = "gemini"',
-            'model = "gemini-2.5-flash"',
+            f'provider = "{_escape(config.llm_provider)}"',
+            f'model = "{_escape(config.llm_model)}"',
+            f"temperature = {config.llm_temperature}",
+            f"workflow_top_k = {config.workflow_top_k}",
             "",
         ]
     )
@@ -196,7 +236,10 @@ def _parse_value(value: str) -> Any:
     try:
         return int(value)
     except ValueError:
-        return value
+        try:
+            return float(value)
+        except ValueError:
+            return value
 
 
 def _escape(value: str) -> str:

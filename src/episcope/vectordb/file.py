@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -196,24 +198,63 @@ class FileDB(AbstractVectorDB):
             "late": False,
         }
 
+    def delete(self, namespace: str) -> int:
+        keep = [
+            index
+            for index, metadata in enumerate(self._metadata)
+            if metadata.get("paper_id") != namespace
+        ]
+        removed = len(self._metadata) - len(keep)
+        if not removed:
+            return 0
+        if keep:
+            self._embeddings = self._embeddings[keep]
+            self._metadata = [self._metadata[index] for index in keep]
+        else:
+            self._embeddings = np.array([])
+            self._metadata = []
+        self._payload_keys = {
+            key for metadata in self._metadata for key in metadata.keys()
+        }
+        self._dirty = True
+        return removed
+
     def save(self) -> None:
         if not self._dirty:
             return
 
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
+        embeddings_path = self.index_dir / "embeddings.npy"
         if self._embeddings.size > 0:
-            np.save(self.index_dir / "embeddings.npy", self._embeddings)
+            with tempfile.NamedTemporaryFile(
+                dir=self.index_dir, suffix=".npy", delete=False
+            ) as handle:
+                np.save(handle, self._embeddings)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary_embeddings = Path(handle.name)
+            os.replace(temporary_embeddings, embeddings_path)
+        elif embeddings_path.exists():
+            embeddings_path.unlink()
 
-        with open(self.index_dir / "metadata.json", "w", encoding="utf-8") as f:
-            json.dump(self._metadata, f, indent=2)
+        def _write_json_atomic(path: Path, value: Any) -> None:
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.index_dir, suffix=".tmp", delete=False
+            ) as handle:
+                json.dump(value, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary = Path(handle.name)
+            os.replace(temporary, path)
+
+        _write_json_atomic(self.index_dir / "metadata.json", self._metadata)
 
         config = {
             "embed_model": self._model,
             "chunking_config": self._chunking_config,
             "payload_keys": list(self._payload_keys),
         }
-        with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        _write_json_atomic(self.index_dir / "config.json", config)
 
         self._dirty = False

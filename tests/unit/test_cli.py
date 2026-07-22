@@ -1084,8 +1084,9 @@ def _studio_popen(monkeypatch):
     pytest.importorskip("streamlit")
     created: list[_FakeStudioProc] = []
 
-    def fake_popen(args, env=None):
+    def fake_popen(args, env=None, **kwargs):
         proc = _FakeStudioProc(args, env=env)
+        proc.popen_kwargs = kwargs
         created.append(proc)
         return proc
 
@@ -1115,6 +1116,8 @@ def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
     assert "uvicorn" in api_proc.args
     assert "episcope.api:app" in api_proc.args
     assert "streamlit" in ui_proc.args
+    assert api_proc.popen_kwargs["start_new_session"] is True
+    assert ui_proc.popen_kwargs["start_new_session"] is True
     assert api_proc.terminate_called
     assert ui_proc.terminate_called
     # No papers indexed in this fresh tmp_path: the empty-index warning fires.

@@ -18,12 +18,14 @@ openai
 google-genai
 rapidfuzz
 lxml
+filelock
 
 # [server] extra — FastAPI backend, Qdrant and MongoDB integrations
 fastapi
 uvicorn
 qdrant-client
 pymongo
+python-multipart
 
 # [faiss] extra — local FAISS vector backend (--index-backend faiss)
 faiss-cpu

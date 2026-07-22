@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import tempfile
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 import requests
 import typer
+from filelock import FileLock
 
 from episcope.db import InMemoryAcademicDB, MongoAcademicDB
 from episcope.rag.embeddings.factory import EmbedderFactory
@@ -1805,33 +1807,39 @@ def index(
             100,
             workspace_config.chunk_overlap if workspace_config else None,
         )
-        papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
-        embedder = EmbedderFactory.get_embedder(embed_model, provider=embed_provider)
-        vectordb = _build_vector_db(
-            index_backend,
-            index_dir=index_dir,
-            qdrant_collection=qdrant_collection,
-            qdrant_url=qdrant_url,
-            dense_dim=getattr(embedder, "dim", None),
+        mutation_lock = (
+            FileLock(str(workspace_config.root / ".episcope.lock"), timeout=60)
+            if workspace_config is not None
+            else nullcontext()
         )
-        academic_db = _build_metadata_db(
-            metadata_backend,
-            db_backup=db_backup,
-            mongo_uri=mongo_uri,
-            mongo_db_name=mongo_db_name,
-        )
-        chunker_instance = _build_chunker(
-            chunker,
-            min_chunk_size=min_chunk_size,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        indexer = Indexer(vectordb, embedder=embedder, chunker=chunker_instance)
-        for paper in papers:
-            indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
-        if hasattr(vectordb, "save"):
-            vectordb.save()
-        _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
+        with mutation_lock:
+            papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
+            embedder = EmbedderFactory.get_embedder(embed_model, provider=embed_provider)
+            vectordb = _build_vector_db(
+                index_backend,
+                index_dir=index_dir,
+                qdrant_collection=qdrant_collection,
+                qdrant_url=qdrant_url,
+                dense_dim=getattr(embedder, "dim", None),
+            )
+            academic_db = _build_metadata_db(
+                metadata_backend,
+                db_backup=db_backup,
+                mongo_uri=mongo_uri,
+                mongo_db_name=mongo_db_name,
+            )
+            chunker_instance = _build_chunker(
+                chunker,
+                min_chunk_size=min_chunk_size,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            indexer = Indexer(vectordb, embedder=embedder, chunker=chunker_instance)
+            for paper in papers:
+                indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
+            if hasattr(vectordb, "save"):
+                vectordb.save()
+            _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
     except Exception as exc:
         _abort_exc(exc)
 
@@ -3300,17 +3308,16 @@ def studio(
         help="Workspace whose index/metadata to serve. Without one, uses the "
         "current directory's local `.episcope/` store.",
     ),
-    host: str = typer.Option(_SETTINGS.api_host, "--host"),
+    workspaces_root: Optional[Path] = typer.Option(
+        None,
+        "--workspaces-root",
+        help="Managed directory whose child workspaces are available in Studio.",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
     api_port: int = typer.Option(_SETTINGS.api_port, "--api-port"),
     ui_port: int = typer.Option(8501, "--ui-port"),
 ) -> None:
-    """Run the API and Streamlit UI together against a local, file-backed
-    index and in-memory metadata store - no Qdrant or MongoDB required.
-
-    Does not index anything itself; run `episcope index ... --workspace ...`
-    first. If QDRANT_URL or MONGO_URI are already set, those take precedence
-    over the local store, same as everywhere else in the CLI.
-    """
+    """Run the local-first API and complete Streamlit workspace UI together."""
     import os
     import signal
     import subprocess
@@ -3346,7 +3353,26 @@ def studio(
         workspace_config = _optional_workspace(workspace)
         child_env = dict(os.environ)
 
+        if workspaces_root is not None:
+            managed_root = workspaces_root.expanduser().resolve()
+        elif workspace_config is not None:
+            managed_root = workspace_config.root.parent
+        else:
+            configured_root = env("EPISCOPE_WORKSPACES_ROOT")
+            managed_root = (
+                Path(configured_root).expanduser().resolve()
+                if configured_root
+                else (Path.home() / ".episcope" / "workspaces").resolve()
+            )
+        child_env["EPISCOPE_WORKSPACES_ROOT"] = str(managed_root)
+
         if workspace_config is not None:
+            if workspace_config.root.parent != managed_root:
+                raise ValueError(
+                    f"Workspace {workspace_config.root} is not an immediate child of "
+                    f"the managed root {managed_root}."
+                )
+            child_env["EPISCOPE_ACTIVE_WORKSPACE"] = workspace_config.root.name
             index_dir = workspace_config.resolve_path(workspace_config.index_dir)
             metadata_path = workspace_config.resolve_path(
                 workspace_config.metadata_path
@@ -3355,24 +3381,41 @@ def studio(
                 child_env["EPISCOPE_LOCAL_INDEX_DIR"] = str(index_dir)
             if not env("MONGO_URI"):
                 child_env["EPISCOPE_LOCAL_METADATA_BACKUP"] = str(metadata_path)
-        else:
-            index_dir = _CLI_ROOT / "index"
-
-        if not env("QDRANT_URL") and _index_dir_is_empty(index_dir):
+        if (
+            workspace_config is not None
+            and not env("QDRANT_URL")
+            and _index_dir_is_empty(index_dir)
+        ):
             typer.secho(
                 "No papers are indexed yet at "
-                f"{index_dir} - the Explorer/Classification/Precision Miner tabs "
-                "will have nothing to retrieve. Run `episcope index ...` "
-                f"{'--workspace ' + str(workspace_config.root) if workspace_config else ''} "
-                "first.",
+                f"{index_dir}. Upload and index papers from the Studio Library, "
+                "or use the CLI against the same workspace.",
                 fg=typer.colors.YELLOW,
             )
+        elif workspace_config is None and not env("QDRANT_URL"):
+            has_managed_index = managed_root.exists() and any(
+                (child / "index" / "config.json").is_file()
+                for child in managed_root.iterdir()
+                if child.is_dir()
+            )
+            if not has_managed_index:
+                typer.secho(
+                    "No papers are indexed yet in the managed workspaces. "
+                    "Create a workspace and use the Studio Library to upload and index papers.",
+                    fg=typer.colors.YELLOW,
+                )
 
         api_url = f"http://localhost:{api_port}"
         ui_url = f"http://localhost:{ui_port}"
         typer.secho("Starting EpiScope studio", bold=True)
         typer.echo(f"  API: {api_url}")
         typer.echo(f"  UI:  {ui_url}")
+        typer.echo(f"  Workspaces: {managed_root}")
+        if host == "0.0.0.0":
+            typer.secho(
+                "Warning: Studio has no authentication and will be reachable on the network.",
+                fg=typer.colors.YELLOW,
+            )
         typer.echo("Press Ctrl-C to stop both.\n")
 
         api_proc = subprocess.Popen(
@@ -3387,6 +3430,7 @@ def studio(
                 str(api_port),
             ],
             env=child_env,
+            start_new_session=True,
         )
         ui_app_path = resources.files("episcope.ui").joinpath("streamlit_app.py")
         ui_env = {**child_env, "EPISCOPE_API_BASE_URL": api_url}
@@ -3399,12 +3443,15 @@ def studio(
                 str(ui_app_path),
                 "--server.port",
                 str(ui_port),
+                "--server.address",
+                host,
                 "--server.headless",
                 "true",
                 "--browser.gatherUsageStats",
                 "false",
             ],
             env=ui_env,
+            start_new_session=True,
         )
 
         try:
