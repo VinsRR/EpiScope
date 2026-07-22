@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, status
-from pydantic import BaseModel, Field
+from filelock import FileLock, Timeout
+from pydantic import BaseModel, ConfigDict, Field
 
 from episcope import __version__
 from episcope.services import (
@@ -113,6 +114,11 @@ class BackendConfig(BaseModel):
 
     def to_runtime_config(self) -> RuntimeConfig:
         data = self.model_dump()
+        defaults = RuntimeConfig.from_settings()
+        if data["mongo_uri"] == "***configured***":
+            data["mongo_uri"] = defaults.mongo_uri
+        if data["qdrant_url"] == "***configured***":
+            data["qdrant_url"] = defaults.qdrant_url
         data["index_dir"] = Path(data["index_dir"]) if data["index_dir"] else None
         data["metadata_backup"] = (
             Path(data["metadata_backup"]) if data["metadata_backup"] else None
@@ -176,6 +182,103 @@ class StudioExploreRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class StudioResource(BaseModel):
+    """Typed public resource while allowing additive, backwards-compatible fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class WorkspaceResource(StudioResource):
+    id: str
+    name: str
+    path: str
+    active: bool
+    indexed: bool
+    document_count: int
+    paper_count: int
+    task_count: int
+    settings: Dict[str, Any]
+
+
+class WorkspaceListResource(StudioResource):
+    root: str
+    active_workspace_id: Optional[str]
+    items: list[WorkspaceResource]
+
+
+class DocumentResource(StudioResource):
+    id: str
+    original_name: str
+    stored_name: str
+    sha256: str
+    size: int
+    paper_id: str
+    status: str
+    duplicate: bool = False
+    title: Optional[str] = None
+    section_count: Optional[int] = None
+    reference_count: Optional[int] = None
+    last_job_id: Optional[str] = None
+    error: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class DocumentListResource(StudioResource):
+    items: list[DocumentResource]
+
+
+class PaperResource(StudioResource):
+    paper_id: str
+    metadata: Dict[str, Any]
+
+
+class PaperListResource(StudioResource):
+    items: list[PaperResource]
+
+
+class JobResource(StudioResource):
+    id: str
+    kind: str
+    status: str
+    current: int
+    total: int
+    message: str
+    payload: Dict[str, Any]
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+    result_id: Optional[str] = None
+    retry_parent: Optional[str] = None
+
+
+class JobListResource(StudioResource):
+    items: list[JobResource]
+
+
+class RunResource(StudioResource):
+    id: str
+    kind: str
+    task_key: Optional[str] = None
+    status: str
+    summary: str
+    request: Dict[str, Any]
+    config: Dict[str, Any]
+    result_path: str
+    created_at: str
+    result: Optional[Any] = None
+
+
+class RunListResource(StudioResource):
+    items: list[RunResource]
+
+
+class TaskCatalogResource(StudioResource):
+    classifiers: list[Dict[str, Any]]
+    miners: list[Dict[str, Any]]
+
+
 _studio_workspaces: Optional[WorkspaceService] = None
 _studio_jobs: Optional[JobManager] = None
 
@@ -199,6 +302,11 @@ def _studio_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail=str(exc).strip("'"))
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=humanize_error(exc))
+    if isinstance(exc, Timeout):
+        return HTTPException(
+            status_code=423,
+            detail="The workspace is busy with another corpus operation. Try again shortly.",
+        )
     return HTTPException(status_code=500, detail=humanize_error(exc))
 
 
@@ -215,6 +323,8 @@ def _redact_secrets(defaults: Dict[str, Any]) -> Dict[str, Any]:
     safe = dict(defaults)
     if safe.get("mongo_uri"):
         safe["mongo_uri"] = "***configured***"
+    if safe.get("qdrant_url"):
+        safe["qdrant_url"] = "***configured***"
     return safe
 
 
@@ -250,11 +360,18 @@ def classify(request: ClassificationRequest) -> Dict[str, Any]:
             spec = TaskService(workspace).get(request.classifier_kind)
             if spec is not None:
                 inline_config = build_classifier_config_from_spec(spec)
+        runtime_kwargs: Dict[str, Any] = {}
+        if workspace is not None:
+            with FileLock(str(workspace.root / ".episcope.lock"), timeout=60):
+                runtime_kwargs["retriever"] = runtime.build_retriever()
+                runtime_kwargs["academic_db"] = runtime.build_db()
+            runtime_kwargs["generator"] = runtime.build_generator()
         result = runtime.classify(
             request.paper_id,
             classifier_kind=request.classifier_kind,
             config=inline_config,
             detailed=request.detailed,
+            **runtime_kwargs,
         )
         return _json_ready(result)
     except ValueError as exc:
@@ -282,11 +399,18 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
             spec = TaskService(workspace).get(request.miner_kind)
             if spec is not None:
                 inline_config = build_miner_config_from_spec(spec)
+        runtime_kwargs: Dict[str, Any] = {}
+        if workspace is not None:
+            with FileLock(str(workspace.root / ".episcope.lock"), timeout=60):
+                runtime_kwargs["retriever"] = runtime.build_retriever()
+                runtime_kwargs["academic_db"] = runtime.build_db()
+            runtime_kwargs["generator"] = runtime.build_generator()
         result = runtime.precision_mine(
             request.paper_id,
             miner_kind=request.miner_kind,
             config=inline_config,
             detailed=request.detailed,
+            **runtime_kwargs,
         )
         return _json_ready(result)
     except ValueError as exc:
@@ -300,16 +424,22 @@ def precision_miner(request: PrecisionMinerRequest) -> Dict[str, Any]:
 @app.post("/explore")
 def explore(request: ExplorerRequest) -> Dict[str, Any]:
     try:
+        workspace = None
         if request.workspace_id:
-            _, runtime = _workspace_runtime(request.workspace_id)
+            workspace, runtime = _workspace_runtime(request.workspace_id)
         else:
             runtime = EpiScopeRuntime(request.config.to_runtime_config())
+        runtime_kwargs: Dict[str, Any] = {}
+        if workspace is not None:
+            with FileLock(str(workspace.root / ".episcope.lock"), timeout=60):
+                runtime_kwargs["retriever"] = runtime.build_retriever()
         result = runtime.explore(
             request.query,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
             generate_answer=request.generate_answer,
             filters=request.filters,
+            **runtime_kwargs,
         )
         return _json_ready(result)
     except ValueError as exc:
@@ -323,7 +453,7 @@ def explore(request: ExplorerRequest) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/workspaces")
+@app.get("/workspaces", response_model=WorkspaceListResource)
 def list_workspaces() -> Dict[str, Any]:
     return {
         "root": str(_workspaces().root),
@@ -332,7 +462,11 @@ def list_workspaces() -> Dict[str, Any]:
     }
 
 
-@app.post("/workspaces", status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/workspaces",
+    status_code=status.HTTP_201_CREATED,
+    response_model=WorkspaceResource,
+)
 def create_studio_workspace(request: WorkspaceCreateRequest) -> Dict[str, Any]:
     try:
         return _workspaces().create(request.id, name=request.name)
@@ -340,7 +474,7 @@ def create_studio_workspace(request: WorkspaceCreateRequest) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}")
+@app.get("/workspaces/{workspace_id}", response_model=WorkspaceResource)
 def get_studio_workspace(workspace_id: str) -> Dict[str, Any]:
     try:
         return _workspaces().summary(_workspaces().get(workspace_id))
@@ -348,7 +482,9 @@ def get_studio_workspace(workspace_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.patch("/workspaces/{workspace_id}/settings")
+@app.patch(
+    "/workspaces/{workspace_id}/settings", response_model=WorkspaceResource
+)
 def update_studio_workspace(
     workspace_id: str, request: WorkspaceSettingsRequest
 ) -> Dict[str, Any]:
@@ -358,7 +494,9 @@ def update_studio_workspace(
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/documents")
+@app.get(
+    "/workspaces/{workspace_id}/documents", response_model=DocumentListResource
+)
 def list_documents(workspace_id: str) -> Dict[str, Any]:
     try:
         workspace = _workspaces().get(workspace_id)
@@ -368,7 +506,9 @@ def list_documents(workspace_id: str) -> Dict[str, Any]:
 
 
 @app.post(
-    "/workspaces/{workspace_id}/documents", status_code=status.HTTP_201_CREATED
+    "/workspaces/{workspace_id}/documents",
+    status_code=status.HTTP_201_CREATED,
+    response_model=DocumentResource,
 )
 async def upload_document(
     workspace_id: str,
@@ -385,7 +525,7 @@ async def upload_document(
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/papers")
+@app.get("/workspaces/{workspace_id}/papers", response_model=PaperListResource)
 def list_papers(workspace_id: str) -> Dict[str, Any]:
     try:
         return {"items": CorpusService(_workspaces().get(workspace_id)).list_papers()}
@@ -393,7 +533,9 @@ def list_papers(workspace_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/papers/{paper_id}")
+@app.get(
+    "/workspaces/{workspace_id}/papers/{paper_id}", response_model=PaperResource
+)
 def get_paper(workspace_id: str, paper_id: str) -> Dict[str, Any]:
     try:
         return CorpusService(_workspaces().get(workspace_id)).get_paper(paper_id)
@@ -402,7 +544,9 @@ def get_paper(workspace_id: str, paper_id: str) -> Dict[str, Any]:
 
 
 @app.post(
-    "/workspaces/{workspace_id}/index-jobs", status_code=status.HTTP_202_ACCEPTED
+    "/workspaces/{workspace_id}/index-jobs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=JobResource,
 )
 def create_index_job(workspace_id: str, request: IndexJobRequest) -> Dict[str, Any]:
     try:
@@ -415,7 +559,7 @@ def create_index_job(workspace_id: str, request: IndexJobRequest) -> Dict[str, A
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/tasks")
+@app.get("/workspaces/{workspace_id}/tasks", response_model=TaskCatalogResource)
 def list_tasks(workspace_id: str) -> Dict[str, Any]:
     try:
         return TaskService(_workspaces().get(workspace_id)).list()
@@ -477,6 +621,7 @@ def studio_explore(workspace_id: str, request: StudioExploreRequest) -> Dict[str
 @app.post(
     "/workspaces/{workspace_id}/runs/classification",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=JobResource,
 )
 def studio_classification(
     workspace_id: str, request: WorkflowRunRequest
@@ -496,6 +641,7 @@ def studio_classification(
 @app.post(
     "/workspaces/{workspace_id}/runs/precision-miner",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=JobResource,
 )
 def studio_precision_miner(
     workspace_id: str, request: WorkflowRunRequest
@@ -512,7 +658,7 @@ def studio_precision_miner(
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/jobs")
+@app.get("/workspaces/{workspace_id}/jobs", response_model=JobListResource)
 def list_jobs(workspace_id: str) -> Dict[str, Any]:
     try:
         repository = StudioRepository(_workspaces().get(workspace_id))
@@ -521,7 +667,9 @@ def list_jobs(workspace_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/jobs/{job_id}")
+@app.get(
+    "/workspaces/{workspace_id}/jobs/{job_id}", response_model=JobResource
+)
 def get_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
     try:
         return StudioRepository(_workspaces().get(workspace_id)).get_job(job_id)
@@ -529,7 +677,10 @@ def get_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.post("/workspaces/{workspace_id}/jobs/{job_id}/cancel")
+@app.post(
+    "/workspaces/{workspace_id}/jobs/{job_id}/cancel",
+    response_model=JobResource,
+)
 def cancel_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
     try:
         return _jobs().cancel(workspace_id, job_id)
@@ -540,6 +691,7 @@ def cancel_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
 @app.post(
     "/workspaces/{workspace_id}/jobs/{job_id}/retry",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=JobResource,
 )
 def retry_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
     try:
@@ -548,7 +700,7 @@ def retry_job(workspace_id: str, job_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/runs")
+@app.get("/workspaces/{workspace_id}/runs", response_model=RunListResource)
 def list_runs(workspace_id: str) -> Dict[str, Any]:
     try:
         return {"items": StudioRepository(_workspaces().get(workspace_id)).list_runs()}
@@ -556,7 +708,7 @@ def list_runs(workspace_id: str) -> Dict[str, Any]:
         raise _studio_http_error(exc) from exc
 
 
-@app.get("/workspaces/{workspace_id}/runs/{run_id}")
+@app.get("/workspaces/{workspace_id}/runs/{run_id}", response_model=RunResource)
 def get_run(workspace_id: str, run_id: str) -> Dict[str, Any]:
     try:
         return StudioRepository(_workspaces().get(workspace_id)).get_run(run_id)

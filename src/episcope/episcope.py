@@ -35,6 +35,7 @@ from episcope.rag.retrieval.candidates import (
 )
 from episcope.rag.retrieval.retriever import Retriever
 from episcope.schemas import PaperMetadata, Reference, StructuredSection
+from episcope.services import CorpusService, TaskService
 from episcope.services.errors import humanize_error
 from episcope.settings import AppSettings, env
 from episcope.utils.logger import setup_logging
@@ -54,13 +55,12 @@ from episcope.workflows.classification import (
 from episcope.workflows.registry import (
     TaskSpec,
     build_classifier_config,
+    build_classifier_config_from_spec,
+    build_miner_config_from_spec,
     build_precision_miner_config,
     classifier_catalog,
-    load_task_file,
-    load_tasks_dir,
     miner_catalog,
     scaffold_task_spec,
-    validate_task_file,
 )
 
 
@@ -517,25 +517,44 @@ def _workspace_path(
     return current
 
 
-def _prepare_tasks(
+def _prepare_task_config(
     workspace: Optional[WorkspaceConfig],
     task_file: Optional[Path],
     current_kind: str,
     *,
     expected: str,
-) -> str:
-    """Register workspace + inline declarative tasks; return the kind to run."""
-    if workspace is not None:
-        load_tasks_dir(workspace.root / "tasks", overwrite=True)
+    top_k: int,
+) -> tuple[str, Any]:
+    """Resolve one task without mutating the process-global task registry."""
+    spec: Optional[TaskSpec] = None
     if task_file is not None:
-        spec = load_task_file(task_file, overwrite=True)
+        try:
+            data = json.loads(task_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in {task_file}: {exc}") from exc
+        spec = TaskService.validate(data)
         if spec.kind != expected:
             raise ValueError(
                 f"--task-file defines a {spec.kind!r} task, "
                 f"but this command runs {expected!r} tasks."
             )
-        return spec.key
-    return current_kind
+    elif workspace is not None:
+        spec = TaskService(workspace).get(current_kind)
+
+    if spec is not None:
+        config = (
+            build_classifier_config_from_spec(spec)
+            if expected == "classifier"
+            else build_miner_config_from_spec(spec)
+        )
+        config.top_k = top_k
+        return spec.key, config
+    config = (
+        build_classifier_config(current_kind, top_k)
+        if expected == "classifier"
+        else build_precision_miner_config(current_kind, top_k)
+    )
+    return current_kind, config
 
 
 def _build_chunker(
@@ -1782,6 +1801,12 @@ def index(
             _DEFAULT_EMBED_MODEL,
             workspace_config.embed_model if workspace_config else None,
         )
+        embed_provider = _workspace_value(
+            workspace_config,
+            embed_provider,
+            _SETTINGS.embed_provider,
+            workspace_config.embed_provider if workspace_config else None,
+        )
         chunker = _workspace_enum(
             workspace_config,
             ChunkerKind,
@@ -1807,39 +1832,80 @@ def index(
             100,
             workspace_config.chunk_overlap if workspace_config else None,
         )
-        mutation_lock = (
-            FileLock(str(workspace_config.root / ".episcope.lock"), timeout=60)
-            if workspace_config is not None
-            else nullcontext()
+        use_managed_corpus = bool(
+            workspace_config is not None
+            and index_backend == IndexBackend.file
+            and metadata_backend == MetadataBackend.memory
+            and index_dir == workspace_config.resolve_path(workspace_config.index_dir)
+            and db_backup == workspace_config.resolve_path(workspace_config.metadata_path)
+            and strategy_name == workspace_config.strategy_name
+            and loader.value == workspace_config.loader
+            and embed_model == workspace_config.embed_model
+            and embed_provider == workspace_config.embed_provider
+            and chunker.value == workspace_config.chunker
+            and min_chunk_size == workspace_config.min_chunk_size
+            and chunk_size == workspace_config.chunk_size
+            and chunk_overlap == workspace_config.chunk_overlap
         )
-        with mutation_lock:
-            papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
-            embedder = EmbedderFactory.get_embedder(embed_model, provider=embed_provider)
-            vectordb = _build_vector_db(
-                index_backend,
-                index_dir=index_dir,
-                qdrant_collection=qdrant_collection,
-                qdrant_url=qdrant_url,
-                dense_dim=getattr(embedder, "dim", None),
+        if use_managed_corpus and workspace_config is not None:
+            files = list(_iter_supported_files(path))
+            if not files:
+                raise ValueError(f"No supported documents found under {path}")
+            corpus = CorpusService(workspace_config)
+            imported = corpus.import_files(files, paper_id=paper_id)
+            indexed = corpus.index_documents(
+                [document["id"] for document in imported],
+                replace_existing=True,
+                job_id="cli-index",
+                progress=lambda *_: None,
+                cancelled=lambda: False,
             )
-            academic_db = _build_metadata_db(
-                metadata_backend,
-                db_backup=db_backup,
-                mongo_uri=mongo_uri,
-                mongo_db_name=mongo_db_name,
+            if indexed["errors"]:
+                failures = "; ".join(item["error"] for item in indexed["errors"])
+                raise ValueError(f"One or more documents could not be indexed: {failures}")
+            paths_by_id = {
+                (paper_id if paper_id and len(files) == 1 else file_path.stem): file_path
+                for file_path in files
+            }
+            paper_summaries = [
+                {**item, "path": str(paths_by_id[item["paper_id"]])}
+                for item in indexed["items"]
+            ]
+        else:
+            mutation_lock = (
+                FileLock(str(workspace_config.root / ".episcope.lock"), timeout=60)
+                if workspace_config is not None
+                else nullcontext()
             )
-            chunker_instance = _build_chunker(
-                chunker,
-                min_chunk_size=min_chunk_size,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-            )
-            indexer = Indexer(vectordb, embedder=embedder, chunker=chunker_instance)
-            for paper in papers:
-                indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
-            if hasattr(vectordb, "save"):
-                vectordb.save()
-            _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
+            with mutation_lock:
+                papers = _load_path(path, loader_kind=loader, paper_id=paper_id)
+                embedder = EmbedderFactory.get_embedder(embed_model, provider=embed_provider)
+                vectordb = _build_vector_db(
+                    index_backend,
+                    index_dir=index_dir,
+                    qdrant_collection=qdrant_collection,
+                    qdrant_url=qdrant_url,
+                    dense_dim=getattr(embedder, "dim", None),
+                )
+                academic_db = _build_metadata_db(
+                    metadata_backend,
+                    db_backup=db_backup,
+                    mongo_uri=mongo_uri,
+                    mongo_db_name=mongo_db_name,
+                )
+                chunker_instance = _build_chunker(
+                    chunker,
+                    min_chunk_size=min_chunk_size,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                )
+                indexer = Indexer(vectordb, embedder=embedder, chunker=chunker_instance)
+                for paper in papers:
+                    indexer.index_paper(paper.sections, paper.metadata, paper.paper_id)
+                if hasattr(vectordb, "save"):
+                    vectordb.save()
+                _persist_papers(papers, db=academic_db, strategy_name=strategy_name)
+            paper_summaries = _paper_summaries(papers)
     except Exception as exc:
         _abort_exc(exc)
 
@@ -1851,7 +1917,7 @@ def index(
             "index_backend": index_backend,
             "metadata_backend": metadata_backend,
             "embed_model": embed_model,
-            "papers": _paper_summaries(papers),
+            "papers": paper_summaries,
         },
         output_format,
         _human_index,
@@ -1922,13 +1988,18 @@ def papers(
             _SETTINGS.mongo_db_name,
             workspace_config.mongo_db_name if workspace_config else None,
         )
-        academic_db = _build_metadata_db(
-            metadata_backend,
-            db_backup=db_backup,
-            mongo_uri=mongo_uri,
-            mongo_db_name=mongo_db_name,
-        )
-        doc_ids = academic_db.list_docs(strategy_name)
+        if workspace_config is not None and metadata_backend == MetadataBackend.memory:
+            doc_ids = [
+                paper["paper_id"] for paper in CorpusService(workspace_config).list_papers()
+            ]
+        else:
+            academic_db = _build_metadata_db(
+                metadata_backend,
+                db_backup=db_backup,
+                mongo_uri=mongo_uri,
+                mongo_db_name=mongo_db_name,
+            )
+            doc_ids = academic_db.list_docs(strategy_name)
     except Exception as exc:
         _abort_exc(exc)
 
@@ -2678,10 +2749,13 @@ def classify(
         # potentially slow PDF-parse + embedding step below, so a typo'd
         # --classifier-kind or a broken --task-file fails immediately
         # instead of after a minutes-long wait.
-        classifier_kind = _prepare_tasks(
-            workspace_config, task_file, classifier_kind, expected="classifier"
+        classifier_kind, classifier_config = _prepare_task_config(
+            workspace_config,
+            task_file,
+            classifier_kind,
+            expected="classifier",
+            top_k=workflow_top_k,
         )
-        classifier_config = build_classifier_config(classifier_kind, workflow_top_k)
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -2975,10 +3049,13 @@ def precision_miner(
         # slow PDF-parse + embedding step below, so a typo'd --miner-kind
         # or a broken --task-file fails immediately instead of after a
         # minutes-long wait.
-        miner_kind = _prepare_tasks(
-            workspace_config, task_file, miner_kind, expected="miner"
+        miner_kind, miner_config = _prepare_task_config(
+            workspace_config,
+            task_file,
+            miner_kind,
+            expected="miner",
+            top_k=workflow_top_k,
         )
-        miner_config = build_precision_miner_config(miner_kind, workflow_top_k)
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -3237,9 +3314,26 @@ def tasks(
         if action == "list":
             workspace_config = _optional_workspace(workspace)
             if workspace_config is not None:
-                load_tasks_dir(workspace_config.root / "tasks", overwrite=True)
+                catalog = TaskService(workspace_config).list()
+                # Preserve the established CLI JSON label while keeping the
+                # service/API vocabulary workspace-oriented.
+                for entries in catalog.values():
+                    for entry in entries:
+                        if entry["source"] == "workspace":
+                            entry["source"] = "declarative"
+            else:
+                catalog = {
+                    "classifiers": [
+                        entry
+                        for entry in classifier_catalog()
+                        if entry["source"] == "builtin"
+                    ],
+                    "miners": [
+                        entry for entry in miner_catalog() if entry["source"] == "builtin"
+                    ],
+                }
             _emit(
-                {"classifiers": classifier_catalog(), "miners": miner_catalog()},
+                catalog,
                 output_format,
                 _human_tasks,
             )
@@ -3258,7 +3352,11 @@ def tasks(
             if task_file is None:
                 _abort("--task-file is required for 'tasks validate'.")
                 return  # unreachable; satisfies the type checker
-            spec = validate_task_file(task_file)
+            try:
+                task_data = json.loads(task_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON in {task_file}: {exc}") from exc
+            spec = TaskService.validate(task_data)
             msg = (
                 f"OK  {task_file.name}\n"
                 f"    kind={spec.kind}  key={spec.key!r}  label={spec.label!r}"
@@ -3447,6 +3545,8 @@ def studio(
                 host,
                 "--server.headless",
                 "true",
+                "--server.maxUploadSize",
+                child_env.get("EPISCOPE_UPLOAD_LIMIT_MB", "100"),
                 "--browser.gatherUsageStats",
                 "false",
             ],

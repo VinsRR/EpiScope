@@ -548,7 +548,8 @@ class TaskService:
             raise KeyError(f"Unknown workspace task {key!r}.")
         return self.validate(json.loads(path.read_text(encoding="utf-8")))
 
-    def validate(self, data: Dict[str, Any]) -> TaskSpec:
+    @staticmethod
+    def validate(data: Dict[str, Any]) -> TaskSpec:
         try:
             spec = TaskSpec.model_validate(data)
             metadata = PaperMetadata(title="Validation paper", abstract="Validation abstract")
@@ -574,10 +575,17 @@ class TaskService:
 
 
 class CorpusService:
-    def __init__(self, workspace: WorkspaceConfig, *, upload_limit_mb: int = 100) -> None:
+    def __init__(
+        self,
+        workspace: WorkspaceConfig,
+        *,
+        upload_limit_mb: int = 100,
+        lock_timeout: float = 60,
+    ) -> None:
         self.workspace = workspace
         self.repository = StudioRepository(workspace)
         self.upload_limit = upload_limit_mb * 1024 * 1024
+        self.lock_timeout = lock_timeout
         self.papers_dir = workspace.resolve_path(workspace.papers_dir)
         self.papers_dir.mkdir(parents=True, exist_ok=True)
 
@@ -631,8 +639,32 @@ class CorpusService:
     def list_documents(self) -> list[Dict[str, Any]]:
         return self.repository.list_documents()
 
+    def import_files(
+        self, paths: Iterable[Path], *, paper_id: Optional[str] = None
+    ) -> list[Dict[str, Any]]:
+        """Copy CLI-selected files into managed storage using upload semantics."""
+        files = list(paths)
+        if paper_id and len(files) != 1:
+            raise ValueError("paper_id can only be used when importing a single file.")
+        imported: list[Dict[str, Any]] = []
+        for path in files:
+            imported.append(
+                self.upload(
+                    path.name,
+                    path.read_bytes(),
+                    paper_id=paper_id or path.stem,
+                )
+            )
+        return imported
+
     def list_papers(self) -> list[Dict[str, Any]]:
-        db = InMemoryAcademicDB(str(self.workspace.resolve_path(self.workspace.metadata_path)))
+        lock = FileLock(
+            str(self.workspace.root / ".episcope.lock"), timeout=self.lock_timeout
+        )
+        with lock:
+            db = InMemoryAcademicDB(
+                str(self.workspace.resolve_path(self.workspace.metadata_path))
+            )
         papers: list[Dict[str, Any]] = []
         documents_by_paper = {item["paper_id"]: item for item in self.list_documents()}
         for paper_id in db.list_docs(self.workspace.strategy_name):
@@ -655,7 +687,13 @@ class CorpusService:
         return papers
 
     def get_paper(self, paper_id: str) -> Dict[str, Any]:
-        db = InMemoryAcademicDB(str(self.workspace.resolve_path(self.workspace.metadata_path)))
+        lock = FileLock(
+            str(self.workspace.root / ".episcope.lock"), timeout=self.lock_timeout
+        )
+        with lock:
+            db = InMemoryAcademicDB(
+                str(self.workspace.resolve_path(self.workspace.metadata_path))
+            )
         metadata = db.get_paper_metadata(paper_id, self.workspace.strategy_name)
         if metadata is None:
             raise KeyError(f"Unknown paper {paper_id!r}.")
@@ -697,7 +735,9 @@ class CorpusService:
         if not documents:
             raise ValueError("Select at least one uploaded document to index.")
 
-        lock = FileLock(str(self.workspace.root / ".episcope.lock"), timeout=60)
+        lock = FileLock(
+            str(self.workspace.root / ".episcope.lock"), timeout=self.lock_timeout
+        )
         stage_root = Path(tempfile.mkdtemp(prefix=".episcope-stage-", dir=self.workspace.root))
         stage_index = stage_root / "index"
         stage_metadata = stage_root / "metadata.json"
@@ -756,7 +796,7 @@ class CorpusService:
 
                         source_path = self.papers_dir / document["stored_name"]
                         sections, metadata, references = loader.load(source_path)
-                        if not metadata.title:
+                        if not metadata.title or metadata.title == source_path.stem:
                             metadata.title = Path(document["original_name"]).stem
                         metadata.file_path = document["original_name"]
                         progress(position - 1, total, f"Embedding {document['original_name']}")
@@ -805,9 +845,16 @@ class CorpusService:
 
                 if successes:
                     vectordb.save()
-                    validation = FileDB(str(stage_index))
-                    if len(validation._metadata) != len(validation._embeddings):
-                        raise ValueError("Staged index validation failed: metadata/vector counts differ.")
+                    validation = FileDB(str(stage_index), strict=True)
+                    if validation._embeddings.size:
+                        expected_dim = getattr(embedder, "dim", None)
+                        actual_dim = int(validation._embeddings.shape[1])
+                        if expected_dim is not None and actual_dim != int(expected_dim):
+                            raise ValueError(
+                                "Staged index validation failed: embedding dimension "
+                                f"{actual_dim} does not match the configured embedder "
+                                f"dimension {expected_dim}."
+                            )
                     self._commit_stage(stage_index, stage_metadata, live_index, live_metadata)
                     for item in successes:
                         self.repository.update_document(
@@ -901,12 +948,18 @@ class JobManager:
         for summary in self.workspaces.list():
             StudioRepository(self.workspaces.get(summary["id"])).interrupt_active_jobs()
 
-    def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+    def shutdown(self, *, wait: bool = True) -> None:
+        self._executor.shutdown(wait=wait, cancel_futures=True)
 
     def submit_index(
         self, workspace_id: str, document_ids: list[str], *, replace_existing: bool = False
     ) -> Dict[str, Any]:
+        if not document_ids:
+            raise ValueError("Select at least one uploaded document to index.")
+        workspace = self.workspaces.get(workspace_id)
+        repository = StudioRepository(workspace)
+        for document_id in document_ids:
+            repository.get_document(document_id)
         payload = {"document_ids": document_ids, "replace_existing": replace_existing}
         return self._submit(workspace_id, "index", payload, total=len(document_ids))
 
@@ -921,6 +974,19 @@ class JobManager:
     ) -> Dict[str, Any]:
         if kind not in {"classification", "precision_miner"}:
             raise ValueError("Unknown workflow job kind.")
+        if not paper_ids:
+            raise ValueError("Select at least one indexed paper.")
+        workspace = self.workspaces.get(workspace_id)
+        available_papers = {
+            paper["paper_id"] for paper in CorpusService(workspace).list_papers()
+        }
+        missing = [paper_id for paper_id in paper_ids if paper_id not in available_papers]
+        if missing:
+            raise KeyError(f"Unknown indexed paper(s): {', '.join(missing)}.")
+        catalog = TaskService(workspace).list()
+        family = "classifiers" if kind == "classification" else "miners"
+        if task_key not in {entry["key"] for entry in catalog[family]}:
+            raise KeyError(f"Unknown {kind} task {task_key!r}.")
         payload = {"paper_ids": paper_ids, "task_key": task_key, "detailed": detailed}
         return self._submit(workspace_id, kind, payload, total=len(paper_ids))
 
@@ -1020,6 +1086,11 @@ class JobManager:
         cancelled: Callable[[], bool],
     ) -> Dict[str, Any]:
         runtime = EpiScopeRuntime(runtime_config_for_workspace(workspace))
+        snapshot_lock = FileLock(str(workspace.root / ".episcope.lock"), timeout=60)
+        with snapshot_lock:
+            retriever = runtime.build_retriever()
+            academic_db = runtime.build_db()
+        generator = runtime.build_generator()
         task_service = TaskService(workspace)
         task_key = payload["task_key"]
         spec = task_service.get(task_key)
@@ -1040,6 +1111,9 @@ class JobManager:
                         classifier_kind=task_key,
                         config=config,
                         detailed=bool(payload.get("detailed", True)),
+                        retriever=retriever,
+                        generator=generator,
+                        academic_db=academic_db,
                     )
                 else:
                     config = build_miner_config_from_spec(spec) if spec else None
@@ -1048,6 +1122,9 @@ class JobManager:
                         miner_kind=task_key,
                         config=config,
                         detailed=bool(payload.get("detailed", True)),
+                        retriever=retriever,
+                        generator=generator,
+                        academic_db=academic_db,
                     )
                 items.append({"paper_id": paper_id, "result": json_ready(result)})
             except Exception as exc:
@@ -1084,12 +1161,16 @@ class JobManager:
     def explore(self, workspace_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
         workspace = self.workspaces.get(workspace_id)
         runtime = EpiScopeRuntime(runtime_config_for_workspace(workspace))
+        snapshot_lock = FileLock(str(workspace.root / ".episcope.lock"), timeout=60)
+        with snapshot_lock:
+            retriever = runtime.build_retriever()
         result = runtime.explore(
             request["query"],
             top_k=int(request.get("top_k", 5)),
             similarity_threshold=float(request.get("similarity_threshold", 0.0)),
             generate_answer=bool(request.get("generate_answer", False)),
             filters=request.get("filters") or {},
+            retriever=retriever,
         )
         ready = json_ready(result)
         repository = StudioRepository(workspace)

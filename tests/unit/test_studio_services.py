@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 import pytest
+from filelock import FileLock, Timeout
 from typer.testing import CliRunner
 
 from episcope.episcope import app
 from episcope.schemas import PaperMetadata, StructuredSection
 from episcope.services.studio import (
     CorpusService,
+    JobManager,
     StudioRepository,
     StudioSettings,
     TaskService,
     WorkspaceService,
 )
+from episcope.workflows.registry import classifier_catalog
 
 
 class _FakeEmbedder:
@@ -158,3 +163,240 @@ def test_local_indexing_persists_paper_and_rolls_back_on_failure(
             cancelled=lambda: False,
         )
     assert index_metadata.read_bytes() == before
+
+
+def test_cli_workspace_index_uses_managed_corpus_service(
+    workspace_service, monkeypatch, tmp_path
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    paper = tmp_path / "managed.txt"
+    paper.write_text("managed corpus body", encoding="utf-8")
+    _install_fake_indexing(monkeypatch)
+
+    result = CliRunner().invoke(
+        app,
+        ["index", str(paper), "--workspace", str(workspace.root), "--format", "json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["papers"][0]["paper_id"] == "managed"
+    documents = StudioRepository(workspace).list_documents()
+    assert documents[0]["original_name"] == "managed.txt"
+    assert documents[0]["status"] == "indexed"
+
+
+def test_cli_task_listing_does_not_mutate_global_registry(
+    workspace_service
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    TaskService(workspace).save(
+        {
+            "key": "isolated_cli_task",
+            "kind": "classifier",
+            "labels": [{"code": "yes"}, {"code": "no"}],
+            "default_label": "no",
+        }
+    )
+    before = {entry["key"] for entry in classifier_catalog()}
+    result = CliRunner().invoke(app, ["tasks", "--workspace", str(workspace.root)])
+    assert result.exit_code == 0, result.output
+    after = {entry["key"] for entry in classifier_catalog()}
+    assert before == after
+    assert "isolated_cli_task" not in after
+
+
+def _install_fake_indexing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        lambda *_args, **_kwargs: _FakeLoader(),
+    )
+    monkeypatch.setattr(
+        "episcope.services.studio.EmbedderFactory.get_embedder",
+        lambda *_args, **_kwargs: _FakeEmbedder(),
+    )
+
+
+def test_workspace_lock_contention_is_reported(workspace_service) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    held = FileLock(str(workspace.root / ".episcope.lock"))
+    with held:
+        with pytest.raises(Timeout):
+            CorpusService(workspace, lock_timeout=0.01).list_papers()
+
+
+def test_indexing_keeps_successes_when_one_document_fails(
+    workspace_service, monkeypatch
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    corpus = CorpusService(workspace)
+    good = corpus.upload("good.txt", b"good content", paper_id="good")
+    bad = corpus.upload("bad.txt", b"bad content", paper_id="bad")
+
+    class PartialLoader(_FakeLoader):
+        def load(self, path):
+            if "bad content" in Path(path).read_text(encoding="utf-8"):
+                raise RuntimeError("parser rejected document")
+            return super().load(path)
+
+    monkeypatch.setattr(
+        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        lambda *_args, **_kwargs: PartialLoader(),
+    )
+    monkeypatch.setattr(
+        "episcope.services.studio.EmbedderFactory.get_embedder",
+        lambda *_args, **_kwargs: _FakeEmbedder(),
+    )
+    result = corpus.index_documents(
+        [good["id"], bad["id"]],
+        replace_existing=False,
+        job_id="partial",
+        progress=lambda *_: None,
+        cancelled=lambda: False,
+    )
+    assert [item["paper_id"] for item in result["items"]] == ["good"]
+    assert result["errors"][0]["document_id"] == bad["id"]
+    assert corpus.repository.get_document(good["id"])["status"] == "indexed"
+    assert corpus.repository.get_document(bad["id"])["status"] == "failed"
+
+
+def test_indexing_cancellation_takes_effect_between_documents(
+    workspace_service, monkeypatch
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    corpus = CorpusService(workspace)
+    documents = [
+        corpus.upload(f"paper-{index}.txt", f"paper {index}".encode(), paper_id=f"p{index}")
+        for index in range(2)
+    ]
+    _install_fake_indexing(monkeypatch)
+    parsed = 0
+
+    class CountingLoader(_FakeLoader):
+        def load(self, path):
+            nonlocal parsed
+            parsed += 1
+            return super().load(path)
+
+    monkeypatch.setattr(
+        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        lambda *_args, **_kwargs: CountingLoader(),
+    )
+    result = corpus.index_documents(
+        [item["id"] for item in documents],
+        replace_existing=False,
+        job_id="cancel",
+        progress=lambda *_: None,
+        cancelled=lambda: parsed == 1,
+    )
+    assert result["cancelled"] is True
+    assert parsed == 1
+    assert len(result["items"]) == 1
+
+
+def test_commit_failure_restores_previous_searchable_snapshot(
+    workspace_service, monkeypatch
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    corpus = CorpusService(workspace)
+    first = corpus.upload("first.txt", b"first body", paper_id="first")
+    _install_fake_indexing(monkeypatch)
+    corpus.index_documents(
+        [first["id"]],
+        replace_existing=False,
+        job_id="first-job",
+        progress=lambda *_: None,
+        cancelled=lambda: False,
+    )
+    live_index = workspace.resolve_path(workspace.index_dir)
+    live_metadata = workspace.resolve_path(workspace.metadata_path)
+    old_index_metadata = (live_index / "metadata.json").read_bytes()
+    old_academic_metadata = live_metadata.read_bytes()
+    second = corpus.upload("second.txt", b"second body", paper_id="second")
+    real_replace = os.replace
+
+    def fail_metadata_commit(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if (
+            source_path.name == "metadata.json"
+            and source_path.parent.name.startswith(".episcope-stage-")
+            and destination_path == live_metadata
+        ):
+            raise OSError("simulated commit failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr("episcope.services.studio.os.replace", fail_metadata_commit)
+    with pytest.raises(OSError, match="simulated commit failure"):
+        corpus.index_documents(
+            [second["id"]],
+            replace_existing=False,
+            job_id="second-job",
+            progress=lambda *_: None,
+            cancelled=lambda: False,
+        )
+    assert (live_index / "metadata.json").read_bytes() == old_index_metadata
+    assert live_metadata.read_bytes() == old_academic_metadata
+    assert [paper["paper_id"] for paper in corpus.list_papers()] == ["first"]
+
+
+def test_job_manager_marks_restart_jobs_interrupted_and_retries(
+    workspace_service, monkeypatch
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    repository = StudioRepository(workspace)
+    original = repository.create_job("index", {"document_ids": []}, total=0)
+    manager = JobManager(workspace_service)
+    try:
+        assert repository.get_job(original["id"])["status"] == "interrupted"
+        monkeypatch.setattr(manager._executor, "submit", lambda *_args, **_kwargs: None)
+        retried = manager.retry("review", original["id"])
+        assert retried["status"] == "queued"
+        assert retried["retry_parent"] == original["id"]
+    finally:
+        manager.shutdown()
+
+
+def test_job_manager_persists_partial_batch_results(
+    workspace_service, monkeypatch
+) -> None:
+    workspace_service.create("review")
+    workspace = workspace_service.get("review")
+    manager = JobManager(workspace_service)
+    monkeypatch.setattr(
+        "episcope.services.studio.CorpusService.list_papers",
+        lambda _self: [{"paper_id": "good"}, {"paper_id": "bad"}],
+    )
+    monkeypatch.setattr(
+        manager,
+        "_run_workflow",
+        lambda *_args, **_kwargs: {
+            "items": [{"paper_id": "good", "result": {"classification": ["yes"]}}],
+            "errors": [{"paper_id": "bad", "error": "LLM failed"}],
+            "cancelled": False,
+        },
+    )
+    try:
+        job = manager.submit_workflow(
+            "review",
+            kind="classification",
+            paper_ids=["good", "bad"],
+            task_key="data_accessibility",
+        )
+        repository = StudioRepository(workspace)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            current = repository.get_job(job["id"])
+            if current["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+        assert current["status"] == "completed_with_errors"
+        run = repository.get_run(current["result_id"])
+        assert run["result"]["errors"][0]["paper_id"] == "bad"
+    finally:
+        manager.shutdown()

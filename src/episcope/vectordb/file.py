@@ -12,8 +12,9 @@ from .base import AbstractVectorDB
 class FileDB(AbstractVectorDB):
     """A file-based vector database for storing paper-specific indexes."""
 
-    def __init__(self, index_dir: str):
+    def __init__(self, index_dir: str, *, strict: bool = False):
         self.index_dir = Path(index_dir)
+        self._strict = strict
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self._embeddings: np.ndarray = np.array([])
         self._metadata: List[Dict[str, Any]] = []
@@ -46,7 +47,21 @@ class FileDB(AbstractVectorDB):
                     if payload_keys is not None:
                         self._payload_keys = set(payload_keys)
                 self._loaded = True
+            if self._strict:
+                embedding_count = (
+                    int(self._embeddings.shape[0]) if self._embeddings.size else 0
+                )
+                if self._embeddings.size and self._embeddings.ndim != 2:
+                    raise ValueError("Stored embeddings must be a two-dimensional array.")
+                if embedding_count != len(self._metadata):
+                    raise ValueError(
+                        "Stored metadata and embedding counts do not match."
+                    )
+                if self._metadata and not self._loaded:
+                    raise ValueError("Stored index configuration is missing or unreadable.")
         except Exception:
+            if self._strict:
+                raise
             # Silently fail if loading fails, will start with an empty DB
             pass
 

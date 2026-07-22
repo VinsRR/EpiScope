@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, cast
 
 from episcope.clients import (
     AnthropicClient,
@@ -133,9 +133,11 @@ class EpiScopeRuntime:
         similarity_threshold: float = 0.0,
         generate_answer: bool = False,
         filters: Optional[Dict[str, Any]] = None,
+        retriever: Optional[Retriever] = None,
+        generator: Optional[LLMGenerator] = None,
     ) -> ExploreResult:
         filters = filters or {}
-        retriever = self.build_retriever()
+        retriever = retriever or self.build_retriever()
         retrieved = list(
             retriever.retrieve(
                 query,
@@ -148,7 +150,9 @@ class EpiScopeRuntime:
         answer = None
         provenance = None
         if generate_answer:
-            provenance = self.build_generator().generate(retrieved, question=query)
+            provenance = (generator or self.build_generator()).generate(
+                retrieved, question=query
+            )
             answer = provenance.answer
 
         return ExploreResult(
@@ -170,12 +174,15 @@ class EpiScopeRuntime:
         classifier_kind: str = "data_accessibility",
         config: Optional[Any] = None,
         detailed: bool = True,
+        retriever: Optional[Retriever] = None,
+        generator: Optional[LLMGenerator] = None,
+        academic_db: Optional[AcademicDB] = None,
     ) -> Any:
         classifier = PaperClassifier(
-            retriever=self.build_retriever(),
-            generator=self.build_generator(),
+            retriever=retriever or self.build_retriever(),
+            generator=generator or self.build_generator(),
             strategy_name=self.config.strategy_name,
-            academic_db=self.build_db(),
+            academic_db=academic_db or self.build_db(),
             config=config or self.build_classifier_config(classifier_kind),
             evidence_reranker=self.build_evidence_reranker(),
         )
@@ -190,12 +197,15 @@ class EpiScopeRuntime:
         miner_kind: str = "find_data_sources",
         config: Optional[Any] = None,
         detailed: bool = True,
+        retriever: Optional[Retriever] = None,
+        generator: Optional[LLMGenerator] = None,
+        academic_db: Optional[AcademicDB] = None,
     ) -> Any:
         miner = PrecisionMiner(
-            retriever=self.build_retriever(),
-            generator=self.build_generator(),
+            retriever=retriever or self.build_retriever(),
+            generator=generator or self.build_generator(),
             strategy_name=self.config.strategy_name,
-            academic_db=self.build_db(),
+            academic_db=academic_db or self.build_db(),
             config=config or self.build_precision_miner_config(miner_kind),
         )
         if detailed:
@@ -320,25 +330,31 @@ class EpiScopeRuntime:
 
 
 def _health_checks(config: RuntimeConfig) -> Dict[str, Any]:
+    provider_keys = {
+        "gemini": env("GEMINI_API_KEY"),
+        "openai": env("OPENAI_API_KEY"),
+        "openrouter": env("OPENROUTER_API_KEY"),
+        "anthropic": env("ANTHROPIC_API_KEY"),
+        "ollama": env("OLLAMA_HOST", "http://localhost:11434"),
+    }
     return {
         "mongo_uri_configured": bool(config.mongo_uri),
-        "qdrant_url": config.qdrant_url,
+        "qdrant_url_configured": bool(config.qdrant_url),
         "qdrant_collection": config.qdrant_collection,
+        "vector_backend": "qdrant" if config.qdrant_url else "local_file",
+        "parser_backend": "unstructured",
+        "grobid_url_configured": bool(env("GROBID_URL")),
+        "ollama_host_configured": bool(env("OLLAMA_HOST")),
         "llm_provider": config.llm_provider,
-        "llm_api_key_configured": bool(
-            {
-                "gemini": env("GEMINI_API_KEY"),
-                "openai": env("OPENAI_API_KEY"),
-                "openrouter": env("OPENROUTER_API_KEY"),
-                "anthropic": env("ANTHROPIC_API_KEY"),
-                "ollama": env("OLLAMA_HOST", "http://localhost:11434"),
-            }.get(config.llm_provider)
-        ),
+        "llm_api_key_configured": bool(provider_keys.get(config.llm_provider)),
+        "credential_presence": {
+            provider: bool(value) for provider, value in provider_keys.items()
+        },
     }
 
 
 def _coerce_llm_provider(provider: str) -> LlmProvider:
     normalized = provider.lower()
     if normalized in {"gemini", "openai", "openrouter", "anthropic", "ollama"}:
-        return normalized  # type: ignore[return-value]
+        return cast(LlmProvider, normalized)
     raise ValueError(f"Unsupported llm_provider={provider!r}")

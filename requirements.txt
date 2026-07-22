@@ -1,6 +1,6 @@
-# Runtime dependencies for the Docker image. Kept in sync with pyproject.toml:
-# each entry below maps to a section of [project.dependencies] or an extra.
-# The image installs these first (for layer caching) and then `pip install -e ".[server]"`.
+# Runtime dependencies matching the base, server, GROBID, and FAISS extras.
+# The optional heavyweight local-ML stack remains opt-in via
+# `pip install epi-scope[local-ml]` and is intentionally not in server images.
 
 # Base — mirrors [project].dependencies
 pydantic
@@ -8,14 +8,13 @@ typer
 requests
 numpy
 python-dotenv
-torch
-transformers
-sentence-transformers
+fastembed
 tqdm
-unstructured[pdf]
-pypdf
+unstructured
+pdfminer.six
 openai
 google-genai
+anthropic
 rapidfuzz
 lxml
 filelock

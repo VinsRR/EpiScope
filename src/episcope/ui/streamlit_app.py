@@ -83,14 +83,14 @@ def render_workflow_result(result: Dict[str, Any]) -> None:
             elif extraction and isinstance(extraction, dict) and "items" in extraction:
                 st.write(extraction.get("description", ""))
                 if extraction.get("items"):
-                    st.dataframe(pd.DataFrame(extraction["items"]), use_container_width=True)
+                    st.dataframe(pd.DataFrame(extraction["items"]), width="stretch")
             else:
                 st.json(payload)
             with st.expander("Complete result"):
                 st.json(payload)
     if errors:
         st.error(f"{len(errors)} item(s) failed")
-        st.dataframe(pd.DataFrame(errors), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(errors), width="stretch", hide_index=True)
 
 
 def home_page() -> None:
@@ -113,6 +113,39 @@ def home_page() -> None:
         "LLM access", "Configured" if checks.get("llm_api_key_configured") else "Needs setup"
     )
     cols[3].metric("Workspaces", len(listing.get("items", [])))
+
+    with st.expander("Setup diagnostics"):
+        diagnostics = [
+            {"Component": "API", "Status": "Ready", "Detail": "Connected"},
+            {
+                "Component": "Parser",
+                "Status": "Ready",
+                "Detail": checks.get("parser_backend", "unstructured"),
+            },
+            {
+                "Component": "Vector index",
+                "Status": "Ready",
+                "Detail": checks.get("vector_backend", "local_file"),
+            },
+            {
+                "Component": "GROBID",
+                "Status": "Configured" if checks.get("grobid_url_configured") else "Optional",
+                "Detail": "Used only by GROBID workspaces",
+            },
+            {
+                "Component": "Ollama",
+                "Status": "Configured" if checks.get("ollama_host_configured") else "Optional",
+                "Detail": "Used only with the Ollama provider",
+            },
+        ]
+        st.dataframe(pd.DataFrame(diagnostics), hide_index=True, width="stretch")
+        credentials = checks.get("credential_presence") or {}
+        if credentials:
+            configured = [name for name, present in credentials.items() if present]
+            st.caption(
+                "Credential presence: "
+                + (", ".join(configured) if configured else "no hosted-provider keys detected")
+            )
 
     if not checks.get("llm_api_key_configured"):
         st.warning(
@@ -164,7 +197,7 @@ def library_page() -> None:
             value=Path(upload.name).stem,
             key=f"paper-id-{getattr(upload, 'file_id', upload.name)}",
         )
-        if st.button("Upload", type="primary", use_container_width=True):
+        if st.button("Upload", type="primary", width="stretch"):
             try:
                 result = client.upload_document(
                     workspace_id,
@@ -193,7 +226,7 @@ def library_page() -> None:
         display = pd.DataFrame(documents)[
             ["id", "original_name", "paper_id", "status", "title", "section_count", "updated_at"]
         ]
-        st.dataframe(display, use_container_width=True, hide_index=True)
+        st.dataframe(display, width="stretch", hide_index=True)
         labels = {
             item["id"]: f"{item['original_name']} · {item['paper_id']} · {item['status']}"
             for item in documents
@@ -233,7 +266,7 @@ def library_page() -> None:
                     for paper in papers
                 ]
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         paper_id = st.selectbox("Inspect paper", [paper["paper_id"] for paper in papers])
@@ -277,7 +310,7 @@ def explore_page() -> None:
             help="The local payload filter currently supports one paper at a time.",
         )
         section_filter = st.text_input("Section type", placeholder="Methods")
-        submitted = st.form_submit_button("Run", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Run", type="primary", width="stretch")
     if submitted:
         if not query.strip():
             st.warning("Enter a question or query.")
@@ -331,7 +364,7 @@ def workflows_page() -> None:
             "Papers", [paper["paper_id"] for paper in papers], default=[papers[0]["paper_id"]]
         )
         detailed = st.checkbox("Keep detailed evidence and trace", value=True)
-        submitted = st.form_submit_button("Queue workflow", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Queue workflow", type="primary", width="stretch")
     if submitted:
         try:
             job = client.workflow(
@@ -460,7 +493,7 @@ def task_builder_page() -> None:
                     }
                 )
             edited = st.data_editor(
-                pd.DataFrame(label_rows), num_rows="dynamic", use_container_width=True,
+                pd.DataFrame(label_rows), num_rows="dynamic", width="stretch",
                 column_config={"examples": st.column_config.TextColumn("Examples (one per line)")},
             )
             candidate["labels"] = [
@@ -509,14 +542,14 @@ def task_builder_page() -> None:
             ) or None
 
     actions = st.columns(3)
-    if actions[0].button("Validate", use_container_width=True):
+    if actions[0].button("Validate", width="stretch"):
         try:
             validated = client.validate_task(workspace_id, candidate)
             st.session_state.task_draft = validated["task"]
             st.success("Task definition is valid.")
         except Exception as exc:
             render_api_error(exc)
-    if actions[1].button("Save", type="primary", use_container_width=True):
+    if actions[1].button("Save", type="primary", width="stretch"):
         try:
             saved = client.save_task(
                 workspace_id, candidate, editing_key=st.session_state.get("task_editing_key")
@@ -531,7 +564,7 @@ def task_builder_page() -> None:
         data=json.dumps(candidate, indent=2),
         file_name=f"{candidate.get('key') or 'task'}.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -598,13 +631,13 @@ def jobs_results_page() -> None:
                 data=json.dumps(run["result"], indent=2, ensure_ascii=False),
                 file_name=f"{run_id}.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
             )
             try:
                 csv_data = client.download_run(workspace_id, run_id, "csv")
                 cols[1].download_button(
                     "Download CSV", data=csv_data, file_name=f"{run_id}.csv",
-                    mime="text/csv", use_container_width=True,
+                    mime="text/csv", width="stretch",
                 )
             except Exception as exc:
                 cols[1].caption(f"CSV export unavailable: {exc}")
@@ -724,46 +757,65 @@ def settings_page() -> None:
 
 
 # Common application frame ---------------------------------------------------
-with st.sidebar:
-    st.header("EpiScope")
-    api_base_url = st.text_input(
-        "API URL", value=st.session_state.get("api_base_url", DEFAULT_API_BASE_URL)
-    )
-    st.session_state.api_base_url = api_base_url
-    try:
-        workspace_listing = get_client().workspaces()
-        workspace_items = workspace_listing.get("items", [])
-        workspace_labels = {item["id"]: item["name"] for item in workspace_items}
-        options = list(workspace_labels)
-        current = st.session_state.get("workspace_id")
-        if current not in options:
-            current = workspace_listing.get("active_workspace_id")
-        if current not in options and options:
-            current = options[0]
-        if options:
-            chosen = st.selectbox(
-                "Workspace", options,
-                index=options.index(current) if current in options else 0,
-                format_func=lambda key: workspace_labels[key],
-            )
-            st.session_state.workspace_id = chosen
-        else:
-            st.caption("No workspaces yet")
-            st.session_state.workspace_id = None
-    except Exception:
-        st.caption("API unavailable")
-
-pages = {
-    "Studio": [
-        st.Page(home_page, title="Home", icon=":material/home:", default=True),
-        st.Page(library_page, title="Library", icon=":material/library_books:"),
-        st.Page(explore_page, title="Explore", icon=":material/search:"),
-        st.Page(workflows_page, title="Workflows", icon=":material/account_tree:"),
-    ],
-    "Manage": [
-        st.Page(task_builder_page, title="Task Builder", icon=":material/edit_note:"),
-        st.Page(jobs_results_page, title="Jobs & Results", icon=":material/history:"),
-        st.Page(settings_page, title="Settings", icon=":material/settings:"),
-    ],
+PAGE_FUNCTIONS = {
+    "home": home_page,
+    "library": library_page,
+    "explore": explore_page,
+    "workflows": workflows_page,
+    "task_builder": task_builder_page,
+    "jobs_results": jobs_results_page,
+    "settings": settings_page,
 }
-st.navigation(pages).run()
+
+
+def run_app() -> None:
+    with st.sidebar:
+        st.header("EpiScope")
+        api_base_url = st.text_input(
+            "API URL", value=st.session_state.get("api_base_url", DEFAULT_API_BASE_URL)
+        )
+        st.session_state.api_base_url = api_base_url
+        try:
+            workspace_listing = get_client().workspaces()
+            workspace_items = workspace_listing.get("items", [])
+            workspace_labels = {item["id"]: item["name"] for item in workspace_items}
+            options = list(workspace_labels)
+            current = st.session_state.get("workspace_id")
+            if current not in options:
+                current = workspace_listing.get("active_workspace_id")
+            if current not in options and options:
+                current = options[0]
+            if options:
+                chosen = st.selectbox(
+                    "Workspace", options,
+                    index=options.index(current) if current in options else 0,
+                    format_func=lambda key: workspace_labels[key],
+                )
+                st.session_state.workspace_id = chosen
+            else:
+                st.caption("No workspaces yet")
+                st.session_state.workspace_id = None
+        except Exception:
+            st.caption("API unavailable")
+
+    pages = {
+        "Studio": [
+            st.Page(home_page, title="Home", icon=":material/home:", default=True),
+            st.Page(library_page, title="Library", icon=":material/library_books:"),
+            st.Page(explore_page, title="Explore", icon=":material/search:"),
+            st.Page(workflows_page, title="Workflows", icon=":material/account_tree:"),
+        ],
+        "Manage": [
+            st.Page(task_builder_page, title="Task Builder", icon=":material/edit_note:"),
+            st.Page(jobs_results_page, title="Jobs & Results", icon=":material/history:"),
+            st.Page(settings_page, title="Settings", icon=":material/settings:"),
+        ],
+    }
+    st.navigation(pages).run()
+
+
+test_page = os.getenv("EPISCOPE_STUDIO_TEST_PAGE")
+if test_page:
+    PAGE_FUNCTIONS[test_page]()
+else:
+    run_app()
