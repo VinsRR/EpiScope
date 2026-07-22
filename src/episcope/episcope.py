@@ -3422,6 +3422,12 @@ def studio(
     import time
     from importlib import resources
 
+    # Tokenizers registers a fork callback that warns (and disables its thread
+    # pool) when Studio launches its API/UI children after tokenization has
+    # already occurred. Choose the safe local default before either fork while
+    # preserving an explicit user preference.
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     # Python's default SIGTERM handling terminates the process immediately,
     # without running the except/finally cleanup below - only SIGINT
     # (Ctrl-C) does that by default. A plain `kill`/process-manager stop

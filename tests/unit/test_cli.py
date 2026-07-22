@@ -1105,9 +1105,19 @@ def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("QDRANT_URL", raising=False)
     monkeypatch.delenv("MONGO_URI", raising=False)
+    monkeypatch.delenv("TOKENIZERS_PARALLELISM", raising=False)
 
     result = runner.invoke(
-        app, ["studio", "--api-port", "9199", "--ui-port", "9198"]
+        app,
+        [
+            "studio",
+            "--api-port",
+            "9199",
+            "--ui-port",
+            "9198",
+            "--workspaces-root",
+            str(tmp_path / "workspaces"),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -1119,6 +1129,8 @@ def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
     assert "--server.maxUploadSize" in ui_proc.args
     assert api_proc.popen_kwargs["start_new_session"] is True
     assert ui_proc.popen_kwargs["start_new_session"] is True
+    assert api_proc.env["TOKENIZERS_PARALLELISM"] == "false"
+    assert ui_proc.env["TOKENIZERS_PARALLELISM"] == "false"
     assert api_proc.terminate_called
     assert ui_proc.terminate_called
     # No papers indexed in this fresh tmp_path: the empty-index warning fires.
