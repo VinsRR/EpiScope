@@ -36,7 +36,9 @@ server = [
     "fastapi",
     "uvicorn",
     "python-multipart",
-    "qdrant-client",
+    # >=1.12 for the query_points/Fusion API; the legacy client.search() was
+    # removed in newer releases (see episcope.vectordb.qdrant).
+    "qdrant-client>=1.12,<2",
     "pymongo",
 ]
 # GROBID-backed PDF parsing (`--loader grobid`). Provides the `grobid_client`

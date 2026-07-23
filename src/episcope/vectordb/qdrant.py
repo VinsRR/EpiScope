@@ -319,17 +319,17 @@ class QdrantDB(AbstractVectorDB):
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection,
-            query_vector=models.NamedVector(
-                name=self.dense_vector_name, vector=query_vector
-            ),
+            query=query_vector,
+            using=self.dense_vector_name,
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
         )
+        points = getattr(results, "points", results)
         return [
-            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
         ]
 
     def search_sparse(
@@ -346,21 +346,20 @@ class QdrantDB(AbstractVectorDB):
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection,
-            query_vector=models.NamedSparseVector(
-                name=self.sparse_vector_name,
-                vector=models.SparseVector(
-                    indices=query_sparse["indices"],
-                    values=query_sparse["values"],
-                ),
+            query=models.SparseVector(
+                indices=query_sparse["indices"],
+                values=query_sparse["values"],
             ),
+            using=self.sparse_vector_name,
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
         )
+        points = getattr(results, "points", results)
         return [
-            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
         ]
 
     def search_hybrid(
