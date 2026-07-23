@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -10,8 +12,9 @@ from .base import AbstractVectorDB
 class FileDB(AbstractVectorDB):
     """A file-based vector database for storing paper-specific indexes."""
 
-    def __init__(self, index_dir: str):
+    def __init__(self, index_dir: str, *, strict: bool = False):
         self.index_dir = Path(index_dir)
+        self._strict = strict
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self._embeddings: np.ndarray = np.array([])
         self._metadata: List[Dict[str, Any]] = []
@@ -44,7 +47,21 @@ class FileDB(AbstractVectorDB):
                     if payload_keys is not None:
                         self._payload_keys = set(payload_keys)
                 self._loaded = True
+            if self._strict:
+                embedding_count = (
+                    int(self._embeddings.shape[0]) if self._embeddings.size else 0
+                )
+                if self._embeddings.size and self._embeddings.ndim != 2:
+                    raise ValueError("Stored embeddings must be a two-dimensional array.")
+                if embedding_count != len(self._metadata):
+                    raise ValueError(
+                        "Stored metadata and embedding counts do not match."
+                    )
+                if self._metadata and not self._loaded:
+                    raise ValueError("Stored index configuration is missing or unreadable.")
         except Exception:
+            if self._strict:
+                raise
             # Silently fail if loading fails, will start with an empty DB
             pass
 
@@ -196,24 +213,63 @@ class FileDB(AbstractVectorDB):
             "late": False,
         }
 
+    def delete(self, namespace: str) -> int:
+        keep = [
+            index
+            for index, metadata in enumerate(self._metadata)
+            if metadata.get("paper_id") != namespace
+        ]
+        removed = len(self._metadata) - len(keep)
+        if not removed:
+            return 0
+        if keep:
+            self._embeddings = self._embeddings[keep]
+            self._metadata = [self._metadata[index] for index in keep]
+        else:
+            self._embeddings = np.array([])
+            self._metadata = []
+        self._payload_keys = {
+            key for metadata in self._metadata for key in metadata.keys()
+        }
+        self._dirty = True
+        return removed
+
     def save(self) -> None:
         if not self._dirty:
             return
 
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
+        embeddings_path = self.index_dir / "embeddings.npy"
         if self._embeddings.size > 0:
-            np.save(self.index_dir / "embeddings.npy", self._embeddings)
+            with tempfile.NamedTemporaryFile(
+                dir=self.index_dir, suffix=".npy", delete=False
+            ) as handle:
+                np.save(handle, self._embeddings)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary_embeddings = Path(handle.name)
+            os.replace(temporary_embeddings, embeddings_path)
+        elif embeddings_path.exists():
+            embeddings_path.unlink()
 
-        with open(self.index_dir / "metadata.json", "w", encoding="utf-8") as f:
-            json.dump(self._metadata, f, indent=2)
+        def _write_json_atomic(path: Path, value: Any) -> None:
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.index_dir, suffix=".tmp", delete=False
+            ) as handle:
+                json.dump(value, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary = Path(handle.name)
+            os.replace(temporary, path)
+
+        _write_json_atomic(self.index_dir / "metadata.json", self._metadata)
 
         config = {
             "embed_model": self._model,
             "chunking_config": self._chunking_config,
             "payload_keys": list(self._payload_keys),
         }
-        with open(self.index_dir / "config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        _write_json_atomic(self.index_dir / "config.json", config)
 
         self._dirty = False

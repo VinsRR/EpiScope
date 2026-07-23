@@ -23,8 +23,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-
-RUN pip install -e ".[server]"
+RUN pip install --no-deps .
 
 EXPOSE 8000
 

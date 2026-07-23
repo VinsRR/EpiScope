@@ -64,7 +64,7 @@ class InMemoryAcademicDB(AcademicDB):
         doc_id: str,
         data_type: str,
         strategy_name: str,
-        content: Dict[str, Any],
+        content: Any,
     ) -> None:
         key = (doc_id, data_type, strategy_name)
         if key in self._store:
@@ -100,3 +100,11 @@ class InMemoryAcademicDB(AcademicDB):
     def list_docs(self, strategy_name: str) -> List[str]:
         """List all document IDs for a given strategy."""
         return sorted(list(set(k[0] for k in self._store if k[2] == strategy_name)))
+
+    def delete_doc(self, doc_id: str, strategy_name: str) -> int:
+        keys = [key for key in self._store if key[0] == doc_id and key[2] == strategy_name]
+        for key in keys:
+            del self._store[key]
+        if self._backup_file and keys:
+            self._flush_backup()
+        return len(keys)

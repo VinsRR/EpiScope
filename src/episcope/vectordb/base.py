@@ -65,6 +65,10 @@ class AbstractVectorDB(ABC):
             "late": False,
         }
 
+    def delete(self, namespace: str) -> int:
+        """Delete points belonging to one namespace when supported."""
+        raise NotImplementedError("This vector database cannot delete a namespace.")
+
     def search_dense(
         self,
         query_vector: List[float],

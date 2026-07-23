@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from .academic_db import AcademicDB
 from ..settings import env
@@ -70,7 +70,7 @@ class MongoAcademicDB(AcademicDB):
         doc_id: str,
         data_type: str,
         strategy_name: str,
-        content: Dict[str, Any],
+        content: Any,
     ) -> None:
         collection = self._get_collection(strategy_name)
         doc = {
@@ -126,3 +126,9 @@ class MongoAcademicDB(AcademicDB):
 
         collection = self._db[strategy_name]
         return collection.distinct("doc_id")
+
+    def delete_doc(self, doc_id: str, strategy_name: str) -> int:
+        if strategy_name not in self._db.list_collection_names():
+            return 0
+        result = self._db[strategy_name].delete_many({"doc_id": doc_id})
+        return int(result.deleted_count)

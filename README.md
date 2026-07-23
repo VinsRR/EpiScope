@@ -430,10 +430,10 @@ Extract likely data sources:
 episcope precision-miner --file /path/to/paper.pdf --miner-kind find_data_sources
 ```
 
-Prefer a browser over the command line? `episcope init`/`episcope index` into a
-workspace, then `episcope studio --workspace <name>` gives you the same
-Explorer/Classification/Precision Miner tabs with no Qdrant or MongoDB to set
-up — see [Running The UI](#running-the-ui).
+Prefer a browser over the command line? `episcope studio` opens the complete
+local workspace UI: create a workspace, upload/index papers, explore evidence,
+run workflows, author tasks, and export persistent results without Qdrant or
+MongoDB — see [Running The UI](#running-the-ui).
 
 ### Running Without An API Key (Ollama)
 
@@ -541,6 +541,11 @@ The current API exposes:
 - `POST /classify`
 - `POST /precision-miner`
 
+Studio additionally exposes workspace-scoped `/workspaces/{workspace_id}/...`
+routes for uploads, papers, indexing jobs, tasks, workflows, job control, run
+history, and downloads. The original unscoped workflow routes remain available
+for existing API clients.
+
 Example health check:
 
 ```bash
@@ -580,20 +585,19 @@ Practical runtime notes:
 ## Running The UI
 
 **Fastest path — no Qdrant or MongoDB needed:** `episcope studio` starts the
-API and the Streamlit UI together against a local, file-backed index (the same
-kind the CLI's `--path` commands already use), pointed at a workspace you've
-indexed:
+API and Streamlit UI together against managed, local file-backed workspaces.
+The browser can create the workspace and perform the first upload/index itself:
 
 ```bash
 python -m pip install "epi-scope[all]"     # API + UI (or: "epi-scope[server,ui]")
-episcope init my-review && episcope index ./papers --workspace my-review
-episcope studio --workspace my-review      # one terminal, prints both URLs
+episcope studio                            # one terminal, prints both URLs
 ```
 
-It warns if the workspace hasn't been indexed yet, and stops both processes
-together on Ctrl-C. This is the recommended way to try the UI locally; the rest
-of this section covers running the API and UI as separate, longer-lived
-processes (e.g. for a shared/server deployment).
+By default, Studio manages workspaces under `~/.episcope/workspaces` and binds
+only to `127.0.0.1`. Use `--workspaces-root PATH` to choose another managed
+directory. To open an existing workspace, run `episcope studio --workspace
+/path/to/workspace`; its parent becomes the managed root. Studio stops both
+processes together on Ctrl-C.
 
 The Streamlit UI is a **thin client over the FastAPI backend** — it does not run
 workflows itself, it calls the API over HTTP. Run them as two separate
@@ -612,19 +616,11 @@ If the UI shows **"API not reachable"**, the backend is not running (or the
 the URL. Docker Compose (below) starts the API, UI, Qdrant, and GROBID together
 for a shared/server setup.
 
-The current UI includes three tabs:
-
-- `Explorer`
-- `Classification`
-- `Precision Miner`
-
-The UI talks to the FastAPI backend and exposes the same main runtime controls:
-
-- backend URLs and collection names
-- LLM provider and model
-- retrieval mode
-- optional evidence reranking
-- workflow kind selection for classification and precision-miner tasks
+The UI includes Home/Setup, Library, Explore, Workflows, Task Builder,
+Jobs/Results, and Settings pages. Indexing and batch workflows are persistent
+background jobs, and complete result JSON plus CSV exports live in each
+workspace's `outputs/` directory. API keys and connection credentials remain
+in the server environment and are never sent through Streamlit.
 
 ## Running With Docker Compose
 
@@ -648,6 +644,10 @@ It starts:
 - `grobid`
 - `api`
 - `ui`
+
+The API stores managed workspaces in the persistent `workspace_data` volume,
+mounted at `/data/workspaces`; rebuilding or restarting containers does not
+discard uploaded papers, local indexes, task definitions, jobs, or results.
 
 Run:
 
@@ -738,8 +738,11 @@ The Docker Compose setup still does not provide:
 
 That means:
 
-- `/explore` can work once Qdrant contains indexed data
-- `/classify` and `/precision-miner` still need an external Mongo instance via `MONGO_URI`
+- the workspace-scoped Studio UI works with its persistent local index and
+  metadata store without MongoDB
+- legacy unscoped `/explore` can work once Qdrant contains indexed data
+- legacy unscoped `/classify` and `/precision-miner` still need an external
+  Mongo instance via `MONGO_URI`
 - GROBID-backed ingestion is available out of the box at `http://127.0.0.1:8070`
 - the API container resolves GROBID internally via `GROBID_URL=http://grobid:8070`
 - local CLI usage can point at the same container with `GROBID_URL=http://127.0.0.1:8070` and `--loader grobid`

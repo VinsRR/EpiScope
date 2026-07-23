@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from ..schemas import (
     PaperMetadata,
@@ -19,7 +19,7 @@ class AcademicDB(ABC):
         doc_id: str,
         data_type: str,
         strategy_name: str,
-        content: Dict[str, Any],
+        content: Any,
     ) -> None:
         """Insert a new extraction record into the store."""
         pass
@@ -44,6 +44,15 @@ class AcademicDB(ABC):
     def list_docs(self, strategy_name: str) -> List[str]:
         """List all document IDs for a given strategy."""
         pass
+
+    def delete_doc(self, doc_id: str, strategy_name: str) -> int:
+        """Delete every stored data type for one paper.
+
+        Backends that support document replacement should override this method.
+        It is intentionally non-abstract so third-party read-only backends remain
+        source compatible.
+        """
+        raise NotImplementedError("This academic database cannot delete one paper.")
 
     def _deserialize_content(self, data_type: str, content: Any) -> Optional[Any]:
         """Helper to deserialize content based on data type."""
