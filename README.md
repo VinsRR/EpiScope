@@ -634,6 +634,16 @@ The root [docker-compose.yml](docker-compose.yml) supports three practical modes
 > # edit .env to add GEMINI_API_KEY (and MONGO_URI for classify/precision-miner)
 > ```
 
+> **Qdrant version alignment:** Qdrant only guarantees compatibility between the
+> `qdrant-client` library and the Qdrant server when they share the same **minor**
+> version (e.g. `1.13.*`). To keep them in lockstep, the server image tag is
+> `qdrant/qdrant:v${QDRANT_VERSION:-1.13.5}` (set `QDRANT_VERSION` in `.env`) and
+> the client is pinned to the matching minor in
+> [pyproject.toml](pyproject.toml). `QdrantDB` also **hard-errors at startup** on
+> a client/server minor mismatch, with the exact `pip install` fix — so drift
+> fails loudly instead of causing intermittent errors. Bump both together when
+> upgrading (escape hatch: `EPISCOPE_QDRANT_SKIP_VERSION_CHECK=1`).
+
 ### 1. Local Dev Mode
 
 This is the simplest setup and the best default for normal local development.

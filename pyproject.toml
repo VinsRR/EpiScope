@@ -36,9 +36,10 @@ server = [
     "fastapi",
     "uvicorn",
     "python-multipart",
-    # >=1.12 for the query_points/Fusion API; the legacy client.search() was
-    # removed in newer releases (see episcope.vectordb.qdrant).
-    "qdrant-client>=1.12,<2",
+    # Pin to the Qdrant server minor (see QDRANT_VERSION in docker-compose.yml).
+    # Qdrant only guarantees client/server compatibility within the same minor,
+    # and QdrantDB hard-errors on a mismatch — bump both in lockstep.
+    "qdrant-client~=1.13.5",
     "pymongo",
 ]
 # GROBID-backed PDF parsing (`--loader grobid`). Provides the `grobid_client`
