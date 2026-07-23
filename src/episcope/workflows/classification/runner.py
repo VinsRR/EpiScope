@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from episcope.rag.generation.base import Generator
+from episcope.rag.generation.llm_generator import structured_output_kwargs
 from episcope.schemas import PaperMetadata, SearchResult
 from episcope.workflows.classification.config import BaseClassifierConfig
 from episcope.workflows.classification.output import CompletionSample
@@ -63,7 +64,9 @@ class ClassificationRunner:
                 generation = self.generator.generate(
                     contexts=[[chunk.text for chunk in chunks]],
                     message_builder=lambda **_: messages,
-                    format="json",
+                    **structured_output_kwargs(
+                        self.config.structured_output, self.config.output_schema
+                    ),
                 )
                 last_raw = generation.answer
             except Exception as exc:

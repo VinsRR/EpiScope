@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 @dataclass
@@ -12,6 +12,11 @@ class PrecisionMinerConfig:
     section_filters: Optional[List[str]] = None
     system_prompt: str = ""
     user_prompt_template: str = ""
+
+    # Decode-time structured-output enforcement; see BaseClassifierConfig.
+    #   "schema" constrains generation to `ExtractionResultSchema` (default),
+    #   "json" requests valid JSON only, "off" disables decode-time constraint.
+    structured_output: Literal["off", "json", "schema"] = "schema"
 
 
 @dataclass

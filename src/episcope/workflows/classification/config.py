@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from .schemas import (
     DATA_ACCESS_CODE_DEFINITIONS,
@@ -60,6 +60,13 @@ class BaseClassifierConfig:
 
     # How many times to re-ask the LLM if JSON does not validate.
     max_validation_retries: int = 3
+
+    # Decode-time structured-output enforcement:
+    #   "schema" — constrain generation to `output_schema` via the provider's
+    #              native structured-output feature (default);
+    #   "json"   — request valid JSON only (legacy Ollama `format="json"`);
+    #   "off"    — no decode-time constraint, rely on prompt + validation retries.
+    structured_output: Literal["off", "json", "schema"] = "schema"
 
     # When False (declarative tasks with multi_label=False) the parser keeps
     # only the first returned code even if the model emits several.
