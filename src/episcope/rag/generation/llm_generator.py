@@ -31,6 +31,21 @@ def _get(ctx: Any, key: str, default: Any = None) -> Any:
     return getattr(ctx, key, default)
 
 
+def structured_output_kwargs(mode: str, schema: Any) -> Dict[str, Any]:
+    """Translate a workflow's ``structured_output`` mode into ``generate`` kwargs.
+
+    ``"schema"`` constrains decoding to ``schema`` (a Pydantic model class or
+    JSON-schema mapping) via the provider's native structured-output feature;
+    ``"json"`` requests valid JSON only (legacy Ollama ``format="json"``);
+    ``"off"`` applies no decode-time constraint.
+    """
+    if mode == "schema" and schema is not None:
+        return {"response_schema": schema}
+    if mode == "json":
+        return {"format": "json"}
+    return {}
+
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are a careful scientific assistant. Using ONLY the provided contexts, "
     "compose a fluent, concise answer. Do not invent facts. If the contexts "
@@ -129,6 +144,7 @@ class LLMGenerator(Generator):
         question: Optional[str] = None,
         extra_messages: Optional[Sequence[Mapping[str, str]]] = None,
         message_builder: Optional[Callable] = None,
+        response_schema: Any = None,
         **kwargs: Any,
     ) -> Provenance:
         # 1) Build messages
@@ -150,6 +166,7 @@ class LLMGenerator(Generator):
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            response_schema=response_schema,
             **kwargs,
         )
 

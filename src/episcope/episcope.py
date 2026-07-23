@@ -158,6 +158,14 @@ class QualityPreset(str, Enum):
     accurate = "accurate"
 
 
+class StructuredOutputMode(str, Enum):
+    """Decode-time structured-output enforcement (see workflow configs)."""
+
+    off = "off"
+    json = "json"
+    schema = "schema"
+
+
 @dataclass(frozen=True)
 class _QualityValues:
     """One row of the --quality preset table.
@@ -2532,6 +2540,16 @@ def classify(
         exists=True,
         help="JSON task spec to run for this call (overrides --classifier-kind).",
     ),
+    structured_output: StructuredOutputMode = typer.Option(
+        StructuredOutputMode.schema,
+        "--structured-output",
+        help=(
+            "Decode-time output constraint: 'schema' constrains generation to the "
+            "output schema via the provider's native structured-output feature "
+            "(Ollama grammar, OpenAI/Gemini JSON schema, Anthropic tool use); "
+            "'json' requests valid JSON only; 'off' disables it (prompt + retries)."
+        ),
+    ),
     quality: Optional[QualityPreset] = typer.Option(
         None,
         "--quality",
@@ -2756,6 +2774,7 @@ def classify(
             expected="classifier",
             top_k=workflow_top_k,
         )
+        classifier_config.structured_output = structured_output.value
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,
@@ -2839,6 +2858,15 @@ def precision_miner(
         "--task-file",
         exists=True,
         help="JSON task spec to run for this call (overrides --miner-kind).",
+    ),
+    structured_output: StructuredOutputMode = typer.Option(
+        StructuredOutputMode.schema,
+        "--structured-output",
+        help=(
+            "Decode-time output constraint: 'schema' constrains generation to the "
+            "extraction schema via the provider's native structured-output feature; "
+            "'json' requests valid JSON only; 'off' disables it (prompt + retries)."
+        ),
     ),
     quality: Optional[QualityPreset] = typer.Option(
         None,
@@ -3056,6 +3084,7 @@ def precision_miner(
             expected="miner",
             top_k=workflow_top_k,
         )
+        miner_config.structured_output = structured_output.value
         resolved = _resolve_paper_from_store(
             paper_id or "",
             loader_kind=loader,

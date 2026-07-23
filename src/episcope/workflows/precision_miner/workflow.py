@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from episcope.db.academic_db import AcademicDB
 from episcope.rag.generation.base import Generator
+from episcope.rag.generation.llm_generator import structured_output_kwargs
 from episcope.rag.provenance import Provenance
 from episcope.rag.retrieval.base import BaseRetriever
 from episcope.schemas import PaperMetadata, SearchResult
@@ -19,7 +20,10 @@ from episcope.workflows.precision_miner.output import (
 )
 from episcope.workflows.precision_miner.parsing import PrecisionMinerResponseParser
 from episcope.workflows.precision_miner.prompting import PrecisionMinerPromptBuilder
-from episcope.workflows.precision_miner.schemas import ExtractionResult
+from episcope.workflows.precision_miner.schemas import (
+    ExtractionResult,
+    ExtractionResultSchema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +69,9 @@ class PrecisionMiner(AbstractRAG):
             provenance = self.generator.generate(
                 contexts=relevant_chunks,
                 message_builder=lambda **_: messages,
-                format="json",
+                **structured_output_kwargs(
+                    self.config.structured_output, ExtractionResultSchema
+                ),
             )
             result = self.response_parser.parse(provenance.answer)
             raw_response = provenance.answer

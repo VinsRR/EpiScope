@@ -9,13 +9,18 @@ components to be written without being tied to a specific LLM provider.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import json
 import inspect
+import re
 from typing import Any, Dict, List, Sequence, Protocol, Optional, Mapping, Tuple
 from dataclasses import dataclass, field
 
 import requests
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 OpenAI: Any
 try:
@@ -52,9 +57,16 @@ class LLMClient(Protocol):
         model: str,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
-        """Return the assistant text for a chat-style prompt."""
+        """Return the assistant text for a chat-style prompt.
+
+        ``response_schema`` (a Pydantic model class or JSON-schema mapping), when
+        provided, is translated to the provider's native structured-output
+        mechanism so the returned text is constrained to the schema. Providers
+        that cannot honor it degrade gracefully to unconstrained decoding.
+        """
 
     def embed(
         self,
@@ -157,6 +169,148 @@ def _with_anthropic_cache_control(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Structured-output helpers
+# ---------------------------------------------------------------------------
+
+# A ``response_schema`` may be a Pydantic model class or an already-built JSON
+# schema mapping. Providers each translate it to their own native mechanism.
+ResponseSchema = Any
+
+
+def _normalize_response_schema(response_schema: ResponseSchema) -> Optional[Dict[str, Any]]:
+    """Coerce a Pydantic model class or JSON-schema mapping to a plain dict.
+
+    Returns ``None`` when no schema is supplied so callers can treat the
+    "unconstrained" case uniformly.
+    """
+    if response_schema is None:
+        return None
+    if isinstance(response_schema, type) and issubclass(response_schema, BaseModel):
+        return response_schema.model_json_schema()
+    if isinstance(response_schema, Mapping):
+        return dict(response_schema)
+    raise TypeError(
+        "response_schema must be a Pydantic model class or a mapping, "
+        f"got {type(response_schema)!r}"
+    )
+
+
+def _schema_name(schema: Mapping[str, Any], default: str = "response") -> str:
+    """A safe identifier for provider APIs that name the schema/tool."""
+    name = re.sub(r"[^a-zA-Z0-9_-]", "_", str(schema.get("title") or default))[:64]
+    return name or default
+
+
+# JSON Schema keywords that provider "strict" structured-output modes reject.
+_STRICT_UNSUPPORTED_KEYS = frozenset(
+    {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "format",
+        "minItems",
+        "maxItems",
+        "uniqueItems",
+        "default",
+        "title",
+        "minProperties",
+        "maxProperties",
+    }
+)
+
+
+def _is_open_map(node: Any) -> bool:
+    """True for an open-ended object such as ``Dict[str, float]``."""
+    return (
+        isinstance(node, dict)
+        and node.get("type") == "object"
+        and "properties" not in node
+        and isinstance(node.get("additionalProperties"), dict)
+    )
+
+
+def _is_strict_unrepresentable(node: Any) -> bool:
+    """True if a property cannot be expressed under strict mode (open maps)."""
+    if not isinstance(node, dict):
+        return False
+    if _is_open_map(node):
+        return True
+    branches = node.get("anyOf")
+    if isinstance(branches, list):
+        return any(_is_strict_unrepresentable(b) for b in branches)
+    return False
+
+
+def _strictify_json_schema(schema: Any) -> Any:
+    """Rewrite a JSON schema to satisfy OpenAI/Gemini strict structured output.
+
+    On every object it sets ``additionalProperties: false`` and marks all
+    properties ``required`` (optional fields stay nullable via their existing
+    ``anyOf``/null union), strips unsupported validation keywords, and drops
+    properties that are open maps (e.g. ``class_probabilities``), which strict
+    mode cannot represent. These are decode-time constraints only; the full
+    Pydantic model still validates the returned JSON, so dropped/optional
+    fields simply come back absent.
+    """
+    if isinstance(schema, list):
+        return [_strictify_json_schema(node) for node in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    out: Dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in _STRICT_UNSUPPORTED_KEYS:
+            continue
+        if key == "properties" and isinstance(value, dict):
+            out["properties"] = {
+                prop: _strictify_json_schema(sub)
+                for prop, sub in value.items()
+                if not _is_strict_unrepresentable(sub)
+            }
+        else:
+            out[key] = _strictify_json_schema(value)
+
+    if out.get("type") == "object" or "properties" in out:
+        props = out.setdefault("properties", {})
+        out["additionalProperties"] = False
+        out["required"] = list(props.keys())
+    return out
+
+
+def _openai_response_format(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Build an OpenAI/OpenRouter Structured Outputs ``response_format`` block."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": _schema_name(schema),
+            "schema": _strictify_json_schema(schema),
+            "strict": True,
+        },
+    }
+
+
+def _openai_create_with_fallback(create_fn: Any, create_kwargs: Dict[str, Any]) -> Any:
+    """Call an OpenAI-style ``create``, retrying unconstrained if the model or
+    route rejects ``response_format`` (best-effort structured output)."""
+    try:
+        return create_fn(**create_kwargs)
+    except Exception as exc:  # noqa: BLE001 - provider errors vary by SDK/route
+        if "response_format" in create_kwargs:
+            logger.warning(
+                "Structured output rejected by provider (%s); retrying unconstrained.",
+                exc,
+            )
+            create_kwargs.pop("response_format", None)
+            return create_fn(**create_kwargs)
+        raise
+
+
 # Provider-specific implementations
 
 
@@ -188,6 +342,7 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
         model: str,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
         # API payload structure; we'll filter kwargs into this.
@@ -226,6 +381,13 @@ class OllamaClient(UsageTrackingMixin, LLMClient):
                 payload[key] = value
             elif key in SUPPORTED_OPTIONS_KWARGS:
                 payload["options"][key] = value
+
+        # Structured output: Ollama accepts a full JSON schema as `format`,
+        # which llama.cpp compiles to a GBNF grammar for constrained decoding.
+        # A schema takes precedence over any `format="json"` passed via kwargs.
+        schema = _normalize_response_schema(response_schema)
+        if schema is not None:
+            payload["format"] = schema
 
         # POST and handle (possibly streaming) response
         with requests.post(
@@ -329,6 +491,7 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
         model: str,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
         """Call the OpenRouter Chat Completions endpoint."""
@@ -339,12 +502,18 @@ class OpenRouterClient(UsageTrackingMixin, LLMClient):
         )
         sig = inspect.signature(self._client.chat.completions.create)
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        response = self._client.chat.completions.create(
+        create_kwargs: Dict[str, Any] = dict(
             model=model,
             messages=processed,
             temperature=temperature,
             max_tokens=max_tokens,
             **supported_kwargs,
+        )
+        schema = _normalize_response_schema(response_schema)
+        if schema is not None:
+            create_kwargs["response_format"] = _openai_response_format(schema)
+        response = _openai_create_with_fallback(
+            self._client.chat.completions.create, create_kwargs
         )
         usage = getattr(response, "usage", None)
         self._record_usage(
@@ -415,17 +584,24 @@ class OpenAIClient(UsageTrackingMixin, LLMClient):
         model: str,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
         """Call the OpenAI Chat Completions endpoint."""
         sig = inspect.signature(self._client.chat.completions.create)
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        response = self._client.chat.completions.create(
+        create_kwargs: Dict[str, Any] = dict(
             model=model,
             messages=list(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             **supported_kwargs,
+        )
+        schema = _normalize_response_schema(response_schema)
+        if schema is not None:
+            create_kwargs["response_format"] = _openai_response_format(schema)
+        response = _openai_create_with_fallback(
+            self._client.chat.completions.create, create_kwargs
         )
         usage = getattr(response, "usage", None)
         self._record_usage(
@@ -520,6 +696,7 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
         model: str = "gemini-2.5-flash",
         temperature: float = 1.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
         """Call the Gemini API."""
@@ -544,27 +721,47 @@ class GeminiClient(UsageTrackingMixin, LLMClient):
         if self.prompt_cache and system_text:
             cache_name = self._get_or_create_cache(model, system_text)
 
+        config_kwargs: Dict[str, Any] = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
         if cache_name:
-            generation_config = genai_types.GenerateContentConfig(
-                cached_content=cache_name,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            )
+            config_kwargs["cached_content"] = cache_name
         else:
-            generation_config = genai_types.GenerateContentConfig(
-                system_instruction=system_text,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            )
+            config_kwargs["system_instruction"] = system_text
+
+        # Structured output: Gemini controlled generation via a standard JSON
+        # schema (google-genai's `response_json_schema`) lives inside the config
+        # object, not among generate_content's kwargs.
+        schema = _normalize_response_schema(response_schema)
+        if schema is not None:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_json_schema"] = _strictify_json_schema(schema)
 
         sig = inspect.signature(self._client.models.generate_content)
         supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        response = self._client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=generation_config,
-            **supported_kwargs,
-        )
+
+        def _generate(cfg: Dict[str, Any]) -> Any:
+            return self._client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=genai_types.GenerateContentConfig(**cfg),
+                **supported_kwargs,
+            )
+
+        try:
+            response = _generate(config_kwargs)
+        except Exception as exc:  # noqa: BLE001 - provider errors vary by SDK
+            if "response_json_schema" in config_kwargs:
+                logger.warning(
+                    "Structured output rejected by Gemini (%s); retrying unconstrained.",
+                    exc,
+                )
+                config_kwargs.pop("response_json_schema", None)
+                config_kwargs.pop("response_mime_type", None)
+                response = _generate(config_kwargs)
+            else:
+                raise
         usage = getattr(response, "usage_metadata", None)
         self._record_usage(
             prompt_tokens=getattr(usage, "prompt_token_count", None),
@@ -638,12 +835,18 @@ class AnthropicClient(UsageTrackingMixin, LLMClient):
         model: str,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
+        response_schema: ResponseSchema = None,
         **kwargs: Any,
     ) -> str:
         """Call the Anthropic Messages API.
 
         System messages are pulled out of `messages` into the top-level
         `system` parameter, as required by the Messages API.
+
+        Anthropic has no JSON-schema response format; its native mechanism for
+        structured output is forced tool use, so ``response_schema`` is exposed
+        as a single tool the model is compelled to call, and that tool's input
+        is returned as the JSON string.
         """
         system_text: Optional[str] = None
         converted: List[Dict[str, Any]] = []
@@ -687,7 +890,35 @@ class AnthropicClient(UsageTrackingMixin, LLMClient):
         create_kwargs.update(
             {k: v for k, v in kwargs.items() if k in sig.parameters}
         )
-        response = self._client.messages.create(**create_kwargs)
+
+        # Structured output via forced tool use. Anthropic tool `input_schema`
+        # accepts full JSON Schema (open maps, optional fields), so pass the raw
+        # schema rather than the strict-mode rewrite.
+        schema = _normalize_response_schema(response_schema)
+        if schema is not None:
+            tool_name = _schema_name(schema)
+            create_kwargs["tools"] = [
+                {
+                    "name": tool_name,
+                    "description": "Return the result as structured JSON.",
+                    "input_schema": schema,
+                }
+            ]
+            create_kwargs["tool_choice"] = {"type": "tool", "name": tool_name}
+
+        try:
+            response = self._client.messages.create(**create_kwargs)
+        except Exception as exc:  # noqa: BLE001 - provider errors vary by SDK
+            if "tools" in create_kwargs:
+                logger.warning(
+                    "Structured output rejected by Anthropic (%s); retrying unconstrained.",
+                    exc,
+                )
+                create_kwargs.pop("tools", None)
+                create_kwargs.pop("tool_choice", None)
+                response = self._client.messages.create(**create_kwargs)
+            else:
+                raise
 
         usage = getattr(response, "usage", None)
         self._record_usage(
@@ -695,6 +926,13 @@ class AnthropicClient(UsageTrackingMixin, LLMClient):
             completion_tokens=getattr(usage, "output_tokens", None),
             cached_tokens=getattr(usage, "cache_read_input_tokens", None),
         )
+        tool_inputs = [
+            block.input
+            for block in response.content
+            if getattr(block, "type", None) == "tool_use"
+        ]
+        if tool_inputs:
+            return json.dumps(tool_inputs[0])
         return "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         )
