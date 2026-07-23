@@ -1,6 +1,8 @@
 services:
   qdrant:
-    image: qdrant/qdrant:v1.13.5
+    # Keep this minor version (1.13.*) in lockstep with the qdrant-client pin in
+    # pyproject.toml; QdrantDB hard-errors on a client/server minor mismatch.
+    image: qdrant/qdrant:v${QDRANT_VERSION:-1.13.5}
     container_name: episcope-qdrant
     ports:
       - "${QDRANT_BIND_ADDRESS:-127.0.0.1}:6333:6333"

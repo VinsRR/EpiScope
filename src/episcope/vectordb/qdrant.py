@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+import os
+import re
+import urllib.error
+import urllib.request
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .base import AbstractVectorDB
 
@@ -49,6 +55,91 @@ def _is_missing_collection_error(exc: Exception) -> bool:
     return False
 
 
+# Set this env var to a truthy value to bypass the client/server version guard
+# (advanced use only — running mismatched versions can fail unpredictably).
+_SKIP_VERSION_CHECK_ENV = "EPISCOPE_QDRANT_SKIP_VERSION_CHECK"
+
+
+class QdrantVersionMismatchError(RuntimeError):
+    """Raised when the qdrant-client minor differs from the Qdrant server minor.
+
+    Qdrant only guarantees client/server compatibility within the same minor
+    version, so a mismatch is treated as a hard error rather than a silent
+    source of intermittent failures.
+    """
+
+    def __init__(self, client_version: str, server_version: str) -> None:
+        server_mm = _parse_major_minor(server_version)
+        pin = f"{server_mm[0]}.{server_mm[1]}.0" if server_mm else server_version
+        super().__init__(
+            f"qdrant-client {client_version} is incompatible with Qdrant server "
+            f"{server_version}: the client and server must share the same minor "
+            f"version (X.Y.*). Install a matching client, e.g.:\n"
+            f"    pip install 'qdrant-client~={pin}'\n"
+            f"or align the server image (QDRANT_VERSION in docker-compose.yml). "
+            f"Set {_SKIP_VERSION_CHECK_ENV}=1 to bypass this check."
+        )
+
+
+def _parse_major_minor(version: Any) -> Optional[Tuple[int, int]]:
+    """Extract ``(major, minor)`` from a version string like ``v1.13.5``."""
+    match = re.match(r"v?(\d+)\.(\d+)", str(version or ""))
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _fetch_server_version(url: str, api_key: Optional[str], timeout: int) -> Optional[str]:
+    """Return the Qdrant server version from its REST root, or ``None``.
+
+    Uses the stdlib so the check adds no dependency to the ``server`` extra.
+    """
+    root = url.rstrip("/") + "/"
+    headers = {"api-key": api_key} if api_key else {}
+    request = urllib.request.Request(root, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - user-configured URL
+        payload = json.loads(response.read().decode("utf-8"))
+    version = payload.get("version")
+    return str(version) if version else None
+
+
+def _check_qdrant_version_compatibility(
+    url: str, api_key: Optional[str], timeout: int
+) -> None:
+    """Hard-error on a client/server minor-version mismatch.
+
+    Silently skips when the check is disabled, the versions cannot be
+    determined, or the server is unreachable (a real connectivity problem
+    surfaces on the first query with a clearer message).
+    """
+    if os.environ.get(_SKIP_VERSION_CHECK_ENV, "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    try:
+        client_version = importlib.metadata.version("qdrant-client")
+    except importlib.metadata.PackageNotFoundError:
+        return
+
+    try:
+        server_version = _fetch_server_version(url, api_key, timeout)
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "Could not read Qdrant server version at %s for the compatibility "
+            "check (%s); skipping. A real connection problem will surface on the "
+            "first query.",
+            url,
+            exc,
+        )
+        return
+
+    client_mm = _parse_major_minor(client_version)
+    server_mm = _parse_major_minor(server_version)
+    if client_mm is None or server_mm is None or client_mm == server_mm:
+        return
+
+    raise QdrantVersionMismatchError(client_version, server_version or "unknown")
+
+
 class QdrantDB(AbstractVectorDB):
     def __init__(
         self,
@@ -83,6 +174,7 @@ class QdrantDB(AbstractVectorDB):
         self.client = QdrantClient(
             url=url, api_key=api_key, timeout=timeout, prefer_grpc=prefer_grpc
         )
+        _check_qdrant_version_compatibility(url, api_key, timeout)
 
         self.use_dense = use_dense
         self.use_sparse = use_sparse
@@ -319,17 +411,17 @@ class QdrantDB(AbstractVectorDB):
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection,
-            query_vector=models.NamedVector(
-                name=self.dense_vector_name, vector=query_vector
-            ),
+            query=query_vector,
+            using=self.dense_vector_name,
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
         )
+        points = getattr(results, "points", results)
         return [
-            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
         ]
 
     def search_sparse(
@@ -346,21 +438,20 @@ class QdrantDB(AbstractVectorDB):
 
         query_filter = self._build_filter(namespace=namespace, filter=filter)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection,
-            query_vector=models.NamedSparseVector(
-                name=self.sparse_vector_name,
-                vector=models.SparseVector(
-                    indices=query_sparse["indices"],
-                    values=query_sparse["values"],
-                ),
+            query=models.SparseVector(
+                indices=query_sparse["indices"],
+                values=query_sparse["values"],
             ),
+            using=self.sparse_vector_name,
             limit=top_k,
             with_payload=True,
             query_filter=query_filter,
         )
+        points = getattr(results, "points", results)
         return [
-            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in results
+            {**(hit.payload or {}), "id": hit.id, "score": hit.score} for hit in points
         ]
 
     def search_hybrid(
