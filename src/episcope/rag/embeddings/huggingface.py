@@ -35,6 +35,10 @@ SUPPORTED_DENSE_MODELS = {
     "BAAI/bge-small-en-v1.5",
     "BAAI/bge-base-en-v1.5",
     "BAAI/bge-large-en-v1.5",
+    # bge-m3: 1024-d, 8192-token window, and (unlike bge-*-v1.5 and e5-*)
+    # needs no query instruction prefix, which suits the symmetric
+    # embed_query/embed_text path used here.
+    "BAAI/bge-m3",
     "intfloat/e5-small-v2",
     "intfloat/e5-base-v2",
     "intfloat/e5-large-v2",
