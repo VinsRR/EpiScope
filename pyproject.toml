@@ -11,8 +11,6 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE.txt"]
 authors = [
     { name = "Vincenzo Perri", email = "vincenzo.perri@isi.it" },
-    { name = "Ciro Cattuto" },
-    { name = "Daniela Paolotti" },
 ]
 maintainers = [
     { name = "Vincenzo Perri", email = "vincenzo.perri@isi.it" },

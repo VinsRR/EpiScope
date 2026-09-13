@@ -328,11 +328,11 @@ such as `v0.1.0`; the release workflow rejects mismatched tags before upload.
 
 ## Citation
 
-The software and accompanying manuscript were developed by Vincenzo Perri,
-Ciro Cattuto, and Daniela Paolotti at ISI Foundation. Citation metadata is in
+EpiLens was developed by Vincenzo Perri at ISI Foundation. Software citation
+metadata is in
 [`CITATION.cff`](https://github.com/VinsRR/EpiScope/blob/main/CITATION.cff).
-The manuscript is still a draft, so a journal reference and DOI should be added
-there when available.
+The accompanying manuscript is still a draft, so its final journal reference
+and DOI can be added when available.
 
 ## License
 

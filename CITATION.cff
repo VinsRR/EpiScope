@@ -15,12 +15,6 @@ authors:
     given-names: Vincenzo
     email: vincenzo.perri@isi.it
     affiliation: ISI Foundation
-  - family-names: Cattuto
-    given-names: Ciro
-    affiliation: ISI Foundation
-  - family-names: Paolotti
-    given-names: Daniela
-    affiliation: ISI Foundation
 keywords:
   - digital epidemiology
   - information extraction
