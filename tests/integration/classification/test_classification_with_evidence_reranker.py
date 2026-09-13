@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from episcope.rag.generation.base import Generator
-from episcope.rag.provenance import Provenance
-from episcope.schemas import SearchResult
-from episcope.workflows.classification.config import DataAccessibilityClassifierConfig
-from episcope.workflows.classification.evidence_reranking import GlobalCrossEncoderReranker
-from episcope.workflows.classification.workflow import PaperClassifier
+from epilens.rag.generation.base import Generator
+from epilens.rag.provenance import Provenance
+from epilens.schemas import SearchResult
+from epilens.workflows.classification.config import DataAccessibilityClassifierConfig
+from epilens.workflows.classification.evidence_reranking import GlobalCrossEncoderReranker
+from epilens.workflows.classification.workflow import PaperClassifier
 
 
 def _result(*, id: str, text: str, score: float) -> SearchResult:

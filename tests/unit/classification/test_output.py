@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from episcope.workflows.classification.output import (
+from epilens.workflows.classification.output import (
     ClassificationTrainingRecord,
     CompletionSample,
 )
-from episcope.workflows.classification.schemas import ClassificationResult, DataAccessibility
+from epilens.workflows.classification.schemas import ClassificationResult, DataAccessibility
 
 
 def _result() -> ClassificationResult:

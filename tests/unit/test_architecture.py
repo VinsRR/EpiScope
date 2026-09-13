@@ -3,8 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "episcope"
-ADAPTER_MODULES = {"api", "episcope", "ui"}
+PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "epilens"
+ADAPTER_MODULES = {"api", "epilens", "ui"}
 REPO_ONLY_MODULES = {"classification", "eval", "scripts", "notebooks"}
 
 
@@ -50,13 +50,13 @@ def test_reusable_package_layers_do_not_import_adapters() -> None:
         if source_part in ADAPTER_MODULES:
             continue
         if path.name == "__main__.py":
-            # `python -m episcope` entry-point shim; part of the CLI adapter.
+            # `python -m epilens` entry-point shim; part of the CLI adapter.
             continue
         for imported in _absolute_imports(path):
             parts = imported.split(".")
             if (
                 len(parts) >= 2
-                and parts[0] == "episcope"
+                and parts[0] == "epilens"
                 and parts[1] in ADAPTER_MODULES
             ):
                 violations.append(
@@ -71,7 +71,7 @@ def test_schemas_stay_independent_of_runtime_layers() -> None:
         "api",
         "clients",
         "db",
-        "episcope",
+        "epilens",
         "rag",
         "services",
         "ui",
@@ -82,7 +82,7 @@ def test_schemas_stay_independent_of_runtime_layers() -> None:
     for path in (PACKAGE_ROOT / "schemas").rglob("*.py"):
         for imported in _absolute_imports(path):
             parts = imported.split(".")
-            if len(parts) >= 2 and parts[0] == "episcope" and parts[1] in forbidden:
+            if len(parts) >= 2 and parts[0] == "epilens" and parts[1] in forbidden:
                 violations.append(
                     f"{path.relative_to(PACKAGE_ROOT)} imports {imported}"
                 )
@@ -94,8 +94,8 @@ def test_rag_layer_does_not_import_workflows() -> None:
     violations = []
     for path in (PACKAGE_ROOT / "rag").rglob("*.py"):
         for imported in _absolute_imports(path):
-            if imported == "episcope.workflows" or imported.startswith(
-                "episcope.workflows."
+            if imported == "epilens.workflows" or imported.startswith(
+                "epilens.workflows."
             ):
                 violations.append(
                     f"{path.relative_to(PACKAGE_ROOT)} imports {imported}"

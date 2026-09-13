@@ -6,7 +6,7 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from episcope.api import app  # noqa: E402
+from epilens.api import app  # noqa: E402
 
 
 def test_health_does_not_leak_mongo_uri(monkeypatch) -> None:
@@ -39,7 +39,7 @@ def test_health_reports_qdrant_url_null_when_unconfigured(monkeypatch) -> None:
 def test_backend_config_round_trips_local_fallback_paths() -> None:
     from pathlib import Path
 
-    from episcope.api import BackendConfig
+    from epilens.api import BackendConfig
 
     config = BackendConfig(index_dir="/tmp/x-index", metadata_backup="/tmp/y-meta.json")
     runtime_config = config.to_runtime_config()
@@ -53,7 +53,7 @@ def test_explore_endpoint_error_is_humanized(monkeypatch, tmp_path) -> None:
     # raises a ValueError (400) that goes through humanize_error, same as
     # every other error path in this endpoint.
     monkeypatch.delenv("QDRANT_URL", raising=False)
-    monkeypatch.setenv("EPISCOPE_LOCAL_INDEX_DIR", str(tmp_path / "empty-index"))
+    monkeypatch.setenv("EPILENS_LOCAL_INDEX_DIR", str(tmp_path / "empty-index"))
 
     response = TestClient(app).post(
         "/explore", json={"query": "anything", "top_k": 1}

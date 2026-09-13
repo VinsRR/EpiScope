@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from episcope.rag.retrieval.components import CandidateRetriever, QueryTransformer
-from episcope.rag.retrieval.retriever import Retriever
-from episcope.schemas import SearchResult
-from episcope.vectordb.base import AbstractVectorDB
+from epilens.rag.retrieval.components import CandidateRetriever, QueryTransformer
+from epilens.rag.retrieval.retriever import Retriever
+from epilens.schemas import SearchResult
+from epilens.vectordb.base import AbstractVectorDB
 
 
 class _VectorDB(AbstractVectorDB):

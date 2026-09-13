@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from episcope.rag.indexing.chunking import NoChunker, RecursiveChunker
+from epilens.rag.indexing.chunking import NoChunker, RecursiveChunker
 
 
 def test_recursive_chunker_uses_inner_chunker() -> None:

@@ -9,9 +9,9 @@ import pytest
 from filelock import FileLock, Timeout
 from typer.testing import CliRunner
 
-from episcope.episcope import app
-from episcope.schemas import PaperMetadata, StructuredSection
-from episcope.services.studio import (
+from epilens.cli import app
+from epilens.schemas import PaperMetadata, StructuredSection
+from epilens.services.studio import (
     CorpusService,
     JobManager,
     StudioRepository,
@@ -19,7 +19,7 @@ from episcope.services.studio import (
     TaskService,
     WorkspaceService,
 )
-from episcope.workflows.registry import classifier_catalog
+from epilens.workflows.registry import classifier_catalog
 
 
 class _FakeEmbedder:
@@ -125,11 +125,11 @@ def test_local_indexing_persists_paper_and_rolls_back_on_failure(
         paper_id="paper-1",
     )
     monkeypatch.setattr(
-        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        "epilens.services.studio.DocumentLoaderFactory.get_loader",
         lambda *_args, **_kwargs: _FakeLoader(),
     )
     monkeypatch.setattr(
-        "episcope.services.studio.EmbedderFactory.get_embedder",
+        "epilens.services.studio.EmbedderFactory.get_embedder",
         lambda *_args, **_kwargs: _FakeEmbedder(),
     )
     result = corpus.index_documents(
@@ -151,7 +151,7 @@ def test_local_indexing_persists_paper_and_rolls_back_on_failure(
     before = index_metadata.read_bytes()
 
     monkeypatch.setattr(
-        "episcope.services.studio.EmbedderFactory.get_embedder",
+        "epilens.services.studio.EmbedderFactory.get_embedder",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("embedder failed")),
     )
     with pytest.raises(RuntimeError, match="embedder failed"):
@@ -208,11 +208,11 @@ def test_cli_task_listing_does_not_mutate_global_registry(
 
 def _install_fake_indexing(monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        "epilens.services.studio.DocumentLoaderFactory.get_loader",
         lambda *_args, **_kwargs: _FakeLoader(),
     )
     monkeypatch.setattr(
-        "episcope.services.studio.EmbedderFactory.get_embedder",
+        "epilens.services.studio.EmbedderFactory.get_embedder",
         lambda *_args, **_kwargs: _FakeEmbedder(),
     )
 
@@ -220,7 +220,7 @@ def _install_fake_indexing(monkeypatch) -> None:
 def test_workspace_lock_contention_is_reported(workspace_service) -> None:
     workspace_service.create("review")
     workspace = workspace_service.get("review")
-    held = FileLock(str(workspace.root / ".episcope.lock"))
+    held = FileLock(str(workspace.root / ".epilens.lock"))
     with held:
         with pytest.raises(Timeout):
             CorpusService(workspace, lock_timeout=0.01).list_papers()
@@ -242,11 +242,11 @@ def test_indexing_keeps_successes_when_one_document_fails(
             return super().load(path)
 
     monkeypatch.setattr(
-        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        "epilens.services.studio.DocumentLoaderFactory.get_loader",
         lambda *_args, **_kwargs: PartialLoader(),
     )
     monkeypatch.setattr(
-        "episcope.services.studio.EmbedderFactory.get_embedder",
+        "epilens.services.studio.EmbedderFactory.get_embedder",
         lambda *_args, **_kwargs: _FakeEmbedder(),
     )
     result = corpus.index_documents(
@@ -282,7 +282,7 @@ def test_indexing_cancellation_takes_effect_between_documents(
             return super().load(path)
 
     monkeypatch.setattr(
-        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        "epilens.services.studio.DocumentLoaderFactory.get_loader",
         lambda *_args, **_kwargs: CountingLoader(),
     )
     result = corpus.index_documents(
@@ -324,13 +324,13 @@ def test_commit_failure_restores_previous_searchable_snapshot(
         destination_path = Path(destination)
         if (
             source_path.name == "metadata.json"
-            and source_path.parent.name.startswith(".episcope-stage-")
+            and source_path.parent.name.startswith(".epilens-stage-")
             and destination_path == live_metadata
         ):
             raise OSError("simulated commit failure")
         return real_replace(source, destination)
 
-    monkeypatch.setattr("episcope.services.studio.os.replace", fail_metadata_commit)
+    monkeypatch.setattr("epilens.services.studio.os.replace", fail_metadata_commit)
     with pytest.raises(OSError, match="simulated commit failure"):
         corpus.index_documents(
             [second["id"]],
@@ -369,7 +369,7 @@ def test_job_manager_persists_partial_batch_results(
     workspace = workspace_service.get("review")
     manager = JobManager(workspace_service)
     monkeypatch.setattr(
-        "episcope.services.studio.CorpusService.list_papers",
+        "epilens.services.studio.CorpusService.list_papers",
         lambda _self: [{"paper_id": "good"}, {"paper_id": "bad"}],
     )
     monkeypatch.setattr(

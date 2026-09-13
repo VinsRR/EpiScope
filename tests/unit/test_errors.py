@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from episcope.services.errors import humanize_error
-from episcope.workflows import registry
-from episcope.workflows.registry import humanize_task_spec_error
+from epilens.services.errors import humanize_error
+from epilens.workflows import registry
+from epilens.workflows.registry import humanize_task_spec_error
 
 
 def _validation_error(data: dict) -> ValidationError:
@@ -85,8 +85,8 @@ def test_humanize_error_delegates_to_task_spec_for_validation_errors() -> None:
         ),
         (
             "Could not infer an embedding provider from model name 'weird'. "
-            "Pass provider=... or set EPISCOPE_EMBED_PROVIDER.",
-            "EpiScope doesn't recognize this embedding model name.",
+            "Pass provider=... or set EPILENS_EMBED_PROVIDER.",
+            "EpiLens doesn't recognize this embedding model name.",
         ),
         (
             "Could not connect to Qdrant at http://localhost:6333 while "
@@ -104,7 +104,7 @@ def test_humanize_error_delegates_to_task_spec_for_validation_errors() -> None:
         ),
         (
             "VectorDB does not have a dense embedding model configured.",
-            "This corpus hasn't been indexed yet. Run `episcope index ...` first.",
+            "This corpus hasn't been indexed yet. Run `epilens index ...` first.",
         ),
     ],
 )

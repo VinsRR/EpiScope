@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from episcope.rag.embeddings.gemini import GeminiEmbedder
-from episcope.rag.retrieval.candidates import SemanticCandidateRetriever
+from epilens.rag.embeddings.gemini import GeminiEmbedder
+from epilens.rag.retrieval.candidates import SemanticCandidateRetriever
 
 
 class _FakeGeminiClient:

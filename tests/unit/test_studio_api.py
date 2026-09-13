@@ -10,13 +10,13 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-import episcope.api as api_module  # noqa: E402
-from episcope.services.studio import (  # noqa: E402
+import epilens.api as api_module  # noqa: E402
+from epilens.services.studio import (  # noqa: E402
     StudioRepository,
     StudioSettings,
     WorkspaceService,
 )
-from episcope.schemas import PaperMetadata, StructuredSection  # noqa: E402
+from epilens.schemas import PaperMetadata, StructuredSection  # noqa: E402
 
 
 class _AcceptanceLoader:
@@ -155,11 +155,11 @@ def test_complete_local_api_acceptance_survives_restart(tmp_path, monkeypatch) -
     monkeypatch.setattr(api_module, "_studio_workspaces", service)
     monkeypatch.setattr(api_module, "_studio_jobs", None)
     monkeypatch.setattr(
-        "episcope.services.studio.DocumentLoaderFactory.get_loader",
+        "epilens.services.studio.DocumentLoaderFactory.get_loader",
         lambda *_args, **_kwargs: _AcceptanceLoader(),
     )
     monkeypatch.setattr(
-        "episcope.services.studio.EmbedderFactory.get_embedder",
+        "epilens.services.studio.EmbedderFactory.get_embedder",
         lambda *_args, **_kwargs: _AcceptanceEmbedder(),
     )
 
@@ -204,13 +204,13 @@ def test_complete_local_api_acceptance_survives_restart(tmp_path, monkeypatch) -
                 raise RuntimeError("simulated per-paper LLM failure")
             return {"classification": ["yes"], "evidence": ["evidence 1"]}
 
-        monkeypatch.setattr("episcope.services.studio.EpiScopeRuntime.classify", classify)
+        monkeypatch.setattr("epilens.services.studio.EpiLensRuntime.classify", classify)
         monkeypatch.setattr(
-            "episcope.services.studio.EpiScopeRuntime.precision_mine",
+            "epilens.services.studio.EpiLensRuntime.precision_mine",
             lambda _self, paper_id, **_kwargs: {"items": [{"name": paper_id}]},
         )
         monkeypatch.setattr(
-            "episcope.services.studio.EpiScopeRuntime.explore",
+            "epilens.services.studio.EpiLensRuntime.explore",
             lambda _self, query, **_kwargs: {
                 "query": query,
                 "retrieval_count": 1,

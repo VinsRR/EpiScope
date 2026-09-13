@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Optional
 import pytest
 from pydantic import BaseModel
 
-import episcope.clients as clients_mod
-from episcope.clients import (
+import epilens.clients as clients_mod
+from epilens.clients import (
     AnthropicClient,
     GeminiClient,
     OllamaClient,
@@ -28,7 +28,7 @@ from episcope.clients import (
     _schema_name,
     _strictify_json_schema,
 )
-from episcope.rag.generation.llm_generator import structured_output_kwargs
+from epilens.rag.generation.llm_generator import structured_output_kwargs
 
 
 class _Weather(BaseModel):
@@ -354,7 +354,7 @@ class _RecordingClient:
 
 
 def test_generator_forwards_response_schema_without_leaking_to_builder() -> None:
-    from episcope.rag.generation.llm_generator import LLMGenerator
+    from epilens.rag.generation.llm_generator import LLMGenerator
 
     client = _RecordingClient()
     gen = LLMGenerator(client=client, model="m")

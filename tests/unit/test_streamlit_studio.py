@@ -7,11 +7,11 @@ import pytest
 streamlit = pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from episcope.ui.api_client import StudioApiClient  # noqa: E402
+from epilens.ui.api_client import StudioApiClient  # noqa: E402
 
 
 APP_PATH = (
-    Path(__file__).resolve().parents[2] / "src" / "episcope" / "ui" / "streamlit_app.py"
+    Path(__file__).resolve().parents[2] / "src" / "epilens" / "ui" / "streamlit_app.py"
 )
 
 
@@ -283,7 +283,7 @@ def test_studio_home_renders_with_no_workspaces(monkeypatch) -> None:
     )
     app = AppTest.from_file(str(APP_PATH)).run(timeout=15)
     assert not app.exception
-    assert any("EpiScope Studio" in title.value for title in app.title)
+    assert any("EpiLens Studio" in title.value for title in app.title)
 
 
 def test_home_opens_an_existing_populated_workspace(studio_client, monkeypatch) -> None:
@@ -325,7 +325,7 @@ def test_home_opens_an_existing_populated_workspace(studio_client, monkeypatch) 
 
 
 def test_sidebar_switches_workspace(studio_client, monkeypatch) -> None:
-    monkeypatch.delenv("EPISCOPE_STUDIO_TEST_PAGE", raising=False)
+    monkeypatch.delenv("EPILENS_STUDIO_TEST_PAGE", raising=False)
     monkeypatch.setattr(
         StudioApiClient,
         "workspaces",
@@ -357,7 +357,7 @@ def test_sidebar_switches_workspace(studio_client, monkeypatch) -> None:
 
 
 def page_app(monkeypatch, page: str) -> AppTest:
-    monkeypatch.setenv("EPISCOPE_STUDIO_TEST_PAGE", page)
+    monkeypatch.setenv("EPILENS_STUDIO_TEST_PAGE", page)
     app = AppTest.from_file(str(APP_PATH))
     app.session_state["workspace_id"] = "review"
     return app.run(timeout=15)
@@ -511,7 +511,7 @@ def test_library_upload_index_and_job_controls(studio_client, monkeypatch) -> No
 
 
 def test_library_shows_live_index_progress(studio_client, monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_STUDIO_TEST_PAGE", "library")
+    monkeypatch.setenv("EPILENS_STUDIO_TEST_PAGE", "library")
     app = AppTest.from_file(str(APP_PATH))
     app.session_state["workspace_id"] = "review"
     app.session_state["last_index_job_id:review"] = "index-job"

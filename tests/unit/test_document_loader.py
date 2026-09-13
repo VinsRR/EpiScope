@@ -4,8 +4,18 @@ import sys
 import types
 from pathlib import Path
 
-from episcope.rag.ingestion.document_loader import GrobidDocumentLoader
-from episcope.rag.ingestion.document_loader import UnstructuredDocumentLoader
+from epilens.rag.ingestion.document_loader import (
+    DocumentLoaderFactory,
+    GrobidDocumentLoader,
+    PdfMinerDocumentLoader,
+    UnstructuredDocumentLoader,
+)
+
+
+def test_pdfminer_loader_is_an_explicit_lightweight_backend() -> None:
+    assert isinstance(
+        DocumentLoaderFactory.get_loader("pdfminer"), PdfMinerDocumentLoader
+    )
 
 
 def test_grobid_loader_uses_env_url(monkeypatch) -> None:
@@ -18,7 +28,7 @@ def test_grobid_loader_uses_env_url(monkeypatch) -> None:
     monkeypatch.setenv("GROBID_URL", "http://grobid:8070")
     monkeypatch.setitem(
         sys.modules,
-        "episcope.rag.ingestion.local_grobid_client",
+        "epilens.rag.ingestion.local_grobid_client",
         types.SimpleNamespace(GrobidClient=FakeClient),
     )
 
@@ -38,7 +48,7 @@ def test_grobid_loader_explicit_url_overrides_env(monkeypatch) -> None:
     monkeypatch.setenv("GROBID_URL", "http://grobid:8070")
     monkeypatch.setitem(
         sys.modules,
-        "episcope.rag.ingestion.local_grobid_client",
+        "epilens.rag.ingestion.local_grobid_client",
         types.SimpleNamespace(GrobidClient=FakeClient),
     )
 

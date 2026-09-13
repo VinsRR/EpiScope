@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from episcope.rag.generation.base import Generator
-from episcope.rag.provenance import Provenance
-from episcope.workflows.classification.config import DataAccessibilityClassifierConfig
-from episcope.workflows.classification.evidence_reranking import (
+from epilens.rag.generation.base import Generator
+from epilens.rag.provenance import Provenance
+from epilens.workflows.classification.config import DataAccessibilityClassifierConfig
+from epilens.workflows.classification.evidence_reranking import (
     GlobalCrossEncoderReranker,
     WithinLabelCrossEncoderReranker,
 )
-from episcope.workflows.classification.workflow import PaperClassifier
+from epilens.workflows.classification.workflow import PaperClassifier
 
 
 class _StubRetriever:

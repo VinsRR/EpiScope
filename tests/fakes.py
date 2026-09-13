@@ -3,9 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Dict, Iterable, List, Mapping, Sequence
 
-from episcope.rag.generation.base import Generator
-from episcope.rag.provenance import Provenance
-from episcope.schemas import SearchResult
+from epilens.rag.generation.base import Generator
+from epilens.rag.provenance import Provenance
+from epilens.schemas import SearchResult
 
 
 def make_search_result(

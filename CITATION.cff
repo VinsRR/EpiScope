@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use EpiLens in research, please cite the software and the accompanying paper when its final reference becomes available."
+title: "EpiLens"
+type: software
+version: 0.1.0
+license: AGPL-3.0-only
+repository-code: "https://github.com/VinsRR/EpiScope"
+url: "https://github.com/VinsRR/EpiScope"
+abstract: >-
+  A local-first Python toolkit for evidence-grounded retrieval, classification,
+  and structured information extraction over scientific literature, with a
+  focus on epidemiology and public health.
+authors:
+  - family-names: Perri
+    given-names: Vincenzo
+    email: vincenzo.perri@isi.it
+    affiliation: ISI Foundation
+  - family-names: Cattuto
+    given-names: Ciro
+    affiliation: ISI Foundation
+  - family-names: Paolotti
+    given-names: Daniela
+    affiliation: ISI Foundation
+keywords:
+  - digital epidemiology
+  - information extraction
+  - large language models
+  - retrieval-augmented generation
+  - scientific literature

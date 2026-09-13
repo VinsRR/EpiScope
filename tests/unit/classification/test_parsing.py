@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from episcope.workflows.classification.config import DataAccessibilityClassifierConfig
-from episcope.workflows.classification.parsing import (
+from epilens.workflows.classification.config import DataAccessibilityClassifierConfig
+from epilens.workflows.classification.parsing import (
     ClassificationParseError,
     ClassificationResponseParser,
 )
-from episcope.workflows.classification.schemas import DataAccessibility
+from epilens.workflows.classification.schemas import DataAccessibility
 
 
 def test_parser_accepts_fenced_json_and_maps_codes() -> None:

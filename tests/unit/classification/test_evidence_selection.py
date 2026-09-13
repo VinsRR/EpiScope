@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from episcope.schemas import SearchResult
-from episcope.workflows.classification.config import BaseClassifierConfig
-from episcope.workflows.classification.evidence_selection import ClassificationEvidenceSelector
+from epilens.schemas import SearchResult
+from epilens.workflows.classification.config import BaseClassifierConfig
+from epilens.workflows.classification.evidence_selection import ClassificationEvidenceSelector
 
 
 def _result(*, id: str, text: str, score: float) -> SearchResult:

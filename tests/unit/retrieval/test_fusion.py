@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from episcope.rag.retrieval.fusion import RRFFusion
+from epilens.rag.retrieval.fusion import RRFFusion
 
 
 def test_rrf_fusion_combines_rank_lists_and_adds_rrf_score() -> None:

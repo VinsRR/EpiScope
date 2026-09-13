@@ -3,7 +3,7 @@ services:
     # Keep this minor version (1.13.*) in lockstep with the qdrant-client pin in
     # pyproject.toml; QdrantDB hard-errors on a client/server minor mismatch.
     image: qdrant/qdrant:v${QDRANT_VERSION:-1.13.5}
-    container_name: episcope-qdrant
+    container_name: epilens-qdrant
     ports:
       - "${QDRANT_BIND_ADDRESS:-127.0.0.1}:6333:6333"
       - "${QDRANT_BIND_ADDRESS:-127.0.0.1}:6334:6334"
@@ -12,7 +12,7 @@ services:
 
   grobid:
     image: grobid/grobid:0.9.0-crf
-    container_name: episcope-grobid
+    container_name: epilens-grobid
     init: true
     ulimits:
       core: 0
@@ -25,7 +25,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: episcope-api
+    container_name: epilens-api
     env_file:
       - .env
     depends_on:
@@ -34,11 +34,11 @@ services:
     environment:
       QDRANT_URL: http://qdrant:6333
       GROBID_URL: http://grobid:8070
-      EPISCOPE_API_HOST: 0.0.0.0
-      EPISCOPE_API_PORT: 8000
-      EPISCOPE_WORKSPACES_ROOT: /data/workspaces
+      EPILENS_API_HOST: 0.0.0.0
+      EPILENS_API_PORT: 8000
+      EPILENS_WORKSPACES_ROOT: /data/workspaces
     ports:
-      - "${EPISCOPE_API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+      - "${EPILENS_API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     volumes:
       - workspace_data:/data/workspaces
     restart: unless-stopped
@@ -52,26 +52,26 @@ services:
     build:
       context: .
       dockerfile: ui/Dockerfile
-    container_name: episcope-ui
+    container_name: epilens-ui
     env_file:
       - .env
     depends_on:
       api:
         condition: service_healthy
     environment:
-      EPISCOPE_API_BASE_URL: http://api:8000
+      EPILENS_API_BASE_URL: http://api:8000
     ports:
-      - "${EPISCOPE_UI_BIND_ADDRESS:-127.0.0.1}:8501:8501"
+      - "${EPILENS_UI_BIND_ADDRESS:-127.0.0.1}:8501:8501"
     restart: unless-stopped
 
   proxy:
     image: caddy:2
-    container_name: episcope-proxy
+    container_name: epilens-proxy
     depends_on:
       - api
       - ui
     ports:
-      - "${EPISCOPE_PROXY_BIND_ADDRESS:-127.0.0.1}:${EPISCOPE_PROXY_PORT:-8080}:8080"
+      - "${EPILENS_PROXY_BIND_ADDRESS:-127.0.0.1}:${EPILENS_PROXY_PORT:-8080}:8080"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -83,7 +83,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: episcope-cloudflared
+    container_name: epilens-cloudflared
     depends_on:
       - proxy
     command: tunnel --no-autoupdate --url http://proxy:8080

@@ -1,55 +1,101 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "epi-scope"
+name = "epilens"
 version = "0.1.0"
+description = "Local-first, evidence-grounded RAG workflows for scientific literature analysis"
 readme = "README.md"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE.txt"]
+authors = [
+    { name = "Vincenzo Perri", email = "vincenzo.perri@isi.it" },
+    { name = "Ciro Cattuto" },
+    { name = "Daniela Paolotti" },
+]
+maintainers = [
+    { name = "Vincenzo Perri", email = "vincenzo.perri@isi.it" },
+]
 requires-python = ">=3.10"
+keywords = [
+    "epidemiology",
+    "information extraction",
+    "large language models",
+    "literature review",
+    "retrieval-augmented generation",
+    "scientific literature",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
 dependencies = [
-    "pydantic",
-    "typer",
-    "requests",
-    "numpy",
-    "python-dotenv",
-    "fastembed",
-    "tqdm",
-    "unstructured",
-    "pdfminer.six",
-    "openai",
-    "google-genai",
-    "anthropic",
-    "rapidfuzz",
-    "lxml",
-    "filelock",
+    "pydantic>=2.7,<3",
+    "typer>=0.12,<1",
+    "requests>=2.31,<3",
+    "numpy>=1.24,<3",
+    "python-dotenv>=1.0,<2",
+    "fastembed>=0.3,<1",
+    "pdfminer.six>=20221105",
+    "filelock>=3.13,<4",
 ]
 
 [project.optional-dependencies]
+# Install exactly one of these for a hosted model provider. Ollama support uses
+# the lightweight HTTP client in the base install and needs no SDK extra.
+gemini = [
+    "google-genai>=1.0,<2",
+]
+openai = [
+    "openai>=1.40,<3",
+]
+openrouter = [
+    "openai>=1.40,<3",
+]
+anthropic = [
+    "anthropic>=0.40,<1",
+]
+providers = [
+    "epilens[gemini,openai,anthropic]",
+]
 ui = [
-    "streamlit>=1.36",
-    "pandas",
-    "requests",
-    "python-dotenv",
+    "streamlit>=1.36,<2",
+    "pandas>=2.0,<3",
 ]
 server = [
-    "fastapi",
-    "uvicorn",
-    "python-multipart",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "python-multipart>=0.0.9,<1",
+]
+qdrant = [
     # Pin to the Qdrant server minor (see QDRANT_VERSION in docker-compose.yml).
     # Qdrant only guarantees client/server compatibility within the same minor,
     # and QdrantDB hard-errors on a mismatch — bump both in lockstep.
     "qdrant-client~=1.13.5",
-    "pymongo",
+]
+mongo = [
+    "pymongo>=4.6,<5",
 ]
 # GROBID-backed PDF parsing (`--loader grobid`). Provides the `grobid_client`
-# module used by episcope.rag.ingestion.local_grobid_client.
+# module used by epilens.rag.ingestion.local_grobid_client.
 grobid = [
-    "grobid-client-python",
+    "grobid-client-python>=0.0.8,<1",
+    "lxml>=4.9,<7",
 ]
 # Local FAISS vector backend (`--index-backend faiss`).
 faiss = [
-    "faiss-cpu",
+    "faiss-cpu>=1.8,<2",
 ]
 # The heavier local ML stack: torch-based embedding models beyond the
 # lightweight fastembed default (provider="huggingface"), and unstructured's
@@ -58,15 +104,18 @@ faiss = [
 # the lightweight defaults (fastembed + the pdfminer heuristic loader) work
 # without it.
 local-ml = [
-    "torch",
-    "transformers",
-    "sentence-transformers",
-    "unstructured[pdf]",
+    "torch>=2.2,<3",
+    "transformers>=4.40,<6",
+    "sentence-transformers>=3,<6",
+    "tqdm>=4.66,<5",
+    "unstructured[pdf]>=0.15,<1",
+    "rapidfuzz>=3,<4",
 ]
-# Everything needed to run the API and the Streamlit UI together.
+# API + UI for the local file-backed Studio. External stores and hosted model
+# SDKs remain explicit (`qdrant`, `mongo`, and one provider extra).
 all = [
-    "epi-scope[server]",
-    "epi-scope[ui]",
+    "epilens[server]",
+    "epilens[ui]",
 ]
 dev = [
     "pytest==9.0.3",
@@ -77,9 +126,16 @@ dev = [
     "twine",
 ]
 
+[project.urls]
+Homepage = "https://github.com/VinsRR/EpiScope"
+Documentation = "https://github.com/VinsRR/EpiScope#readme"
+Repository = "https://github.com/VinsRR/EpiScope.git"
+Issues = "https://github.com/VinsRR/EpiScope/issues"
+Changelog = "https://github.com/VinsRR/EpiScope/blob/main/CHANGELOG.md"
+
 [project.scripts]
-episcope = "episcope.episcope:main"
-episcope-ui = "episcope.ui.launcher:main"
+epilens = "epilens.cli:main"
+epilens-ui = "epilens.ui.launcher:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -88,4 +144,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-episcope = ["py.typed"]
+epilens = ["py.typed"]
