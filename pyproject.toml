@@ -79,8 +79,8 @@ server = [
 qdrant = [
     # Pin to the Qdrant server minor (see QDRANT_VERSION in docker-compose.yml).
     # Qdrant only guarantees client/server compatibility within the same minor,
-    # and QdrantDB hard-errors on a mismatch — bump both in lockstep.
-    "qdrant-client~=1.13.5",
+    # and QdrantDB hard-errors on a mismatch — keep both on the same minor.
+    "qdrant-client~=1.13.3",
 ]
 mongo = [
     "pymongo>=4.6,<5",

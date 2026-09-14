@@ -43,12 +43,14 @@ def test_from_settings_qdrant_url_reads_env_var(monkeypatch) -> None:
     assert config.qdrant_url == "http://example:6333"
 
 
-def test_from_settings_reads_local_fallback_paths(monkeypatch) -> None:
-    monkeypatch.setenv("EPILENS_LOCAL_INDEX_DIR", "/tmp/some-index")
-    monkeypatch.setenv("EPILENS_LOCAL_METADATA_BACKUP", "/tmp/some-meta.json")
+def test_from_settings_reads_local_fallback_paths(monkeypatch, tmp_path) -> None:
+    index_dir = tmp_path / "some-index"
+    metadata_backup = tmp_path / "some-meta.json"
+    monkeypatch.setenv("EPILENS_LOCAL_INDEX_DIR", str(index_dir))
+    monkeypatch.setenv("EPILENS_LOCAL_METADATA_BACKUP", str(metadata_backup))
     config = RuntimeConfig.from_settings()
-    assert str(config.index_dir) == "/tmp/some-index"
-    assert str(config.metadata_backup) == "/tmp/some-meta.json"
+    assert config.index_dir == index_dir
+    assert config.metadata_backup == metadata_backup
 
 
 # ---------------------------------------------------------------------------
