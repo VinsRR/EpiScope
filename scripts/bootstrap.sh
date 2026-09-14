@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fastest way to get EpiLens running locally: creates a virtual environment,
-# installs the package, and prepares a .env file to fill in.
+# installs the package, and points to the optional provider setup.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/VinsRR/EpiScope/main/scripts/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/VinsRR/EpiLens/main/scripts/bootstrap.sh | bash
 #   # or, from a clone:
 #   bash scripts/bootstrap.sh
 set -euo pipefail
@@ -28,14 +28,11 @@ echo "==> Verifying the installation:"
 echo "      python -c \"import epilens; print(epilens.__name__)\""
 echo "      epilens doctor"
 
-if [ ! -f .env ] && [ -f .env.example ]; then
-  echo "==> Creating .env from .env.example (optional: add an LLM API key later)"
-  cp .env.example .env
-elif [ -f .env ]; then
+if [ -f .env ]; then
   echo "==> .env already exists, leaving it as-is"
 else
-  echo "==> No .env.example found in this directory; create .env yourself with at least"
-  echo "      EPILENS_LLM_PROVIDER=ollama, or install a hosted-provider extra"
+  echo "==> No .env created: local parsing and retrieval need no configuration"
+  echo "      Run 'epilens quickstart' later if you want generated answers"
 fi
 
 cat <<'EOF'

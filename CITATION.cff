@@ -4,8 +4,8 @@ title: "EpiLens"
 type: software
 version: 0.1.0
 license: AGPL-3.0-only
-repository-code: "https://github.com/VinsRR/EpiScope"
-url: "https://github.com/VinsRR/EpiScope"
+repository-code: "https://github.com/VinsRR/EpiLens"
+url: "https://github.com/VinsRR/EpiLens"
 abstract: >-
   A local-first Python toolkit for evidence-grounded retrieval, classification,
   and structured information extraction over scientific literature, with a

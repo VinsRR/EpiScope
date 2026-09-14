@@ -171,7 +171,9 @@ python -m pip install "epilens[grobid]"     # richer academic-PDF parsing
 ## Configuration
 
 EpiLens loads environment variables from your shell and from the nearest `.env`
-file. Common settings are:
+file. You do not need one for the local-first workflow. For generated answers,
+`epilens quickstart` creates a minimal `.env` containing only the provider you
+choose. Manual configuration looks like:
 
 ```dotenv
 EPILENS_LLM_PROVIDER=gemini
@@ -185,10 +187,10 @@ EPILENS_OUTPUT_FORMAT=human
 ```
 
 Other provider credentials are `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and
-`ANTHROPIC_API_KEY`; Ollama uses `OLLAMA_HOST`. External deployments can set
-`QDRANT_URL`, `QDRANT_COLLECTION`, `MONGO_URI`, `MONGO_DB_NAME`, and
-`GROBID_URL`. The complete annotated template is
-[`.env.example`](https://github.com/VinsRR/EpiScope/blob/main/.env.example).
+`ANTHROPIC_API_KEY`; Ollama uses `OLLAMA_HOST`. The inert, beginner-safe
+template is [`.env.example`](https://github.com/VinsRR/EpiLens/blob/main/.env.example).
+Docker and external-service settings are kept separately in
+[`.env.docker.example`](https://github.com/VinsRR/EpiLens/blob/main/.env.docker.example).
 
 Secrets belong in `.env` or the deployment secret store, never in a workspace
 file, notebook, issue, or commit.
@@ -248,14 +250,14 @@ workspaces. They use helper files and sample PDFs that are intentionally not
 bundled in the wheel, so clone the repository before running them:
 
 ```bash
-git clone https://github.com/VinsRR/EpiScope.git
-cd EpiScope
+git clone https://github.com/VinsRR/EpiLens.git
+cd EpiLens
 python -m pip install -e ".[dev]"
 jupyter lab notebooks/
 ```
 
 See the
-[notebook guide](https://github.com/VinsRR/EpiScope/tree/main/notebooks) for the
+[notebook guide](https://github.com/VinsRR/EpiLens/tree/main/notebooks) for the
 recommended order.
 
 ## Studio and API
@@ -281,21 +283,29 @@ workspace-scoped routes. Interactive API documentation is available at
 `http://127.0.0.1:8000/docs` while the server is running.
 
 For a shared deployment with Qdrant and GROBID, use the repository's
-[Docker Compose configuration](https://github.com/VinsRR/EpiScope/blob/main/docker-compose.yml).
+[Docker Compose configuration](https://github.com/VinsRR/EpiLens/blob/main/docker-compose.yml):
+
+```bash
+cp .env.docker.example .env
+# Add a provider key to .env if generated answers are required.
+docker compose up --build
+```
+
 MongoDB remains external and is only needed for the unscoped
 corpus-backed routes; the workspace-scoped Studio path is file-backed.
 
 ## Development
 
 ```bash
-git clone https://github.com/VinsRR/EpiScope.git
-cd EpiScope
+git clone https://github.com/VinsRR/EpiLens.git
+cd EpiLens
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev,all,qdrant,mongo,faiss,providers]"
 pytest -q
 ruff check src/epilens tests
+python scripts/clean_release_artifacts.py
 python -m build
 python -m twine check dist/*
 ```
@@ -313,12 +323,12 @@ such as `v0.1.0`; the release workflow rejects mismatched tags before upload.
 
 EpiLens was developed by Vincenzo Perri at ISI Foundation. Software citation
 metadata is in
-[`CITATION.cff`](https://github.com/VinsRR/EpiScope/blob/main/CITATION.cff).
+[`CITATION.cff`](https://github.com/VinsRR/EpiLens/blob/main/CITATION.cff).
 The accompanying manuscript is still a draft, so its final journal reference
 and DOI can be added when available.
 
 ## License
 
 EpiLens is distributed under the
-[GNU Affero General Public License v3.0](https://github.com/VinsRR/EpiScope/blob/main/LICENSE.txt)
+[GNU Affero General Public License v3.0](https://github.com/VinsRR/EpiLens/blob/main/LICENSE.txt)
 (`AGPL-3.0-only`).

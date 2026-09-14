@@ -76,12 +76,12 @@ absorbs the boilerplate around those.
 
 The notebooks focus on the Python API. EpiLens also offers higher-level entry
 points documented in the
-[main README](https://github.com/VinsRR/EpiScope#readme):
+[main README](https://github.com/VinsRR/EpiLens#readme):
 
 - **CLI** — `epilens quickstart`, `doctor`, `init`, `index`, `inspect`,
   `papers`, `explore`, `ask`, `classify`, `precision-miner`, `tasks`, `serve`,
   and `studio`. Start with the
-  [five-minute first run](https://github.com/VinsRR/EpiScope#a-five-minute-first-run).
+  [five-minute first run](https://github.com/VinsRR/EpiLens#a-five-minute-first-run).
 - **Workspaces** — `epilens init <name>` creates a self-contained folder
   (`epilens.toml`, `papers/`, `index/`, `outputs/`, `tasks/`) that commands
   auto-discover when run from inside it. Notebook 09 covers the Python side; see
@@ -90,11 +90,11 @@ points documented in the
   `epilens tasks new` (add `--interactive` for a guided wizard), validate with
   `epilens tasks validate`, and run them from the CLI (`--task-file`) or
   inline via the API. See
-  [Structured Workflows](https://github.com/VinsRR/EpiScope#structured-workflows).
+  [Structured Workflows](https://github.com/VinsRR/EpiLens#structured-workflows).
 - **UI** — `epilens studio` runs the Streamlit interface local-first, with no
   external services required. `epilens serve` plus the UI over a shared
   Qdrant/MongoDB corpus is the deployed/multi-user setup. See
-  [Studio and API](https://github.com/VinsRR/EpiScope#studio-and-api).
+  [Studio and API](https://github.com/VinsRR/EpiLens#studio-and-api).
 
 ## Running The Notebooks
 
@@ -102,8 +102,8 @@ The helper module and sample PDFs are repository assets, not wheel contents.
 Clone the repository, install it in editable mode, and then open the notebooks:
 
 ```bash
-git clone https://github.com/VinsRR/EpiScope.git
-cd EpiScope
+git clone https://github.com/VinsRR/EpiLens.git
+cd EpiLens
 python -m pip install -e ".[dev]"
 python -m pip install jupyterlab
 jupyter lab notebooks/

@@ -125,11 +125,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/VinsRR/EpiScope"
-Documentation = "https://github.com/VinsRR/EpiScope#readme"
-Repository = "https://github.com/VinsRR/EpiScope.git"
-Issues = "https://github.com/VinsRR/EpiScope/issues"
-Changelog = "https://github.com/VinsRR/EpiScope/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/VinsRR/EpiLens"
+Documentation = "https://github.com/VinsRR/EpiLens#readme"
+Repository = "https://github.com/VinsRR/EpiLens.git"
+Issues = "https://github.com/VinsRR/EpiLens/issues"
+Changelog = "https://github.com/VinsRR/EpiLens/blob/main/CHANGELOG.md"
 
 [project.scripts]
 epilens = "epilens.cli:main"
