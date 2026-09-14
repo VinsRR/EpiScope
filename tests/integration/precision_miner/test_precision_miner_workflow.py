@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from episcope.rag.generation.base import Generator
-from episcope.rag.provenance import Provenance
-from episcope.schemas import PaperMetadata, SearchResult
-from episcope.workflows.precision_miner.config import PrecisionMinerConfig
-from episcope.workflows.precision_miner.workflow import PrecisionMiner
+from epilens.rag.generation.base import Generator
+from epilens.rag.provenance import Provenance
+from epilens.schemas import PaperMetadata, SearchResult
+from epilens.workflows.precision_miner.config import PrecisionMinerConfig
+from epilens.workflows.precision_miner.workflow import PrecisionMiner
 
 
 def _result(*, id: str, text: str, score: float, section_type: str = "Methods") -> SearchResult:

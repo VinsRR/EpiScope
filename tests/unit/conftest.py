@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from episcope.workflows import registry
+from epilens.workflows import registry
 
 
 @pytest.fixture(autouse=True)

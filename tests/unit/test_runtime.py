@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from episcope.clients import AnthropicClient
-from episcope.db import InMemoryAcademicDB
-from episcope.rag.retrieval.candidates import SemanticCandidateRetriever
-from episcope.services.runtime import (
-    EpiScopeRuntime,
+from epilens.clients import AnthropicClient
+from epilens.db import InMemoryAcademicDB
+from epilens.rag.retrieval.candidates import SemanticCandidateRetriever
+from epilens.services.runtime import (
+    EpiLensRuntime,
     RuntimeConfig,
     _coerce_llm_provider,
 )
@@ -14,7 +14,7 @@ from episcope.services.runtime import (
 
 def test_build_llm_client_dispatches_anthropic(monkeypatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    runtime = EpiScopeRuntime(RuntimeConfig(llm_provider="anthropic"))
+    runtime = EpiLensRuntime(RuntimeConfig(llm_provider="anthropic"))
     assert isinstance(runtime.build_llm_client(), AnthropicClient)
 
 
@@ -43,12 +43,14 @@ def test_from_settings_qdrant_url_reads_env_var(monkeypatch) -> None:
     assert config.qdrant_url == "http://example:6333"
 
 
-def test_from_settings_reads_local_fallback_paths(monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_LOCAL_INDEX_DIR", "/tmp/some-index")
-    monkeypatch.setenv("EPISCOPE_LOCAL_METADATA_BACKUP", "/tmp/some-meta.json")
+def test_from_settings_reads_local_fallback_paths(monkeypatch, tmp_path) -> None:
+    index_dir = tmp_path / "some-index"
+    metadata_backup = tmp_path / "some-meta.json"
+    monkeypatch.setenv("EPILENS_LOCAL_INDEX_DIR", str(index_dir))
+    monkeypatch.setenv("EPILENS_LOCAL_METADATA_BACKUP", str(metadata_backup))
     config = RuntimeConfig.from_settings()
-    assert str(config.index_dir) == "/tmp/some-index"
-    assert str(config.metadata_backup) == "/tmp/some-meta.json"
+    assert config.index_dir == index_dir
+    assert config.metadata_backup == metadata_backup
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +58,7 @@ def test_from_settings_reads_local_fallback_paths(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 def test_build_db_falls_back_to_in_memory_when_unconfigured(tmp_path) -> None:
     backup = tmp_path / "db.json"
-    runtime = EpiScopeRuntime(RuntimeConfig(mongo_uri=None, metadata_backup=backup))
+    runtime = EpiLensRuntime(RuntimeConfig(mongo_uri=None, metadata_backup=backup))
     db = runtime.build_db()
     assert isinstance(db, InMemoryAcademicDB)
 
@@ -70,9 +72,9 @@ def test_build_db_still_constructs_mongo_when_configured(monkeypatch) -> None:
             captured["db_name"] = db_name
 
     monkeypatch.setattr(
-        "episcope.services.runtime.MongoAcademicDB", _FakeMongoAcademicDB
+        "epilens.services.runtime.MongoAcademicDB", _FakeMongoAcademicDB
     )
-    runtime = EpiScopeRuntime(
+    runtime = EpiLensRuntime(
         RuntimeConfig(mongo_uri="mongodb://example:27017", mongo_db_name="mydb")
     )
     db = runtime.build_db()
@@ -98,13 +100,13 @@ def test_build_retriever_falls_back_to_file_db_when_unconfigured(
         def capabilities(self):
             return {}
 
-    monkeypatch.setattr("episcope.services.runtime.FileDB", _FakeFileDB)
+    monkeypatch.setattr("epilens.services.runtime.FileDB", _FakeFileDB)
     monkeypatch.setattr(
-        "episcope.rag.embeddings.factory.EmbedderFactory.get_embedder",
+        "epilens.rag.embeddings.factory.EmbedderFactory.get_embedder",
         staticmethod(lambda model_name, **_: object()),
     )
     index_dir = tmp_path / "myindex"
-    runtime = EpiScopeRuntime(RuntimeConfig(qdrant_url=None, index_dir=index_dir))
+    runtime = EpiLensRuntime(RuntimeConfig(qdrant_url=None, index_dir=index_dir))
 
     retriever = runtime.build_retriever()
 
@@ -128,12 +130,12 @@ def test_build_retriever_still_constructs_qdrant_when_configured(monkeypatch) ->
         def capabilities(self):
             return {}
 
-    monkeypatch.setattr("episcope.services.runtime.QdrantDB", _FakeQdrantDB)
+    monkeypatch.setattr("epilens.services.runtime.QdrantDB", _FakeQdrantDB)
     monkeypatch.setattr(
-        "episcope.rag.embeddings.factory.EmbedderFactory.get_embedder",
+        "epilens.rag.embeddings.factory.EmbedderFactory.get_embedder",
         staticmethod(lambda model_name, **_: object()),
     )
-    runtime = EpiScopeRuntime(
+    runtime = EpiLensRuntime(
         RuntimeConfig(
             qdrant_url="http://example:6333",
             qdrant_collection="mycoll",

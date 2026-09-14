@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from episcope.vectordb.file import FileDB
-from episcope.vectordb.qdrant import QdrantDB
+from epilens.vectordb.file import FileDB
+from epilens.vectordb.qdrant import QdrantDB
 
 try:
     import faiss  # noqa: F401
 
-    from episcope.vectordb.faiss import FaissDB
+    from epilens.vectordb.faiss import FaissDB
 except ImportError:
     FaissDB = None
 

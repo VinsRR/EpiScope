@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from episcope.workflows import registry
-from episcope.workflows.classification.config import (
+from epilens.workflows import registry
+from epilens.workflows.classification.config import (
     BaseClassifierConfig,
     DataAccessibilityClassifierConfig,
 )
-from episcope.workflows.precision_miner.config import (
+from epilens.workflows.precision_miner.config import (
     FindDataSourcesConfig,
     PrecisionMinerConfig,
 )
@@ -91,7 +91,7 @@ def test_register_declarative_classifier_builds_and_appears_in_catalog() -> None
 
 
 def test_declarative_classifier_parses_and_filters_codes() -> None:
-    from episcope.workflows.classification.parsing import ClassificationResponseParser
+    from epilens.workflows.classification.parsing import ClassificationResponseParser
 
     spec = registry.TaskSpec.model_validate(_classifier_spec_dict())
     parser = ClassificationResponseParser(

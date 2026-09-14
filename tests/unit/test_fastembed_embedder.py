@@ -6,7 +6,7 @@ import types
 import numpy as np
 import pytest
 
-from episcope.rag.embeddings.fastembed_embedder import (
+from epilens.rag.embeddings.fastembed_embedder import (
     FASTEMBED_SUPPORTED_MODELS,
     FastEmbedEmbedder,
 )
@@ -60,3 +60,18 @@ def test_embed_text_matches_embed_texts_single_item() -> None:
     single = embedder.embed_text("hello")
     batch = embedder.embed_texts(["hello"])[0]
     assert single == batch
+
+
+def test_first_download_failure_has_an_actionable_message(monkeypatch) -> None:
+    class BrokenTextEmbedding:
+        def __init__(self, **_kwargs) -> None:
+            raise OSError("network unavailable")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fastembed",
+        types.SimpleNamespace(TextEmbedding=BrokenTextEmbedding),
+    )
+
+    with pytest.raises(RuntimeError, match=r"downloads and caches.*90 MB"):
+        FastEmbedEmbedder()

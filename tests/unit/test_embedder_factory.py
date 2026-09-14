@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from episcope.rag.embeddings import factory
-from episcope.rag.embeddings.factory import EmbedderFactory
+from epilens.rag.embeddings import factory
+from epilens.rag.embeddings.factory import EmbedderFactory
 
 
 class _FakeEmbedder:
@@ -55,7 +55,7 @@ def test_auto_detect_then_dispatch() -> None:
 
 
 def test_env_var_selects_provider(monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_EMBED_PROVIDER", "ollama")
+    monkeypatch.setenv("EPILENS_EMBED_PROVIDER", "ollama")
     embedder = EmbedderFactory.get_embedder("anything-unrecognized")
     assert isinstance(embedder, _FakeEmbedder)
 
@@ -66,7 +66,7 @@ def test_unknown_provider_raises() -> None:
 
 
 def test_auto_without_match_raises(monkeypatch) -> None:
-    monkeypatch.delenv("EPISCOPE_EMBED_PROVIDER", raising=False)
+    monkeypatch.delenv("EPILENS_EMBED_PROVIDER", raising=False)
     with pytest.raises(ValueError, match="Could not infer"):
         EmbedderFactory.get_embedder("nomic-embed-text")
 
@@ -78,7 +78,7 @@ def test_huggingface_dispatch_is_lazy_and_works_when_available(monkeypatch) -> N
         HuggingFaceLateEmbedder=_FakeEmbedder,
     )
     monkeypatch.setitem(
-        sys.modules, "episcope.rag.embeddings.huggingface", fake_module
+        sys.modules, "epilens.rag.embeddings.huggingface", fake_module
     )
     embedder = EmbedderFactory.get_embedder(
         "intfloat/e5-small-v2", provider="huggingface"
@@ -89,7 +89,7 @@ def test_huggingface_dispatch_is_lazy_and_works_when_available(monkeypatch) -> N
 
 def test_huggingface_dispatch_missing_torch_raises_local_ml_hint(monkeypatch) -> None:
     monkeypatch.delitem(
-        sys.modules, "episcope.rag.embeddings.huggingface", raising=False
+        sys.modules, "epilens.rag.embeddings.huggingface", raising=False
     )
     original_import = __import__
 
@@ -100,5 +100,5 @@ def test_huggingface_dispatch_missing_torch_raises_local_ml_hint(monkeypatch) ->
 
     monkeypatch.setattr("builtins.__import__", fake_import)
 
-    with pytest.raises(ImportError, match="epi-scope\\[local-ml\\]"):
+    with pytest.raises(ImportError, match="epilens\\[local-ml\\]"):
         EmbedderFactory.get_embedder("intfloat/e5-small-v2", provider="huggingface")

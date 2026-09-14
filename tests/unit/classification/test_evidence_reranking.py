@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from episcope.schemas import SearchResult
-from episcope.workflows.classification.config import BaseClassifierConfig
-from episcope.workflows.classification.evidence_reranking import (
+from epilens.schemas import SearchResult
+from epilens.workflows.classification.config import BaseClassifierConfig
+from epilens.workflows.classification.evidence_reranking import (
     GlobalCrossEncoderReranker,
     WithinLabelCrossEncoderReranker,
 )

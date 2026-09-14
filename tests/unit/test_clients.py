@@ -5,7 +5,7 @@ from typing import Any, List
 
 import pytest
 
-from episcope.clients import AnthropicClient
+from epilens.clients import AnthropicClient
 
 
 @dataclass
@@ -59,8 +59,8 @@ def test_requires_api_key(monkeypatch) -> None:
 
 def test_requires_anthropic_package(monkeypatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr("episcope.clients.anthropic", None)
-    with pytest.raises(ImportError, match="anthropic package"):
+    monkeypatch.setattr("epilens.clients.anthropic", None)
+    with pytest.raises(ImportError, match=r"epilens\[anthropic\]"):
         AnthropicClient()
 
 

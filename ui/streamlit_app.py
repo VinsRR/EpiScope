@@ -2,7 +2,7 @@
 
 Prefer running:
 
-    episcope-ui
+    epilens-ui
 """
 
-from episcope.ui.streamlit_app import *  # noqa: F401,F403
+from epilens.ui.streamlit_app import *  # noqa: F401,F403

@@ -1,6 +1,6 @@
 """Tests for the Qdrant client/server minor-version compatibility guard.
 
-These exercise the pure helpers in ``episcope.vectordb.qdrant`` and do not
+These exercise the pure helpers in ``epilens.vectordb.qdrant`` and do not
 require ``qdrant-client`` or a live server.
 """
 
@@ -10,8 +10,8 @@ import importlib.metadata
 
 import pytest
 
-import episcope.vectordb.qdrant as q
-from episcope.vectordb.qdrant import (
+import epilens.vectordb.qdrant as q
+from epilens.vectordb.qdrant import (
     QdrantVersionMismatchError,
     _check_qdrant_version_compatibility,
     _parse_major_minor,

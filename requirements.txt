@@ -1,33 +1,3 @@
-# Runtime dependencies matching the base, server, GROBID, and FAISS extras.
-# The optional heavyweight local-ML stack remains opt-in via
-# `pip install epi-scope[local-ml]` and is intentionally not in server images.
-
-# Base — mirrors [project].dependencies
-pydantic
-typer
-requests
-numpy
-python-dotenv
-fastembed
-tqdm
-unstructured
-pdfminer.six
-openai
-google-genai
-anthropic
-rapidfuzz
-lxml
-filelock
-
-# [server] extra — FastAPI backend, Qdrant and MongoDB integrations
-fastapi
-uvicorn
-qdrant-client
-pymongo
-python-multipart
-
-# [faiss] extra — local FAISS vector backend (--index-backend faiss)
-faiss-cpu
-
-# [grobid] extra — GROBID-backed PDF parsing (--loader grobid)
-grobid-client-python
+# Full API container/runtime environment. Dependency versions live in
+# pyproject.toml so this file cannot silently drift from the published package.
+.[server,qdrant,mongo,grobid,faiss,providers]

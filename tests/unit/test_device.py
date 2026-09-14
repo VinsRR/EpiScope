@@ -2,23 +2,23 @@ from __future__ import annotations
 
 import sys
 
-from episcope.rag.device import resolve_device
+from epilens.rag.device import resolve_device
 
 
 def test_explicit_request_wins(monkeypatch) -> None:
-    monkeypatch.delenv("EPISCOPE_DEVICE", raising=False)
+    monkeypatch.delenv("EPILENS_DEVICE", raising=False)
     assert resolve_device("cpu") == "cpu"
     assert resolve_device("cuda") == "cuda"
     assert resolve_device("mps") == "mps"
 
 
 def test_env_var_selects_device(monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_DEVICE", "cpu")
+    monkeypatch.setenv("EPILENS_DEVICE", "cpu")
     assert resolve_device() == "cpu"
 
 
 def test_auto_returns_a_valid_device(monkeypatch) -> None:
-    monkeypatch.delenv("EPISCOPE_DEVICE", raising=False)
+    monkeypatch.delenv("EPILENS_DEVICE", raising=False)
     assert resolve_device() in {"cpu", "cuda", "mps"}
 
 
@@ -55,7 +55,7 @@ def _fake_torch(capability, arch_list):
 
 def test_auto_falls_back_to_cpu_for_unsupported_gpu(monkeypatch) -> None:
     # A GTX 1050 (sm_61) with a torch build for sm_75+ must NOT pick CUDA.
-    monkeypatch.delenv("EPISCOPE_DEVICE", raising=False)
+    monkeypatch.delenv("EPILENS_DEVICE", raising=False)
     monkeypatch.setitem(
         sys.modules, "torch", _fake_torch((6, 1), ["sm_75", "sm_80", "sm_90"])
     )
@@ -63,7 +63,7 @@ def test_auto_falls_back_to_cpu_for_unsupported_gpu(monkeypatch) -> None:
 
 
 def test_auto_uses_cuda_for_supported_gpu(monkeypatch) -> None:
-    monkeypatch.delenv("EPISCOPE_DEVICE", raising=False)
+    monkeypatch.delenv("EPILENS_DEVICE", raising=False)
     monkeypatch.setitem(
         sys.modules, "torch", _fake_torch((8, 6), ["sm_75", "sm_80", "sm_86"])
     )

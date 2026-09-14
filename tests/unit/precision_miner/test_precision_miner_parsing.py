@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from episcope.workflows.precision_miner.parsing import PrecisionMinerResponseParser
+from epilens.workflows.precision_miner.parsing import PrecisionMinerResponseParser
 
 
 def test_precision_miner_parser_accepts_fenced_json() -> None:

@@ -11,10 +11,10 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from episcope.episcope import app
-from episcope.workflows import registry
-from episcope.workflows.classification.parsing import ClassificationResponseParser
-from episcope.workflows.classification.prompting import (
+from epilens.cli import app
+from epilens.workflows import registry
+from epilens.workflows.classification.parsing import ClassificationResponseParser
+from epilens.workflows.classification.prompting import (
     ClassificationPromptBuilder,
     _safe_format,
 )
@@ -84,7 +84,7 @@ def test_classification_prompt_builder_raises_on_bad_template(monkeypatch) -> No
     config = registry.build_classifier_config_from_spec(spec)
     builder = ClassificationPromptBuilder(config)
 
-    from episcope.schemas.paper import PaperMetadata
+    from epilens.schemas.paper import PaperMetadata
     metadata = PaperMetadata(title="Test", abstract="Abstract")
 
     with pytest.raises(ValueError, match="user_prompt_template"):
@@ -457,7 +457,7 @@ def test_tasks_new_interactive_retries_duplicate_label_code(tmp_path, monkeypatc
 
 
 def test_tasks_new_interactive_defaults_to_workspace_tasks_dir(tmp_path, monkeypatch) -> None:
-    from episcope.workspace import create_workspace
+    from epilens.workspace import create_workspace
 
     monkeypatch.chdir(tmp_path)
     ws = create_workspace(tmp_path / "my-ws")

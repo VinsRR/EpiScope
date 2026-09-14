@@ -6,8 +6,8 @@ import types
 import pytest
 from typer.testing import CliRunner
 
-from episcope.episcope import app
-from episcope.rag.provenance import Provenance
+from epilens.cli import app
+from epilens.rag.provenance import Provenance
 
 
 runner = CliRunner()
@@ -19,7 +19,7 @@ def _json_output_by_default(monkeypatch) -> None:
 
     Individual tests can still pass ``--format human`` to override this.
     """
-    monkeypatch.setenv("EPISCOPE_OUTPUT_FORMAT", "json")
+    monkeypatch.setenv("EPILENS_OUTPUT_FORMAT", "json")
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +106,7 @@ def test_inspect_command_reads_text_file(tmp_path) -> None:
 
 def test_index_and_papers_use_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
 
@@ -153,11 +153,11 @@ def test_index_and_papers_use_local_defaults(tmp_path, monkeypatch) -> None:
 
 def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeAnswerGenerator(),
     )
 
@@ -173,7 +173,7 @@ def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
     assert init_result.exit_code == 0
     init_payload = json.loads(init_result.stdout)
     assert init_payload["workspace"] == str(workspace.resolve())
-    assert (workspace / "episcope.toml").exists()
+    assert (workspace / "epilens.toml").exists()
     assert (workspace / "papers").is_dir()
     assert (workspace / "index").is_dir()
 
@@ -219,7 +219,7 @@ def test_workspace_init_index_papers_and_ask(tmp_path, monkeypatch) -> None:
 
 def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
 
@@ -248,13 +248,38 @@ def test_explore_path_runs_without_llm_by_default(tmp_path, monkeypatch) -> None
     assert any("Zenodo" in chunk["text"] for chunk in payload["retrieved_chunks"])
 
 
+def test_ask_path_returns_passages_when_no_llm_is_configured(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("epilens.cli._ollama_models", lambda: None)
+    monkeypatch.setattr(
+        "epilens.cli.EmbedderFactory.get_embedder",
+        lambda model_name, **_: _FakeEmbedder(),
+    )
+
+    paper = tmp_path / "paper.txt"
+    paper.write_text(
+        "A short title\n\nThe dataset is publicly available on Zenodo.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["ask", "Where are the data?", "--path", str(paper)])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["answer"] is None
+    assert payload["source_count"] >= 1
+    assert any("Zenodo" in source["text"] for source in payload["sources"])
+
+
 def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeAnswerGenerator(),
     )
 
@@ -284,7 +309,7 @@ def test_ask_path_generates_answer_from_local_file(tmp_path, monkeypatch) -> Non
 # --quality preset resolution
 # ---------------------------------------------------------------------------
 def test_resolve_value_precedence_explicit_beats_quality_beats_workspace() -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     # Explicit flag (current != default) always wins.
     assert cli._resolve_value(300, 600, cli.QualityPreset.fast, 800, object(), 900) == 300
@@ -298,11 +323,11 @@ def test_resolve_value_precedence_explicit_beats_quality_beats_workspace() -> No
 
 def test_ask_path_accepts_quality_preset(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeAnswerGenerator(),
     )
     paper = tmp_path / "paper.txt"
@@ -323,7 +348,7 @@ def test_ask_path_accepts_quality_preset(tmp_path, monkeypatch) -> None:
 # storage, or without the local ML stack for the sparse embedder)
 # ---------------------------------------------------------------------------
 def test_resolve_retrieval_mode_dense_only_passthrough() -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
     result = cli._resolve_retrieval_mode_for_vectordb(
@@ -333,7 +358,7 @@ def test_resolve_retrieval_mode_dense_only_passthrough() -> None:
 
 
 def test_resolve_retrieval_mode_clamps_when_storage_lacks_sparse(capsys) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
     result = cli._resolve_retrieval_mode_for_vectordb(
@@ -344,7 +369,7 @@ def test_resolve_retrieval_mode_clamps_when_storage_lacks_sparse(capsys) -> None
 
 
 def test_resolve_retrieval_mode_errors_when_explicit_and_storage_lacks_sparse() -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": False})
     with pytest.raises(ValueError, match="sparse-capable storage"):
@@ -354,7 +379,7 @@ def test_resolve_retrieval_mode_errors_when_explicit_and_storage_lacks_sparse() 
 
 
 def test_resolve_retrieval_mode_clamps_when_local_ml_missing(monkeypatch, capsys) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.setattr(cli, "_local_ml_available", lambda: False)
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
@@ -366,7 +391,7 @@ def test_resolve_retrieval_mode_clamps_when_local_ml_missing(monkeypatch, capsys
 
 
 def test_resolve_retrieval_mode_errors_when_explicit_and_local_ml_missing(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.setattr(cli, "_local_ml_available", lambda: False)
     fake_vectordb = types.SimpleNamespace(capabilities=lambda: {"sparse": True})
@@ -377,7 +402,7 @@ def test_resolve_retrieval_mode_errors_when_explicit_and_local_ml_missing(monkey
 
 
 def test_resolve_retrieval_mode_passes_through_when_fully_satisfied(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     # Explicitly mock local ML availability rather than relying on whether
     # torch happens to be installed in whatever environment runs this test.
@@ -397,7 +422,7 @@ def test_explore_workspace_with_balanced_quality_clamps_on_file_backend(
     instead of raising, matching the --path/--file clamp behavior.
     """
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     workspace = tmp_path / "ws"
@@ -440,7 +465,7 @@ def test_explore_path_with_balanced_quality_does_not_raise(tmp_path, monkeypatch
     preset should never surface an error the user didn't ask for.
     """
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     paper = tmp_path / "paper.txt"
@@ -463,7 +488,7 @@ def test_explore_path_without_quality_prints_no_retrieval_mode_note(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     paper = tmp_path / "paper.txt"
@@ -480,7 +505,7 @@ def test_explore_path_with_explicit_hybrid_still_errors(tmp_path, monkeypatch) -
     clear, actionable error - only preset-driven mismatches are silenced.
     """
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     paper = tmp_path / "paper.txt"
@@ -497,11 +522,11 @@ def test_explore_path_with_explicit_hybrid_still_errors(tmp_path, monkeypatch) -
 
 def test_classify_file_with_quality_preset_does_not_raise(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeClassifierGenerator(),
     )
     paper = tmp_path / "paper.txt"
@@ -523,11 +548,11 @@ def test_precision_miner_file_with_quality_preset_does_not_raise(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakePrecisionMinerGenerator(),
     )
     paper = tmp_path / "paper.txt"
@@ -550,12 +575,12 @@ def test_precision_miner_file_with_quality_preset_does_not_raise(
 
 
 def test_version_flag_prints_version() -> None:
-    import episcope
+    import epilens
 
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert episcope.__version__ in result.stdout
+    assert epilens.__version__ in result.stdout
 
 
 def test_inspect_human_format_overrides_env(tmp_path) -> None:
@@ -573,7 +598,7 @@ def test_inspect_human_format_overrides_env(tmp_path) -> None:
 
 
 def test_doctor_reports_ok_when_provider_key_present(monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("EPILENS_LLM_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     result = runner.invoke(app, ["doctor", "--no-probe"])
@@ -588,7 +613,7 @@ def test_doctor_reports_ok_when_provider_key_present(monkeypatch) -> None:
 def test_doctor_warns_when_provider_key_missing(monkeypatch) -> None:
     # A missing cloud key is a warning, not a failure: you can run keyless via
     # Ollama. doctor still succeeds (exit 0).
-    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("EPILENS_LLM_PROVIDER", "openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     result = runner.invoke(app, ["doctor", "--no-probe"])
@@ -603,7 +628,7 @@ def test_doctor_warns_when_provider_key_missing(monkeypatch) -> None:
 
 
 def test_doctor_checks_anthropic_key(monkeypatch) -> None:
-    monkeypatch.setenv("EPISCOPE_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("EPILENS_LLM_PROVIDER", "anthropic")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     result = runner.invoke(app, ["doctor", "--no-probe"])
@@ -627,16 +652,15 @@ def _no_services_reachable(url: str, *, timeout: float = 3.0):
 def _isolate_quickstart_probes(monkeypatch):
     """Keep quickstart tests fast/offline regardless of the real environment.
 
-    quickstart has no --no-probe escape hatch (checking connectivity is the
-    point), so without this a developer's real ambient MONGO_URI/mongo_uri
-    (dotenv legacy name, see settings.py) would make these tests attempt a
-    real, slow MongoDB connection.
+    Provider SDK presence and service reachability are controlled here so the
+    tests do not depend on the developer's ambient environment.
     """
     monkeypatch.delenv("MONGO_URI", raising=False)
     monkeypatch.delenv("mongo_uri", raising=False)
-    monkeypatch.setattr("episcope.episcope._probe_http", _no_services_reachable)
+    monkeypatch.setattr("epilens.cli._probe_http", _no_services_reachable)
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: object())
     monkeypatch.setattr(
-        "episcope.episcope._check_mongo", lambda uri: ("skip", "not checked", "")
+        "epilens.cli._check_mongo", lambda uri: ("skip", "not checked", "")
     )
     return monkeypatch
 
@@ -647,7 +671,7 @@ def test_quickstart_ollama_writes_provider_and_reports_ready(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(
-        "episcope.episcope._probe_http",
+        "epilens.cli._probe_http",
         lambda url, **_: (True, 200, "") if "11434" in url else _no_services_reachable(url),
     )
 
@@ -674,6 +698,20 @@ def test_quickstart_gemini_writes_key_to_env(
     # LLM key presence is an "ok" check even though GROBID/Qdrant/Mongo are
     # unreachable - those are warnings, not failures, for the local CLI path.
     assert "All required checks passed" in result.output
+
+
+def test_quickstart_does_not_claim_ready_when_provider_sdk_is_missing(
+    tmp_path, monkeypatch, _isolate_quickstart_probes
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
+
+    result = runner.invoke(app, ["quickstart"], input="1\nfake-key-123\n")
+
+    assert result.exit_code == 0
+    assert "Some checks still need attention" in result.output
+    assert "epilens[gemini]" in result.output
+    assert "You're ready" not in result.output
 
 
 def test_quickstart_leaves_existing_key_untouched_when_blank(
@@ -704,11 +742,11 @@ def test_quickstart_invalid_choice_aborts(
 
 def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeClassifierGenerator(),
     )
 
@@ -738,7 +776,7 @@ def test_classify_file_uses_transient_local_defaults(tmp_path, monkeypatch) -> N
 def test_classify_unknown_kind_fails_before_parsing_file(tmp_path, monkeypatch) -> None:
     embedder_calls: list[str] = []
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: embedder_calls.append(model_name) or _FakeEmbedder(),
     )
     paper = tmp_path / "paper.txt"
@@ -760,7 +798,7 @@ def test_precision_miner_unknown_kind_fails_before_parsing_file(
 ) -> None:
     embedder_calls: list[str] = []
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: embedder_calls.append(model_name) or _FakeEmbedder(),
     )
     paper = tmp_path / "paper.txt"
@@ -814,11 +852,11 @@ class _FakeStudyDesignGenerator:
 
 def test_classify_with_task_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeStudyDesignGenerator(),
     )
 
@@ -851,11 +889,11 @@ def test_classify_with_task_file(tmp_path, monkeypatch) -> None:
 
 def test_classify_with_workspace_task(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.setattr(
-        "episcope.episcope._build_generator",
+        "epilens.cli._build_generator",
         lambda provider, model, temperature: _FakeStudyDesignGenerator(),
     )
 
@@ -920,8 +958,8 @@ def test_tasks_command_lists_builtin_and_declarative(tmp_path) -> None:
 # Provider dispatch
 # ---------------------------------------------------------------------------
 def test_build_generator_dispatches_anthropic_provider(monkeypatch) -> None:
-    from episcope import episcope as cli
-    from episcope.clients import AnthropicClient
+    from epilens import cli
+    from epilens.clients import AnthropicClient
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     generator = cli._build_generator(cli.LLMProvider.anthropic, "claude-sonnet-5", 0.0)
@@ -930,7 +968,7 @@ def test_build_generator_dispatches_anthropic_provider(monkeypatch) -> None:
 
 
 def test_build_generator_anthropic_requires_explicit_model(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with pytest.raises(ValueError, match="--llm-model is required"):
@@ -941,7 +979,7 @@ def test_build_generator_anthropic_requires_explicit_model(monkeypatch) -> None:
 # Keyless Ollama fallback for generation
 # ---------------------------------------------------------------------------
 def test_resolve_generator_passthrough_for_explicit_provider(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("built", p, m))
     result = cli._resolve_generator(cli.LLMProvider.nollm, None, 0.0, task="ask")
@@ -949,7 +987,7 @@ def test_resolve_generator_passthrough_for_explicit_provider(monkeypatch) -> Non
 
 
 def test_resolve_generator_uses_gemini_when_key_present(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.setenv("GEMINI_API_KEY", "x")
     monkeypatch.setattr(cli, "_build_generator", lambda p, m, t: ("built", p, m))
@@ -958,7 +996,7 @@ def test_resolve_generator_uses_gemini_when_key_present(monkeypatch) -> None:
 
 
 def test_resolve_generator_ask_falls_back_to_small_ollama_model(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_SMALL_MODEL])
@@ -968,7 +1006,7 @@ def test_resolve_generator_ask_falls_back_to_small_ollama_model(monkeypatch) -> 
 
 
 def test_resolve_generator_workflow_uses_strong_default(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_STRONG_MODEL])
@@ -978,7 +1016,7 @@ def test_resolve_generator_workflow_uses_strong_default(monkeypatch) -> None:
 
 
 def test_resolve_generator_errors_without_key_or_ollama(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: None)
@@ -987,7 +1025,7 @@ def test_resolve_generator_errors_without_key_or_ollama(monkeypatch) -> None:
 
 
 def test_resolve_generator_errors_when_model_not_pulled(monkeypatch) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: ["some-other-model"])
@@ -1001,7 +1039,7 @@ def test_resolve_generator_ignores_gemini_model_name_on_ollama_fallback(
     """A workspace's configured Gemini model must not leak into the Ollama
     fallback lookup (regression: previously caused a spurious 'model not
     pulled' error even though the Ollama default was available)."""
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_SMALL_MODEL])
@@ -1017,7 +1055,7 @@ def test_resolve_generator_ignores_gemini_model_name_on_ollama_fallback(
 def test_resolve_generator_ignores_gemini_model_name_for_workflow_task(
     monkeypatch,
 ) -> None:
-    from episcope import episcope as cli
+    from epilens import cli
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(cli, "_ollama_models", lambda: [cli._OLLAMA_STRONG_MODEL])
@@ -1032,11 +1070,11 @@ def test_resolve_generator_ignores_gemini_model_name_for_workflow_task(
 
 def test_ask_without_key_or_ollama_shows_extractive_fallback(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "episcope.episcope.EmbedderFactory.get_embedder",
+        "epilens.cli.EmbedderFactory.get_embedder",
         lambda model_name, **_: _FakeEmbedder(),
     )
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr("episcope.episcope._ollama_models", lambda: None)
+    monkeypatch.setattr("epilens.cli._ollama_models", lambda: None)
 
     paper = tmp_path / "paper.txt"
     paper.write_text(
@@ -1124,7 +1162,7 @@ def test_studio_launches_api_and_ui_and_cleans_up_on_interrupt(
     assert len(_studio_popen) == 2
     api_proc, ui_proc = _studio_popen
     assert "uvicorn" in api_proc.args
-    assert "episcope.api:app" in api_proc.args
+    assert "epilens.api:app" in api_proc.args
     assert "streamlit" in ui_proc.args
     assert "--server.maxUploadSize" in ui_proc.args
     assert api_proc.popen_kwargs["start_new_session"] is True
@@ -1170,7 +1208,7 @@ def test_studio_sigterm_is_routed_through_the_same_cleanup_as_ctrl_c(
 def test_studio_points_at_workspace_index_when_qdrant_unset(
     tmp_path, monkeypatch, _studio_popen
 ) -> None:
-    from episcope.workspace import create_workspace
+    from epilens.workspace import create_workspace
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("QDRANT_URL", raising=False)
@@ -1184,10 +1222,10 @@ def test_studio_points_at_workspace_index_when_qdrant_unset(
 
     assert result.exit_code == 0, result.output
     api_proc, _ = _studio_popen
-    assert api_proc.env.get("EPISCOPE_LOCAL_INDEX_DIR") == str(
+    assert api_proc.env.get("EPILENS_LOCAL_INDEX_DIR") == str(
         ws.resolve_path(ws.index_dir)
     )
-    assert api_proc.env.get("EPISCOPE_LOCAL_METADATA_BACKUP") == str(
+    assert api_proc.env.get("EPILENS_LOCAL_METADATA_BACKUP") == str(
         ws.resolve_path(ws.metadata_path)
     )
 
@@ -1195,7 +1233,7 @@ def test_studio_points_at_workspace_index_when_qdrant_unset(
 def test_studio_does_not_override_explicit_qdrant_url(
     tmp_path, monkeypatch, _studio_popen
 ) -> None:
-    from episcope.workspace import create_workspace
+    from epilens.workspace import create_workspace
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("QDRANT_URL", "http://external-qdrant:6333")
@@ -1208,4 +1246,4 @@ def test_studio_does_not_override_explicit_qdrant_url(
 
     assert result.exit_code == 0, result.output
     api_proc, _ = _studio_popen
-    assert "EPISCOPE_LOCAL_INDEX_DIR" not in api_proc.env
+    assert "EPILENS_LOCAL_INDEX_DIR" not in api_proc.env
