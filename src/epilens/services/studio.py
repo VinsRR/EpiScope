@@ -1093,7 +1093,6 @@ class JobManager:
         with snapshot_lock:
             retriever = runtime.build_retriever()
             academic_db = runtime.build_db()
-        generator = runtime.build_generator()
         task_service = TaskService(workspace)
         task_key = payload["task_key"]
         spec = task_service.get(task_key)
@@ -1115,7 +1114,7 @@ class JobManager:
                         config=config,
                         detailed=bool(payload.get("detailed", True)),
                         retriever=retriever,
-                        generator=generator,
+                        generator=None,
                         academic_db=academic_db,
                     )
                 else:
@@ -1126,7 +1125,7 @@ class JobManager:
                         config=config,
                         detailed=bool(payload.get("detailed", True)),
                         retriever=retriever,
-                        generator=generator,
+                        generator=None,
                         academic_db=academic_db,
                     )
                 items.append({"paper_id": paper_id, "result": json_ready(result)})
