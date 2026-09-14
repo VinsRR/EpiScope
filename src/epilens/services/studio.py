@@ -49,7 +49,7 @@ from epilens.services.runtime import (
 from epilens.settings import env
 from epilens.vectordb.file import FileDB
 from epilens.workspace import (
-    WORKSPACE_FILES,
+    WORKSPACE_FILE,
     WorkspaceConfig,
     create_workspace,
     load_workspace,
@@ -177,9 +177,7 @@ class WorkspaceService:
         if not self.root.exists():
             return summaries
         for child in sorted(self.root.iterdir(), key=lambda item: item.name.lower()):
-            if child.is_dir() and any(
-                (child / filename).is_file() for filename in WORKSPACE_FILES
-            ):
+            if child.is_dir() and (child / WORKSPACE_FILE).is_file():
                 try:
                     summaries.append(self.summary(load_workspace(child)))
                 except Exception:
@@ -922,7 +920,7 @@ def runtime_config_for_workspace(workspace: WorkspaceConfig) -> RuntimeConfig:
     use_mongo = workspace.metadata_backend == "mongo"
     return RuntimeConfig(
         strategy_name=workspace.strategy_name,
-        mongo_uri=env("MONGO_URI", legacy_names=("mongo_uri",)) if use_mongo else None,
+        mongo_uri=env("MONGO_URI") if use_mongo else None,
         mongo_db_name=workspace.mongo_db_name,
         qdrant_url=workspace.qdrant_url if use_qdrant else None,
         qdrant_collection=workspace.qdrant_collection,

@@ -20,7 +20,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MONGO_URI = env("MONGO_URI", "mongodb://localhost:27017", legacy_names=("mongo_uri",))
+MONGO_URI = env("MONGO_URI", "mongodb://localhost:27017")
 
 
 class MongoAcademicDB(AcademicDB):

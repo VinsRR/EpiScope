@@ -2,35 +2,21 @@ from __future__ import annotations
 
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 WORKSPACE_FILE = "epilens.toml"
-LEGACY_WORKSPACE_FILE = "episcope.toml"
-WORKSPACE_FILES = (WORKSPACE_FILE, LEGACY_WORKSPACE_FILE)
 
 
 def state_root(base: str | Path | None = None) -> Path:
-    """Choose the EpiLens state directory, preserving an existing old one.
-
-    New installations use ``.epilens``. A pre-rename ``.episcope`` directory
-    remains visible until the user deliberately migrates it.
-    """
+    """Return the EpiLens state directory beneath ``base`` or the current directory."""
     parent = Path(base) if base is not None else Path.cwd()
-    primary = parent / ".epilens"
-    legacy = parent / ".episcope"
-    return legacy if legacy.exists() and not primary.exists() else primary
+    return parent / ".epilens"
 
 
 def workspace_lock_path(config: "WorkspaceConfig") -> Path:
-    """Use the old lock name when operating on a legacy workspace."""
-    lock_name = (
-        ".episcope.lock"
-        if config.config_filename == LEGACY_WORKSPACE_FILE
-        else ".epilens.lock"
-    )
-    return config.root / lock_name
+    return config.root / ".epilens.lock"
 
 
 @dataclass(frozen=True)
@@ -63,11 +49,10 @@ class WorkspaceConfig:
     evidence_reranker_kind: str = "none"
     cross_encoder_model: Optional[str] = None
     cross_encoder_top_k: int = 15
-    config_filename: str = field(default=WORKSPACE_FILE, repr=False, compare=False)
 
     @property
     def config_path(self) -> Path:
-        return self.root / self.config_filename
+        return self.root / WORKSPACE_FILE
 
     def resolve_path(self, value: str | Path) -> Path:
         path = Path(value).expanduser()
@@ -83,13 +68,8 @@ def create_workspace(
     force: bool = False,
 ) -> WorkspaceConfig:
     root = Path(path).expanduser().resolve()
-    existing = _existing_workspace_file(root)
-    config = WorkspaceConfig(
-        root=root,
-        name=name or root.name,
-        config_filename=existing.name if existing else WORKSPACE_FILE,
-    )
-    if existing is not None and not force:
+    config = WorkspaceConfig(root=root, name=name or root.name)
+    if config.config_path.is_file() and not force:
         raise FileExistsError(f"Workspace already exists at {root}")
 
     root.mkdir(parents=True, exist_ok=True)
@@ -107,15 +87,12 @@ def create_workspace(
 
 def load_workspace(path: str | Path) -> WorkspaceConfig:
     root_or_file = Path(path).expanduser()
-    if root_or_file.name in WORKSPACE_FILES:
+    if root_or_file.name == WORKSPACE_FILE:
         config_path = root_or_file
     else:
-        config_path = _existing_workspace_file(root_or_file) or (
-            root_or_file / WORKSPACE_FILE
-        )
+        config_path = root_or_file / WORKSPACE_FILE
     if not config_path.exists():
-        expected = " or ".join(WORKSPACE_FILES)
-        raise FileNotFoundError(f"No {expected} found under {root_or_file}")
+        raise FileNotFoundError(f"No {WORKSPACE_FILE} found under {root_or_file}")
 
     data = _read_simple_toml(config_path)
     root = config_path.parent.resolve()
@@ -165,7 +142,6 @@ def load_workspace(path: str | Path) -> WorkspaceConfig:
             else None
         ),
         cross_encoder_top_k=int(retrieval.get("cross_encoder_top_k") or 15),
-        config_filename=config_path.name,
     )
 
 
@@ -175,8 +151,8 @@ def find_workspace(start: str | Path | None = None) -> Optional[WorkspaceConfig]
         current = current.parent
 
     for candidate in (current, *current.parents):
-        config_path = _existing_workspace_file(candidate)
-        if config_path is not None:
+        config_path = candidate / WORKSPACE_FILE
+        if config_path.is_file():
             return load_workspace(config_path)
     return None
 
@@ -188,7 +164,7 @@ def write_workspace_config(config: WorkspaceConfig) -> None:
         "w",
         encoding="utf-8",
         dir=config.root,
-        prefix=f".{config.config_filename}.",
+        prefix=f".{WORKSPACE_FILE}.",
         suffix=".tmp",
         delete=False,
     ) as handle:
@@ -197,15 +173,6 @@ def write_workspace_config(config: WorkspaceConfig) -> None:
         os.fsync(handle.fileno())
         temporary_path = Path(handle.name)
     os.replace(temporary_path, config.config_path)
-
-
-def _existing_workspace_file(root: Path) -> Optional[Path]:
-    """Return the canonical config, or the pre-rename config as a fallback."""
-    for filename in WORKSPACE_FILES:
-        candidate = root / filename
-        if candidate.is_file():
-            return candidate
-    return None
 
 
 def _render_workspace_toml(config: WorkspaceConfig) -> str:

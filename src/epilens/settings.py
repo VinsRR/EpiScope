@@ -13,21 +13,10 @@ import dotenv
 dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
 
 
-def env(
-    name: str, default: Optional[str] = None, *, legacy_names: tuple[str, ...] = ()
-) -> Optional[str]:
-    # EpiLens is the canonical prefix. During the rename, continue to read the
-    # equivalent EPISCOPE_* value so existing private .env files keep working.
-    # New values always win and generated configuration only uses EPILENS_*.
-    renamed_legacy = (
-        ("EPISCOPE_" + name.removeprefix("EPILENS_"),)
-        if name.startswith("EPILENS_")
-        else ()
-    )
-    for candidate in (name, *legacy_names, *renamed_legacy):
-        value = os.getenv(candidate)
-        if value is not None and value != "":
-            return value
+def env(name: str, default: Optional[str] = None) -> Optional[str]:
+    value = os.getenv(name)
+    if value is not None and value != "":
+        return value
     return default
 
 
@@ -56,9 +45,8 @@ class AppSettings:
         port_raw = env("EPILENS_API_PORT", "8000")
         return cls(
             strategy_name=env("EPILENS_STRATEGY_NAME", "grobid") or "grobid",
-            mongo_uri=env("MONGO_URI", legacy_names=("mongo_uri",)),
-            mongo_db_name=env("MONGO_DB_NAME", legacy_names=("mongo_db_name",))
-            or "epilens_academic_db",
+            mongo_uri=env("MONGO_URI"),
+            mongo_db_name=env("MONGO_DB_NAME") or "epilens_academic_db",
             qdrant_url=env("QDRANT_URL", "http://localhost:6333")
             or "http://localhost:6333",
             qdrant_collection=env("QDRANT_COLLECTION", "epilens_academic")

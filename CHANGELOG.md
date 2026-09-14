@@ -22,10 +22,3 @@ All notable user-facing changes are recorded here. This project follows
 - Split heavyweight parsers, databases, and model-provider SDKs into explicit
   extras so the default install stays focused.
 - Reworked onboarding around an install-first, no-key learning path.
-
-### Compatibility
-
-- Existing `EPISCOPE_*` environment variables, `episcope.toml` workspaces, and
-  `.episcope/` local state are detected as migration fallbacks.
-- No old Python import or console-command shim is provided because the old
-  normalized project name conflicts with an unrelated PyPI package.

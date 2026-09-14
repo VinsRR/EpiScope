@@ -282,25 +282,8 @@ workspace-scoped routes. Interactive API documentation is available at
 
 For a shared deployment with Qdrant and GROBID, use the repository's
 [Docker Compose configuration](https://github.com/VinsRR/EpiScope/blob/main/docker-compose.yml).
-MongoDB remains external and is only needed for the legacy unscoped
+MongoDB remains external and is only needed for the unscoped
 corpus-backed routes; the workspace-scoped Studio path is file-backed.
-
-## Name Migration
-
-The PyPI distribution, Python namespace, and executable are now `epilens`.
-There is intentionally no `episcope` import or command shim because that name
-belongs to an unrelated package on PyPI.
-
-To avoid hiding existing local data during the rename, EpiLens still reads old
-`EPISCOPE_*` environment variables when the equivalent `EPILENS_*` value is not
-set, discovers existing `episcope.toml` workspaces, and reuses an existing
-`.episcope/` state directory when no `.epilens/` directory exists. New files and
-configuration use the EpiLens names.
-
-The default external MongoDB database and Qdrant collection are now
-`epilens_academic_db` and `epilens_academic`. Set `MONGO_DB_NAME` and
-`QDRANT_COLLECTION` explicitly if you want to keep using stores created under
-older defaults.
 
 ## Development
 
